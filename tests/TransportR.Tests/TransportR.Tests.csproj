@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TransportR.Tests</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Security Fixes -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.14.0" />
+    <!-- Testcontainers for Redis integration tests -->
+    <PackageReference Include="Testcontainers.Redis" Version="4.3.0" />
+    <PackageReference Include="Docker.DotNet" Version="3.125.15" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\samples\Shared\Shared.csproj" />
+    <ProjectReference Include="..\..\samples\DataHub\DataHub.csproj" />
+    <ProjectReference Include="..\..\src\TransportR\TransportR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Storage.Redis\TransportR.Storage.Redis.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
+
+    <ProjectReference Include="..\..\src\TransportR.Auth.ClientCredentials\TransportR.Auth.ClientCredentials.csproj" />
+
+    <ProjectReference Include="..\..\src\TransportR.Serialization.Json\TransportR.Serialization.Json.csproj" />
+  </ItemGroup>
+
+</Project>

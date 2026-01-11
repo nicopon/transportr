@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\TransportR\TransportR.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    
+    <!-- NuGet Package Metadata -->
+    <PackageId>TransportR.Client.SignalR</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Nicolas Ponsart</Authors>
+    <Description>SignalR client implementation for TransportR - High-performance data transport</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>signalr;transport;streaming</PackageTags>
+  </PropertyGroup>
+
+</Project>

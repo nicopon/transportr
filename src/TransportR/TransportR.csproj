@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0" />
+    <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);IDE0290</NoWarn>
+    
+    <!-- NuGet Package Metadata -->
+    <PackageId>TransportR</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Nicolas Ponsart</Authors>
+    <Description>Core library for TransportR - High-performance data transport over SignalR</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>signalr;transport;streaming</PackageTags>
+  </PropertyGroup>
+
+</Project>

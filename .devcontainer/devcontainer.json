@@ -1,0 +1,41 @@
+{
+  "name": "TransportR",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:1-10.0-noble",
+  
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true
+    }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.vscode-dotnet-runtime",
+        "yzhang.markdown-all-in-one",
+        "bierner.markdown-mermaid",
+        "eamodio.gitlens",
+        "EditorConfig.EditorConfig"
+      ],
+      "settings": {
+        "dotnet.defaultSolution": "TransportR.sln",
+        "editor.formatOnSave": true,
+        "files.trimTrailingWhitespace": true
+      }
+    }
+  },
+
+  "forwardPorts": [5252],
+  "portsAttributes": {
+    "5252": {
+      "label": "DataHub",
+      "onAutoForward": "notify"
+    }
+  },
+
+  "postCreateCommand": "dotnet restore && echo '✅ Ready! Run ./scripts/init.sh to generate test data, then ./scripts/benchmark.sh to test.'",
+
+  "remoteUser": "vscode"
+}

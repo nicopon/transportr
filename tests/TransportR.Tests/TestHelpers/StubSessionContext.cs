@@ -1,0 +1,74 @@
+using System.Text;
+using Microsoft.Extensions.Logging;
+using Microsoft.IO;
+using Microsoft.AspNetCore.SignalR.Client;
+using TransportR.Interfaces;
+using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.SignalR.Configuration;
+
+namespace TransportR.Tests.TestHelpers;
+
+public class StubSessionContext : ISessionContext
+{
+    public Guid ClientId { get; } = Guid.NewGuid();
+    public ILogger Logger { get; } = new StubLogger();
+    public IBatchSerializer Serializer { get; } = new StubBatchSerializer();
+    public HttpClient HttpClient { get; }
+    
+    // HubConnection is nullable/mockable?
+    // ISessionContext returns HubConnection (not nullable in interface?).
+    // Usually tests mock it or return null if not used. 
+    // We'll return null! for now, risking NRE if accessed.
+    public HubConnection HubConnection => null!; 
+    
+    public int BatchFlushIntervalMs => 50;
+    public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
+    public ClientOptions Options { get; } = new ClientOptions();
+
+    public StubSessionContext(HttpClient? httpClient = null)
+    {
+        HttpClient = httpClient ?? new HttpClient();
+    }
+
+    public int RemoveSessionCount { get; private set; }
+    public void RemoveSession(string transferId) 
+    {
+        RemoveSessionCount++;
+    }
+    
+    public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
+}
+
+public class StubLogger : ILogger, IDisposable
+{
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    public bool IsEnabled(LogLevel logLevel) => true;
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => this;
+    public void Dispose() { }
+}
+
+public class StubBatchSerializer : IBatchSerializer
+{
+    public Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    {
+        // Simple serialization
+        using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
+        writer.Write(batch.Count);
+        writer.Write(new byte[1]); 
+        return Task.CompletedTask;
+    }
+
+    public Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    {
+        using var reader = new BinaryReader(source, Encoding.UTF8, leaveOpen: true);
+        try
+        {
+            var count = reader.ReadInt32();
+            var bytes = reader.ReadBytes(1);
+            var list = new List<T>();
+            for(int i=0; i<count; i++) list.Add(default!);
+            return Task.FromResult<List<T>?>(list);
+        }
+        catch(EndOfStreamException) { return Task.FromResult<List<T>?>(null); }
+    }
+}

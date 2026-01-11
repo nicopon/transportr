@@ -1,0 +1,73 @@
+using TransportR.Models;
+
+// Re-export abstract classes from Abstractions namespace for backward compatibility
+using TransportR.Abstractions;
+
+namespace TransportR.Interfaces;
+
+/// <summary>
+/// Base interface for TransportR clients that can connect to and disconnect from a hub.
+/// </summary>
+public interface IDataClient
+{
+    /// <summary>
+    /// Gets the unique identifier for this client.
+    /// </summary>
+    Guid ClientId { get; }
+
+    /// <summary>
+    /// Connects to the hub with specified groups.
+    /// </summary>
+    /// <param name="groups">Optional groups. When authenticated and null, derived from JWT scopes.</param>
+    /// <param name="cancellationToken">Token to cancel the connection attempt.</param>
+    Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Disconnects from the hub and cleans up all active sessions.
+    /// </summary>
+    Task DisconnectAsync();
+    
+    /// <summary>
+    /// Gets information about all active transfers.
+    /// </summary>
+    /// <returns>A list of transfer information for all active sessions.</returns>
+    IReadOnlyList<TransferInfo> GetTransfers();
+}
+
+/// <summary>
+/// Interface for a client that can receive data transfers.
+/// </summary>
+/// <typeparam name="T">The type of items to receive.</typeparam>
+public interface IDataReceiver<T> : IDataClient
+{
+    /// <summary>
+    /// Event fired when a new transfer is initiated targeting this receiver.
+    /// </summary>
+    /// <remarks>
+    /// The handler should consume items from the transfer's <see cref="Receive{T}.ReceiveAsync"/> method.
+    /// </remarks>
+    event Func<Receive<T>, Task> OnTransferStarted;
+}
+
+/// <summary>
+/// Interface for a client that can send data transfers.
+/// </summary>
+/// <typeparam name="T">The type of items to send.</typeparam>
+public interface IDataSender<T> : IDataClient
+{
+    /// <summary>
+    /// Initiates a new transfer to the specified target client.
+    /// </summary>
+    /// <param name="targetClientId">The ID of the receiver client.</param>
+    /// <param name="batchSize">Optional batch size override. Uses default if not specified.</param>
+    /// <returns>A Send handle to transmit items through.</returns>
+    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
+    
+    /// <summary>
+    /// Gets a list of receivers that this client is authorized to send data to.
+    /// </summary>
+    /// <param name="cancellationToken">Token to cancel the request.</param>
+    /// <returns>List of authorized receiver clients.</returns>
+    Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default);
+}
+

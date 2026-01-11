@@ -1,0 +1,32 @@
+
+# Build results
+# Data files
+# Environment
+# NuGet packages
+*.cache
+*.log
+*.nupkg
+*.snupkg
+*.suo
+*.user
+.DS_Store
+.env
+.env.local
+.idea/
+.vs/
+.vscode/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+artifacts/
+bin/
+data/
+nohup.out
+obj/
+output/**
+tools/**
+x64/
+x86/

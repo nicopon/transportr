@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\TransportR\TransportR.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" Version="1.14.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    
+    <!-- NuGet Package Metadata -->
+    <PackageId>TransportR.Hub.SignalR</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Nicolas Ponsart</Authors>
+    <Description>SignalR hub implementation for TransportR - High-performance data transport server</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>signalr;transport;streaming;hub</PackageTags>
+  </PropertyGroup>
+
+</Project>
