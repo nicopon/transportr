@@ -35,6 +35,7 @@
     <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Storage.Redis\TransportR.Storage.Redis.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Serialization.Arrow\TransportR.Serialization.Arrow.csproj" />
 
     <ProjectReference Include="..\..\src\TransportR.Auth.ClientCredentials\TransportR.Auth.ClientCredentials.csproj" />
 
