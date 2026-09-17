@@ -27,10 +27,20 @@ namespace TransportR.Serialization.Arrow.Services;
 /// </para>
 ///
 /// <para>
-/// <b>Ownership.</b> Deserialization allocates through the supplied <see cref="MemoryAllocator"/>,
-/// so the batches handed to a consumer are observable by a tracking pool — the interface gives
-/// this a <see cref="Stream"/>, and Arrow's stream reader takes an allocator, so nothing here has
-/// to choose between a copy and losing that. Each batch returned is owned by the caller.
+/// <b>This serializer OWNS the batches it is given, and disposes them once written.</b> That is
+/// unlike the POCO serializers, and it is not a liberty: a <see cref="RecordBatch"/> holds
+/// off-heap memory that something must release, and this is the only place that knows the batch
+/// has been written. The sender does not re-serialize on a resend — <c>_unackedBatches</c> holds
+/// the serialized BYTES, so a replay never comes back here — which is what makes disposing here
+/// safe rather than a use-after-free waiting for a retry.
+/// </para>
+///
+/// <para>
+/// <b>Ownership of what comes back.</b> Deserialization allocates through the supplied
+/// <see cref="MemoryAllocator"/>, so received batches are observable by a tracking pool — the
+/// interface hands this a <see cref="Stream"/> and Arrow's stream reader takes an allocator, so
+/// nothing here has to choose between a copy and losing that. Each batch returned is owned by the
+/// caller.
 /// </para>
 /// </remarks>
 public sealed class ArrowBatchSerializer : IBatchSerializer
@@ -76,13 +86,22 @@ public sealed class ArrowBatchSerializer : IBatchSerializer
                     "An Arrow chunk holds batches of two different schemas. One chunk is one IPC "
                   + "stream, so they cannot travel together; send them as separate batches.");
 
-        using var writer = new ArrowStreamWriter(destination, schema, leaveOpen: true, _options);
-        foreach (var recordBatch in batches)
-            await writer.WriteRecordBatchAsync(recordBatch).ConfigureAwait(false);
+        try
+        {
+            using var writer = new ArrowStreamWriter(destination, schema, leaveOpen: true, _options);
+            foreach (var recordBatch in batches)
+                await writer.WriteRecordBatchAsync(recordBatch).ConfigureAwait(false);
 
-        // Not optional: this is the marker that tells a reader the stream ended because it was
-        // finished, rather than because the bytes stopped arriving.
-        await writer.WriteEndAsync().ConfigureAwait(false);
+            // Not optional: this is the marker that tells a reader the stream ended because it was
+            // finished, rather than because the bytes stopped arriving.
+            await writer.WriteEndAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // In the finally, so a write that throws still releases the off-heap memory. Nothing
+            // downstream holds these: the bytes are what gets kept for a resend.
+            foreach (var recordBatch in batches) recordBatch.Dispose();
+        }
     }
 
     public async Task<List<T>?> DeserializeBatchAsync<T>(Stream source)

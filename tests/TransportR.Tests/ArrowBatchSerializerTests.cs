@@ -1,4 +1,6 @@
+using System.Buffers;
 using Apache.Arrow;
+using Apache.Arrow.Memory;
 using Apache.Arrow.Types;
 using TransportR.Protocol;
 using TransportR.Serialization.Arrow.Services;
@@ -166,6 +168,34 @@ public class ArrowBatchSerializerTests
         Assert.Null(await ReadAsync(serializer, bytes));
     }
 
+    /// <summary>
+    /// The off-heap memory of a sent batch is released once it is written.
+    /// </summary>
+    /// <remarks>
+    /// Arrow buffers are native, so a batch nobody disposes is not a leak the GC reports — it is
+    /// RSS reclaimed only when a finalizer eventually runs. The sender keeps the serialized bytes
+    /// for a resend, never the batch, so this is the last place that could release it.
+    /// </remarks>
+    [Fact]
+    public async Task A_Sent_Batch_Releases_Its_Memory()
+    {
+        var pool = new CountingAllocator();
+        var serializer = new ArrowBatchSerializer(pool);
+
+        var ids = new Int32Array.Builder();
+        for (var i = 0; i < 1000; i++) ids.Append(i);
+        var batch = new RecordBatch(
+            new Schema([new Field("id", Int32Type.Default, nullable: false)], null),
+            [ids.Build(pool)],
+            1000);
+
+        Assert.True(pool.Allocated > 0, "the test allocated nothing, so it proves nothing");
+
+        await WriteAsync(serializer, [batch]);
+
+        Assert.Equal(pool.Allocated, pool.Released);
+    }
+
     [Fact]
     public async Task A_Type_It_Does_Not_Carry_Is_Named_Rather_Than_Guessed()
     {
@@ -176,5 +206,33 @@ public class ArrowBatchSerializerTests
             () => new BatchProtocol(serializer).SerializeBatchAsync(buffer, new List<string> { "a" }));
 
         Assert.Contains("RecordBatch", ex.Message);
+    }
+}
+
+/// <summary>Counts what Arrow takes and gives back, so a missing dispose is visible.</summary>
+internal sealed class CountingAllocator : MemoryAllocator
+{
+    public long Allocated;
+    public long Released;
+
+    protected override IMemoryOwner<byte> AllocateInternal(int length, out int bytesAllocated)
+    {
+        var inner = System.Buffers.MemoryPool<byte>.Shared.Rent(length);
+        bytesAllocated = length;
+        Interlocked.Add(ref Allocated, length);
+        return new Tracked(this, inner, length);
+    }
+
+    private sealed class Tracked(CountingAllocator owner, IMemoryOwner<byte> inner, int length) : IMemoryOwner<byte>
+    {
+        private int _disposed;
+        public Memory<byte> Memory => inner.Memory[..length];
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            Interlocked.Add(ref owner.Released, length);
+            inner.Dispose();
+        }
     }
 }
