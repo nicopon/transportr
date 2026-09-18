@@ -188,4 +188,89 @@ public class BatchProcessorTests
             return Task.FromResult<List<T>?>(list);
         }
     }
+
+    // ---- In-flight window (ClientOptions.MaxInFlightBatches) ----
+
+    private BatchProcessor<string> CreateWindowedProcessor(int maxInFlight, int batchSize = 1)
+    {
+        _stubContext.Options.MaxInFlightBatches = maxInFlight;
+        return CreateProcessor(batchSize);
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenWindowIsFull_ParksTheProducerUntilAcked()
+    {
+        // Arrange: one item per batch, window of two.
+        await using var processor = CreateWindowedProcessor(maxInFlight: 2);
+        await processor.StartSenderAsync(CancellationToken.None);
+
+        await processor.SendAsync("a", CancellationToken.None);
+        await processor.SendAsync("b", CancellationToken.None);
+
+        // Act: the third batch has no slot.
+        var blocked = processor.SendAsync("c", CancellationToken.None);
+
+        // Assert: parked. Draining the outgoing channel is not what reopens the window - only an
+        // acknowledgement is, which is the whole point of measuring in-flight rather than queued.
+        while (processor.UnackedCount < 2) await Task.Delay(10);
+        processor.OutgoingMessages.TryRead(out _);
+        processor.OutgoingMessages.TryRead(out _);
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(300)));
+
+        // Act: acknowledge batch 0.
+        await processor.ProcessChunkAsync(
+            new ChunkData(ChunkHeader.CreateControl(_transferId, 0, ChunkType.BatchAck), null, 0));
+
+        // Assert: the producer resumes.
+        await blocked.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task SendAsync_WithoutWindow_DoesNotParkTheProducer()
+    {
+        // Arrange: no window configured - the default.
+        await using var processor = CreateProcessor(batchSize: 1);
+        await processor.StartSenderAsync(CancellationToken.None);
+
+        // Act: send far more than any window would allow, acknowledging nothing.
+        var produce = Task.Run(async () =>
+        {
+            for (var i = 0; i < 50; i++)
+                await processor.SendAsync($"item{i}", CancellationToken.None);
+        });
+
+        // Assert
+        Assert.Same(produce, await Task.WhenAny(produce, Task.Delay(TimeSpan.FromSeconds(5))));
+        await produce;
+    }
+
+    [Fact]
+    public async Task ResendUnackedBatches_ImplicitAck_GivesTheSlotBack()
+    {
+        // Arrange: window of two, both taken.
+        await using var processor = CreateWindowedProcessor(maxInFlight: 2);
+        await processor.StartSenderAsync(CancellationToken.None);
+
+        await processor.SendAsync("a", CancellationToken.None);
+        await processor.SendAsync("b", CancellationToken.None);
+        while (processor.UnackedCount < 2) await Task.Delay(10);
+
+        var blocked = processor.SendAsync("c", CancellationToken.None);
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(200)));
+
+        // Act: after a cut, the Pong says the receiver already has batch 0. That is an implicit
+        // ack - if it does not return its slot, the window shrinks by one on every resumed batch
+        // and never reopens.
+        using var outputStream = new MemoryStream();
+        await processor.ResendUnackedBatchesAsync(
+            outputStream,
+            _transferId,
+            didPingPong: true,
+            nextExpectedFromPong: 1,
+            token: CancellationToken.None);
+
+        // Assert
+        Assert.Equal(1, processor.UnackedCount);
+        await blocked.WaitAsync(TimeSpan.FromSeconds(5));
+    }
 }

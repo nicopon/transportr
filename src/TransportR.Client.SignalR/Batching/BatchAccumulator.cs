@@ -4,8 +4,14 @@ namespace TransportR.Client.SignalR.Batching;
 
 /// <summary>
 /// Accumulates items into batches and publishes them to a channel for parallel processing.
-/// Uses a producer/consumer pattern with async backpressure.
 /// </summary>
+/// <remarks>
+/// The channel itself is unbounded, so handing a batch off never blocks on the channel. Whatever
+/// backpressure exists comes from the optional in-flight window passed to the constructor: a slot
+/// is taken here, when a batch is handed off, and released by the caller when that batch is
+/// acknowledged. Without it, the producer runs to the end of the source regardless of how far
+/// behind the receiver is.
+/// </remarks>
 internal class BatchAccumulator<T> : IDisposable
 {
     private readonly int _batchSize;
@@ -16,15 +22,21 @@ internal class BatchAccumulator<T> : IDisposable
     private int _batchId;
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _flushIntervalTask;
-    
-    // Channel for batches - unbounded to allow producer to run at full speed
+
+    // Optional in-flight window. Held on the PRODUCER side deliberately: gating the serialization
+    // worker instead would only move the backlog into _batchChannel, where items are not yet
+    // serialized and - for off-heap payloads - not yet released.
+    private readonly SemaphoreSlim? _inFlightSlots;
+
+    // Channel for batches - unbounded; the window above is what bounds the producer
     private readonly Channel<(List<T> Items, int BatchId)> _batchChannel;
 
-    public BatchAccumulator(int batchSize, int flushIntervalMs)
+    public BatchAccumulator(int batchSize, int flushIntervalMs, SemaphoreSlim? inFlightSlots = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchSize, 0, nameof(batchSize));
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(flushIntervalMs, 0, nameof(flushIntervalMs));
-        
+
+        _inFlightSlots = inFlightSlots;
         _batchSize = batchSize;
         _flushIntervalMs = flushIntervalMs;
         _items = new List<T>(batchSize);
@@ -124,13 +136,23 @@ internal class BatchAccumulator<T> : IDisposable
     private async ValueTask FlushInternalAsync(CancellationToken ct)
     {
         if (_items.Count == 0) return;
-        
+
+        // Take an in-flight slot BEFORE handing the batch off. This is the only point at which the
+        // producer can be made to wait for the receiver. Linked to _disposeCts so a blocked
+        // producer is released when the accumulator goes away rather than hanging on a window that
+        // will never reopen.
+        if (_inFlightSlots != null)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposeCts.Token);
+            await _inFlightSlots.WaitAsync(linked.Token);
+        }
+
         var batchToSend = _items;
         var currentBatchId = _batchId++;
         _items = new List<T>(_batchSize);
         _lastFlushTime = DateTime.UtcNow;
-        
-        // Async write - will wait if channel is full (backpressure)
+
+        // The channel is unbounded, so this never blocks - the slot taken above is the bound.
         await _batchChannel.Writer.WriteAsync((batchToSend, currentBatchId), ct);
     }
 
@@ -164,9 +186,12 @@ internal class BatchAccumulator<T> : IDisposable
 
     public void Dispose()
     {
+        // Cancel first: a producer parked on the in-flight window unwinds through the finally that
+        // releases _lock, so _lock must still be usable at that point. SemaphoreSlim only needs
+        // disposing when AvailableWaitHandle has been touched, which it never is here, so leaving
+        // it alone costs nothing and removes the race outright.
         _disposeCts.Cancel();
         _batchChannel.Writer.TryComplete();
-        _lock.Dispose();
         _disposeCts.Dispose();
     }
 }

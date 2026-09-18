@@ -16,6 +16,7 @@ public class TransportRClientBuilder
     private string? _url;
     private int _batchSize = 1000;
     private int _batchFlushIntervalMs = 1000;
+    private int? _maxInFlightBatches;
     private ILoggerFactory? _loggerFactory;
     private IBatchSerializer? _serializer;
     private string? _accessToken;
@@ -45,6 +46,23 @@ public class TransportRClientBuilder
     public TransportRClientBuilder WithBatchTimeout(int timeoutMs)
     {
         _batchFlushIntervalMs = timeoutMs;
+        return this;
+    }
+
+    /// <summary>
+    /// Bounds how many batches may be in flight — flushed but not yet acknowledged — before the
+    /// producer is made to wait. Unbounded by default.
+    /// </summary>
+    /// <remarks>
+    /// This is the only backpressure path from the receiver back to the producer. Left unset, a
+    /// slow receiver makes the sender hold the whole source in memory: TCP throttles the HTTP
+    /// write, but nothing upstream of it. The window counts batches, so it bounds roughly
+    /// <c>max × batch size</c> — see <see cref="ClientOptions.MaxInFlightBatches"/> for sizing.
+    /// </remarks>
+    public TransportRClientBuilder WithMaxInFlightBatches(int max)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(max, 0, nameof(max));
+        _maxInFlightBatches = max;
         return this;
     }
 
@@ -117,7 +135,11 @@ public class TransportRClientBuilder
             throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
         }
 
-        var options = new ClientOptions { BatchFlushIntervalMs = _batchFlushIntervalMs };
+        var options = new ClientOptions
+        {
+            BatchFlushIntervalMs = _batchFlushIntervalMs,
+            MaxInFlightBatches = _maxInFlightBatches
+        };
         
         var hubUrl = _url.TrimEnd('/');
         var controlUrl = $"{hubUrl}/hub/command";

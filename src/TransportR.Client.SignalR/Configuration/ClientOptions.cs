@@ -44,4 +44,25 @@ public class ClientOptions
     /// Timeout for batch accumulation in milliseconds. Default: 1000ms.
     /// </summary>
     public int BatchFlushIntervalMs { get; set; } = 1000;
+
+    /// <summary>
+    /// Maximum number of batches allowed in flight — flushed by the accumulator but not yet
+    /// acknowledged by the receiver. <c>null</c> (the default) means unbounded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When set, the producer blocks in <c>SendAsync</c> once the window is full and resumes as
+    /// acknowledgements come back. This is the only backpressure path from the receiver to the
+    /// producer: TCP throttles the HTTP write, but nothing upstream of it. Left unbounded, a slow
+    /// receiver makes the sender hold the entire source in memory.
+    /// </para>
+    /// <para>
+    /// <b>Sizing.</b> The window counts <i>batches</i>, so the memory it bounds is roughly
+    /// <c>MaxInFlightBatches × batch size</c>. A window too small costs throughput — the producer
+    /// idles waiting for acknowledgements — and the right value depends on how large a batch is,
+    /// which only the caller knows. This is why there is no default: for item-sized POCOs the
+    /// unbounded behaviour is a memory spike, but for multi-megabyte payloads it is the process.
+    /// </para>
+    /// </remarks>
+    public int? MaxInFlightBatches { get; set; }
 }

@@ -171,6 +171,88 @@ public class BatchAccumulatorTests
         // Channel should be completed after dispose
         Assert.True(accumulator.BatchReader.Completion.IsCompleted);
     }
+
+    // ---- In-flight window (ClientOptions.MaxInFlightBatches) ----
+
+    [Fact]
+    public async Task AddAsync_WithoutWindow_NeverBlocksTheProducer()
+    {
+        // Arrange: no window - the historical, unbounded behaviour.
+        using var accumulator = new BatchAccumulator<int>(batchSize: 1, flushIntervalMs: 60000);
+
+        // Act: publish far more batches than anything will consume.
+        var produce = Task.Run(async () =>
+        {
+            for (var i = 0; i < 50; i++)
+                await accumulator.AddAsync(i);
+        });
+
+        // Assert: completes without anyone draining the channel.
+        var finished = await Task.WhenAny(produce, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(produce, finished);
+        await produce;
+    }
+
+    [Fact]
+    public async Task AddAsync_WhenWindowIsFull_BlocksTheProducer()
+    {
+        // Arrange: a window of two batches, one item per batch.
+        using var slots = new SemaphoreSlim(2, 2);
+        using var accumulator = new BatchAccumulator<int>(batchSize: 1, flushIntervalMs: 60000, inFlightSlots: slots);
+
+        // Act: a third batch has no slot to take.
+        await accumulator.AddAsync(1);
+        await accumulator.AddAsync(2);
+        var blocked = accumulator.AddAsync(3).AsTask();
+
+        // Assert: still parked - draining the channel is NOT what reopens the window.
+        Assert.True(accumulator.BatchReader.TryRead(out _));
+        Assert.True(accumulator.BatchReader.TryRead(out _));
+        var finished = await Task.WhenAny(blocked, Task.Delay(300));
+        Assert.NotSame(blocked, finished);
+
+        // Act: an acknowledgement gives a slot back.
+        slots.Release();
+
+        // Assert: the producer resumes.
+        await blocked.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(accumulator.BatchReader.TryRead(out _));
+    }
+
+    [Fact]
+    public async Task AddAsync_WhenDisposedWhileParked_ReleasesTheProducer()
+    {
+        // Arrange: a window of one, already exhausted.
+        using var slots = new SemaphoreSlim(1, 1);
+        var accumulator = new BatchAccumulator<int>(batchSize: 1, flushIntervalMs: 60000, inFlightSlots: slots);
+        await accumulator.AddAsync(1);
+
+        var blocked = accumulator.AddAsync(2).AsTask();
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(200)));
+
+        // Act: tear the session down while the producer waits on a window that will never reopen.
+        accumulator.Dispose();
+
+        // Assert: it is cancelled, not hung.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => blocked.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task AddAsync_WhenCancelledWhileParked_ObservesTheCallerToken()
+    {
+        // Arrange
+        using var slots = new SemaphoreSlim(1, 1);
+        using var accumulator = new BatchAccumulator<int>(batchSize: 1, flushIntervalMs: 60000, inFlightSlots: slots);
+        using var cts = new CancellationTokenSource();
+        await accumulator.AddAsync(1, cts.Token);
+
+        var blocked = accumulator.AddAsync(2, cts.Token).AsTask();
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(200)));
+
+        // Act
+        cts.Cancel();
+
+        // Assert
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => blocked.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
 }
-
-

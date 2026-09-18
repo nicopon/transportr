@@ -38,6 +38,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private readonly ConcurrentDictionary<int, BatchEntry> _unackedBatches = new();
 
     private Task? _serializationWorker;
+
+    // In-flight window (ClientOptions.MaxInFlightBatches). Slots are taken by the accumulator when
+    // a batch is handed off and released here when it leaves _unackedBatches. Null = unbounded.
+    private SemaphoreSlim? _inFlightSlots;
+
     private int _pendingBatches = 0;
     private int _lastAckedBatchId = -1;
     
@@ -76,7 +81,15 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public Task StartSenderAsync(CancellationToken token)
     {
         _unackedBatches.Clear();
-        _batchAccumulator = new BatchAccumulator<T>(_batchSize, _context.BatchFlushIntervalMs);        _batchAccumulator.StartFlushInterval();
+
+        // maxCount is set as well as initialCount: an over-release means the slot accounting is
+        // wrong somewhere, and we would rather find out than silently widen the window.
+        _inFlightSlots = _context.Options.MaxInFlightBatches is { } max
+            ? new SemaphoreSlim(max, max)
+            : null;
+
+        _batchAccumulator = new BatchAccumulator<T>(_batchSize, _context.BatchFlushIntervalMs, _inFlightSlots);
+        _batchAccumulator.StartFlushInterval();
         
         _serializationWorker = Task.Run(() => SerializationWorkerAsync(token));
         
@@ -189,6 +202,22 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     private async Task SerializeAndSendBatch(List<T> items, int batchId, CancellationToken ct)
     {
+        // The accumulator took a slot for this batch. From the moment it lands in _unackedBatches,
+        // the ack path owns giving it back; before that, this method does.
+        var registered = false;
+        try
+        {
+            await SerializeAndSendBatchCore(items, batchId, () => registered = true, ct);
+        }
+        catch
+        {
+            if (!registered) ReleaseInFlightSlot();
+            throw;
+        }
+    }
+
+    private async Task SerializeAndSendBatchCore(List<T> items, int batchId, Action onRegistered, CancellationToken ct)
+    {
         using var memoryStream = _context.StreamManager.GetStream();
         var countBytes = BitConverter.GetBytes(items.Count);
         await memoryStream.WriteAsync(countBytes.AsMemory(), ct);
@@ -202,11 +231,13 @@ internal class BatchProcessor<T> : IAsyncDisposable
         
         // 1 reference for _unackedBatches (initial ref = 1)
         _unackedBatches[batchId] = entry;
+        onRegistered();
 
-        // 1 reference for BatchControlMessage (we must retain it)
-        var entryForMessage = entry.TryRetain();
-        // entryForMessage cannot be null here since it was just created
-        
+        // 1 reference for BatchControlMessage. TryRetain increments the entry's ref count and
+        // hands back the payload; the message carries the entry itself, so the return is unused.
+        // Cannot be null here - the entry was created on the line above.
+        entry.TryRetain();
+
         Interlocked.Increment(ref _pendingBatches);
         Interlocked.Add(ref _itemsSent, items.Count);
         
@@ -214,26 +245,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
         {
             if (batchId > _maxBatchIdSent) _maxBatchIdSent = batchId;
         }
-        
-        // entryForMessage IS the Internal.BatchEntry (TryRetain returns IMemoryOwner? NO. TryRetain returns IMemoryOwner<byte>?)
-        // Wait, Internal.BatchEntry.TryRetain returns IMemoryOwner<byte>.
-        // BUT BatchControlMessage expects BatchEntry.
-        
-        // My extracted class:
-        // public IMemoryOwner<byte>? TryRetain()
-        
-        // Ah! If I return IMemoryOwner, I lose the BatchEntry wrapper reference management?
-        // No. The methods are ON BatchEntry.
-        
-        // BatchControlMessage takes `BatchEntry Entry`.
-        // So I need to pass `entry`.
-        // BUT I need to increment ref count manually?
-        // BatchEntry.TryRetain returns the Payload (IMemoryOwner). It increments the ref count.
-        // It DOES NOT return the BatchEntry itself.
-        
-        // I need a method `RetainEntry()`? Or just call `TryRetain()` and ignore return (since return is payload)?
-        // Yes. `TryRetain()` increments `_refCount`.
-        // So `entry.TryRetain()` increments to 2.
         
         await _sendChannel.Writer.WriteAsync(new BatchControlMessage(batchId, entry), ct);
     }
@@ -262,8 +273,42 @@ internal class BatchProcessor<T> : IAsyncDisposable
              // Release the reference held by the Dictionary
              entry.Release(); 
              Interlocked.Decrement(ref _pendingBatches);
+             ReleaseInFlightSlot();
         }
         Interlocked.Increment(ref _acksReceived);
+    }
+
+    /// <summary>
+    /// Gives an in-flight slot back to the producer. Called from every path that removes a batch
+    /// from <see cref="_unackedBatches"/>, and from the serialization path when a batch fails
+    /// before it ever gets there. Missing one of those closes the window permanently.
+    /// </summary>
+    /// <remarks>
+    /// This runs on the ACK-reading loop (the Control stream read task), which is distinct from
+    /// both the serialization worker and the data write loop. It only ever releases, never waits,
+    /// which is what keeps the window free of deadlock.
+    /// </remarks>
+    private void ReleaseInFlightSlot()
+    {
+        if (_inFlightSlots == null) return;
+
+        try
+        {
+            _inFlightSlots.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // Accounting bug: a batch was released twice. Logged rather than thrown, because this
+            // runs on the loop that processes acknowledgements and killing it would stall the
+            // transfer outright.
+            _context.Logger.LogError(
+                "In-flight slot over-released for Transfer={TransferId}. The send window is now wider than configured.",
+                _transferId);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Session torn down while an ack was in flight; nothing left to bound.
+        }
     }
     
     private async Task HandlePingAsync()
@@ -354,6 +399,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
                     // Implicit ACK: Update stats and pending/unacked counters
                     Interlocked.Decrement(ref _pendingBatches);
                     Interlocked.Increment(ref _acksReceived);
+                    // Same as an explicit ack: the batch is done, give the slot back. Without this
+                    // the window shrinks by one on every resumed batch and never reopens.
+                    ReleaseInFlightSlot();
                     
                     _context.Logger.LogDebug("Skipped resend of batch {BatchId} (receiver has it) for Transfer={TransferId}", kvp.Key, _transferId);
                 }
@@ -397,7 +445,14 @@ internal class BatchProcessor<T> : IAsyncDisposable
     {
         _sendChannel.Writer.TryComplete();
         _serializationWorker = null; // Should look into canceling it if running?
+
+        // Dispose the accumulator first: it cancels its own token, which releases a producer
+        // parked on the in-flight window before that window is disposed underneath it.
         _batchAccumulator?.Dispose();
+
+        // Not disposed on purpose: a producer may still be unwinding out of a cancelled wait on
+        // it, and SemaphoreSlim only needs disposing once AvailableWaitHandle has been used.
+        _inFlightSlots = null;
         
         foreach(var kvp in _unackedBatches)
         {
