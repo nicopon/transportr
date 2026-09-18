@@ -29,7 +29,7 @@ Builds the entire solution in Release mode.
 
 ### `init.sh`
 
-Generates test data (binary order file) for benchmarks.
+Downloads Toxiproxy and generates the test data.
 
 ```bash
 # Default: 2M items
@@ -37,9 +37,15 @@ Generates test data (binary order file) for benchmarks.
 
 # Custom count
 ITEM_COUNT=500000 ./scripts/init.sh
+
+# Keep existing data
+./scripts/init.sh --skip-data
 ```
 
 Output: `data/orders.bin`
+
+It exits non-zero as soon as something it attempted fails, which is what makes
+`test-all.sh` able to judge it. A failed download leaves no half-written binary behind.
 
 ### `run-benchmark.sh`
 
