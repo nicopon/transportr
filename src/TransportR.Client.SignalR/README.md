@@ -22,7 +22,7 @@ using TransportR.Client.SignalR;
 using Microsoft.Extensions.Logging;
 
 // 1. Configure the Client
-var client = new TransportRClientBuilder()
+var client = new TransportRClientBuilder<Order>()
     .WithUrl("http://localhost:5000")
     .WithClientCredentials(
         tokenEndpoint: "http://localhost:5100/connect/token",
@@ -34,7 +34,7 @@ var client = new TransportRClientBuilder()
     // .WithSerializer(new MyCustomSerializer()) // Or bring your own
     .WithBatchSize(1000)
     .WithLoggerFactory(LoggerFactory.Create(b => b.AddConsole()))
-    .Build<Order>();
+    .Build();
 
 // 2. Connect
 await client.ConnectAsync(new[] { "my-group" });
@@ -58,7 +58,12 @@ You can provide a static token or a custom dynamic provider:
 ```
 
 ### Serialization
-We recommend MessagePack for performance, but you can implement `IBatchSerializer` for any format (e.g. JSON, Protobuf).
+We recommend MessagePack for performance, but you can implement `IBatchSerializer<T>` for any
+format (e.g. JSON, Protobuf).
+
+The builder carries the item type, so a serializer that cannot carry it is not an overload that
+exists: `new TransportRClientBuilder<string>().WithArrowSerialization()` does not compile, rather
+than building a client that fails on its first batch.
 
 ## License
 

@@ -83,9 +83,12 @@ Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHead
 Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload. `ChunkIO`
 (`src/TransportR/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
 `BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`) are the whole vocabulary. Payload
-serialization is fully decoupled behind `IBatchSerializer` — `TransportR.Serialization.{MessagePack,
-Protobuf,Json}` are interchangeable implementations; the hub never needs to know which one is in use
-because it never deserializes the payload.
+serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,
+Protobuf,Json,Arrow}` are interchangeable implementations; the hub never needs to know which one is
+in use because it never deserializes the payload. The item type sits on the interface, not on the
+call, so a serializer that cannot carry a client's item type (`WithArrowSerialization()` on anything
+but `RecordBatch`) is a compile error rather than a throw on the first batch — `MessagePack`,
+`Protobuf` and `Json` are generic over `T`, `Arrow` closes over `RecordBatch`.
 
 ### Project layering
 
@@ -93,7 +96,7 @@ because it never deserializes the payload.
 src/TransportR                          # Protocol, interfaces, models — no SignalR/hub deps
 src/TransportR.Client.SignalR           # Client: SignalRDataClient<T>, HubConnectionManager, DataSession, batching
 src/TransportR.Hub.SignalR              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager
-src/TransportR.Serialization.{MessagePack,Protobuf,Json}  # IBatchSerializer implementations
+src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
 src/TransportR.FlowControl                # Group-based authorization (IFlowControlService)
 src/TransportR.Auth.ClientCredentials      # OAuth2 client-credentials token acquisition (client side)
 src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in)

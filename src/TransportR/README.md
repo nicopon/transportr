@@ -37,15 +37,20 @@ TransportR/
 
 ## Key Interfaces
 
-### IBatchSerializer
+### IBatchSerializer<T>
 
 ```csharp
-public interface IBatchSerializer
+public interface IBatchSerializer<T>
 {
-    Task SerializeBatchAsync<T>(Stream destination, List<T> batch);
-    Task<List<T>?> DeserializeBatchAsync<T>(Stream source);
+    Task SerializeBatchAsync(Stream destination, List<T> batch);
+    Task<List<T>?> DeserializeBatchAsync(Stream source);
 }
 ```
+
+The item type is on the interface, not on the call. A per-call generic would claim that every
+implementation carries every type, which none can and one cannot at all: a serializer built on
+Apache Arrow carries record batches only, and on a generic contract it could reject anything else
+only by throwing at the first batch. Typed here, the mismatch is a compile error.
 
 ### IDataSender<T> / IDataReceiver<T>
 

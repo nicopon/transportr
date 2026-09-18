@@ -128,7 +128,7 @@ TransportR supports horizontal scaling (Active/Active) for Hubs:
 |-----------|---------|----------|
 | `IDataSender<T>` | Initiate transfers, discover receivers | [ITransportRClient.cs](src/TransportR/Interfaces/ITransportRClient.cs) |
 | `IDataReceiver<T>` | Receive transfers via event | [ITransportRClient.cs](src/TransportR/Interfaces/ITransportRClient.cs) |
-| `IBatchSerializer` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR/Interfaces/IBatchSerializer.cs) |
+| `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR/Interfaces/IBatchSerializer.cs) |
 | `IHubProgressMonitor` | Hub-side monitoring (bytes only) | [IHubProgressMonitor.cs](src/TransportR/Interfaces/IHubProgressMonitor.cs) |
 
 > The hub operates as a "dumb-pipe" and only tracks bytes. Client-side monitoring uses `TransportRMetrics` OpenTelemetry counters.
@@ -162,7 +162,7 @@ builder.Services.AddOpenTelemetry()
 
 ### Wire Format (v1)
 
-The transport protocol uses a **30-byte fixed header** followed by an **opaque binary payload**. The payload serialization is completely decoupled via `IBatchSerializer`.
+The transport protocol uses a **30-byte fixed header** followed by an **opaque binary payload**. The payload serialization is completely decoupled via `IBatchSerializer<T>`.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -172,7 +172,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 │ 1 byte   │ 1 b  │ 4 bytes    │ 4 bytes │ 4 b   │ 16 bytes   │
 ├──────────────────────────────────────────────────────────────┤
 │ Payload (variable length, opaque bytes)                      │
-│ ← Serialized by IBatchSerializer implementation              │
+│ ← Serialized by IBatchSerializer<T> implementation           │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -187,7 +187,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | Ping | 0x05 | Connection probe (sender → receiver) |
 | Pong | 0x06 | Connection probe response |
 
-> **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, etc.). The included `TransportR.Serialization.MessagePack` uses MessagePack with Lz4 compression for high performance.
+> **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. The included `TransportR.Serialization.MessagePack` uses MessagePack with Lz4 compression for high performance.
 
 ---
 
