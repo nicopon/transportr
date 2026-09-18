@@ -19,7 +19,9 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 | **Reconnect Debounce** | 2 s | Prevents reconnection spam (Client side) |
 | **Pong Wait** | 10 s timeout | HTTP stream Ping/Pong Handshake |
 | **HTTP Backoff** | 100 ms → 5 s | Exponential (Restart data streams) |
-| **Bridge Timeout** | 60 s | Hub terminates idle transfers (No Progress) |
+| **Bridge Timeout** | 300 s | Hub cancels a non-active bridge waiting for a peer (`BridgeTimeoutSeconds`) |
+| **Transfer Inactivity** | 60 s | Hub terminates a transfer gone fully silent (`TransferInactivityTimeoutSeconds`) |
+| **Stalled Progress** | disabled | Opt-in: alive but not advancing (`StalledProgressTimeoutSeconds`) |
 
 ---
 
@@ -105,8 +107,10 @@ if (pong.NextExpectedBatchId > currentBatch.Id) {
 The Hub employs a **TransferCleanupService** that monitors all active transfers.
 
 -   **LastActivityUtc**: Updates on Heartbeat (SignalR) or HTTP activity.
--   **LastProgressUtc**: Updates ONLY when `ItemsSent` or `AcksReceived` increases.
--   **Policy**: If a transfer has valid connections but **Zero Progress** for `60 seconds`, it is considered a "Zombie" (likely a deadlock or client issue) and is terminated.
+-   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
+-   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — not even a heartbeat — is terminated. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
+-   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
+-   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the deployment has to name the longest outage it intends to survive before enabling it.
 
 ### 4. Affinity Handoff (HA)
 

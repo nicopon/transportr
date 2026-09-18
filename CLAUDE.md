@@ -125,9 +125,13 @@ and a receiver stream; `DataSessionStateMachine` models the per-client session s
 machines are directly unit-tested (`BridgeStateMachineTests.cs`, `DataSessionStateMachineTests.cs`,
 `DominoStateTransitionTests.cs` for the completion sequence) — a change to transfer lifecycle
 belongs in the state machine, not scattered as ad-hoc flags in `BridgeManager`/`TransferManager`.
-`BridgeCleanupService`/`TransferCleanupService` are the reaper: a bridge with live connections but no
-`ItemsSent`/`AcksReceived` progress for 60s is considered a zombie and torn down — this is the *only*
-place the hub unilaterally kills a transfer.
+`BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
+`BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s) and **skips `Active`
+bridges entirely**; `TransferCleanupService` terminates a transfer with no activity at all for
+`TransferInactivityTimeoutSeconds` (60s), and — only if `StalledProgressTimeoutSeconds` is set,
+off by default — one that is alive but making no progress. Heartbeats refresh activity but not
+progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
+stall from the hub). This is the *only* place the hub unilaterally kills a transfer.
 
 ### Auth
 
