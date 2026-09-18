@@ -5,8 +5,8 @@ namespace TransportR.Serialization.MessagePack;
 
 public static class TransportRClientBuilderMessagePackExtensions
 {
-    public static TransportRClientBuilder WithMessagePackSerialization(this TransportRClientBuilder builder, bool useAnnotations = false)
+    public static TransportRClientBuilder<T> WithMessagePackSerialization<T>(this TransportRClientBuilder<T> builder, bool useAnnotations = false)
     {
-        return builder.WithSerializer(new MessagePackBatchSerializer(useAnnotations));
+        return builder.WithSerializer(new MessagePackBatchSerializer<T>(useAnnotations));
     }
 }

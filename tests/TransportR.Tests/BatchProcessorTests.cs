@@ -139,11 +139,11 @@ public class BatchProcessorTests
 
     // ========== STUBS ==========
 
-    private class StubSessionContext : ISessionContext
+    private class StubSessionContext : ISessionContext<string>
     {
         public Guid ClientId { get; } = Guid.NewGuid();
         public ILogger Logger { get; } = new StubLogger();
-        public IBatchSerializer Serializer { get; } = new StubBatchSerializer();
+        public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
         public HttpClient HttpClient => null!; // Not used in BatchProcessor logic directly (only via HttpStreamManager which is mocked out or not used)
         // Wait, BatchProcessor doesn't use HttpClient directly.
         
@@ -164,9 +164,9 @@ public class BatchProcessorTests
         public void Dispose() { }
     }
 
-    private class StubBatchSerializer : IBatchSerializer
+    private class StubBatchSerializer : IBatchSerializer<string>
     {
-        public Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+        public Task SerializeBatchAsync(Stream destination, List<string> batch)
         {
             // Simple string serialization: Count + Items
             // 4 bytes count, then just placeholder bytes for items
@@ -177,15 +177,15 @@ public class BatchProcessorTests
             return Task.CompletedTask;
         }
 
-        public Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+        public Task<List<string>?> DeserializeBatchAsync(Stream source)
         {
             using var reader = new BinaryReader(source, Encoding.UTF8, leaveOpen: true);
             var count = reader.ReadInt32();
             var bytes = reader.ReadBytes(10 * count);
-            var list = new List<T>(); 
+            var list = new List<string>(); 
             // Return empty items just to match count
             for(int i=0; i<count; i++) list.Add(default!);
-            return Task.FromResult<List<T>?>(list);
+            return Task.FromResult<List<string>?>(list);
         }
     }
 

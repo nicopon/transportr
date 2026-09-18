@@ -112,7 +112,6 @@ public class HttpStreamManagerTests
     {
         public Guid ClientId { get; } = Guid.NewGuid();
         public ILogger Logger { get; } = new StubLogger();
-        public IBatchSerializer Serializer { get; } = new StubBatchSerializer();
         public HttpClient HttpClient { get; }
         
         public HubConnection HubConnection => null!;
@@ -129,18 +128,12 @@ public class HttpStreamManagerTests
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
     }
     
-    // Reuse StubLogger/Serializer from others or duplicate for isolation
+    // Reuse StubLogger from others or duplicate for isolation
     private class StubLogger : ILogger, IDisposable
     {
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
         public bool IsEnabled(LogLevel logLevel) => true;
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => this;
         public void Dispose() { }
-    }
-
-    private class StubBatchSerializer : IBatchSerializer
-    {
-        public Task SerializeBatchAsync<T>(Stream destination, List<T> batch) => Task.CompletedTask;
-        public Task<List<T>?> DeserializeBatchAsync<T>(Stream source) => Task.FromResult<List<T>?>(new List<T>());
     }
 }

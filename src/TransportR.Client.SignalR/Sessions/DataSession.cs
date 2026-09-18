@@ -28,7 +28,7 @@ internal class DataSession<T> : IDataSession<T>
     
     private readonly ISignalRInteraction _signalR;
     private readonly ISessionConfig _config;
-    private readonly BatchProtocol _protocol;
+    private readonly BatchProtocol<T> _protocol;
     
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
@@ -69,7 +69,7 @@ internal class DataSession<T> : IDataSession<T>
     
     // Ping/Pong connection probing delegated to ReconnectionHandler
     
-    public DataSession(ISessionContext context, string transferId, int batchSize, string dataUrl)
+    public DataSession(ISessionContext<T> context, string transferId, int batchSize, string dataUrl)
     {
         _signalR = context;
         _config = context; // ISessionContext implements ISessionConfig
@@ -77,7 +77,7 @@ internal class DataSession<T> : IDataSession<T>
         TransferId = transferId;
         BatchSize = batchSize;
         DataUrl = dataUrl.TrimEnd('/');
-        _protocol = new BatchProtocol(context.Serializer);
+        _protocol = new BatchProtocol<T>(context.Serializer);
         
         _cts = new CancellationTokenSource();
         _batchProcessor = new BatchProcessor<T>(context, transferId, batchSize, dataUrl);

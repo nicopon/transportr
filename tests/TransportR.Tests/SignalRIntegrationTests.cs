@@ -217,7 +217,7 @@ public class SignalRIntegrationTests
         );
         
         var registry = new SessionRegistry<string>(logger);
-        var serializer = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer();
+        var serializer = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(url) };
 

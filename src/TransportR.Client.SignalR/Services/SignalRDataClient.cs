@@ -15,14 +15,14 @@ namespace TransportR.Client.SignalR.Services;
 /// SignalR-based client for sending and receiving data transfers.
 /// Acts as a coordinator between HubConnectionManager, SessionRegistry, and DataSessions.
 /// </summary>
-public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, ISessionContext, IAsyncDisposable
+public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, ISessionContext<T>, IAsyncDisposable
 {
     public Guid ClientId { get; }
 
     // Dependencies
     private readonly HubConnectionManager _connectionManager;
     private readonly SessionRegistry<T> _sessionRegistry;
-    private readonly IBatchSerializer _serializer;
+    private readonly IBatchSerializer<T> _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
     
@@ -43,7 +43,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     internal SignalRDataClient(
         HubConnectionManager connectionManager,
         SessionRegistry<T> sessionRegistry,
-        IBatchSerializer serializer,
+        IBatchSerializer<T> serializer,
         ILogger logger,
         int defaultBatchSize,
         ClientOptions options,
@@ -253,7 +253,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     Guid ISessionConfig.ClientId => ClientId;
     ILogger ISessionConfig.Logger => _logger;
-    IBatchSerializer ISessionConfig.Serializer => _serializer;
+    IBatchSerializer<T> ISessionConfig<T>.Serializer => _serializer;
     HttpClient IStreamTransport.HttpClient => _httpClient;
     HubConnection ISignalRInteraction.HubConnection => _connectionManager.Connection; // Expose underlying connection
     int ISessionConfig.BatchFlushIntervalMs => _options.BatchFlushIntervalMs;

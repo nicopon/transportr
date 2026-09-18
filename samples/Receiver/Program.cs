@@ -82,7 +82,7 @@ else
 }
 
 // Single Client Instance
-var clientBuilder = new TransportRClientBuilder()
+var clientBuilder = new TransportRClientBuilder<Order>()
     .WithUrl(hubBaseUrl)
     .WithBatchSize(receiverOptions.BatchSize)
     .WithBatchTimeout(batchTimeoutMs)
@@ -129,7 +129,7 @@ else if (!string.IsNullOrEmpty(receiverOptions.AccessToken))
     clientBuilder.WithAccessToken(receiverOptions.AccessToken);
 }
 
-var broker = clientBuilder.Build<Order>();
+var broker = clientBuilder.Build();
 
 // Handler for shutdown
 var cts = new CancellationTokenSource();

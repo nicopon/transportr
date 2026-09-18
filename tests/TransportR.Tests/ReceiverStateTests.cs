@@ -13,13 +13,13 @@ namespace POC_DataProxy.Tests;
 public class ReceiverStateTests
 {
     private readonly Channel<int> _channel;
-    private readonly BatchProtocol _protocol;
+    private readonly BatchProtocol<int> _protocol;
     private readonly ReceiverState<int> _receiverState;
 
     public ReceiverStateTests()
     {
         _channel = Channel.CreateUnbounded<int>();
-        _protocol = new BatchProtocol(new MockBatchSerializer());
+        _protocol = new BatchProtocol<int>(new MockBatchSerializer());
         _receiverState = new ReceiverState<int>(_channel.Writer, _protocol);
     }
 
@@ -157,33 +157,29 @@ public class ReceiverStateTests
     /// <summary>
     /// Mock serializer for testing ReceiverState.
     /// </summary>
-    private class MockBatchSerializer : IBatchSerializer
+    private class MockBatchSerializer : IBatchSerializer<int>
     {
-        public Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+        public Task SerializeBatchAsync(Stream destination, List<int> batch)
         {
             using var writer = new BinaryWriter(destination, System.Text.Encoding.UTF8, leaveOpen: true);
             writer.Write(batch.Count);
             foreach (var item in batch)
             {
-                if (item is int intVal)
-                    writer.Write(intVal);
+                writer.Write(item);
             }
             return Task.CompletedTask;
         }
 
-        public Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+        public Task<List<int>?> DeserializeBatchAsync(Stream source)
         {
             using var reader = new BinaryReader(source, System.Text.Encoding.UTF8, leaveOpen: true);
             var count = reader.ReadInt32();
-            var result = new List<T>(count);
+            var result = new List<int>(count);
             for (int i = 0; i < count; i++)
             {
-                if (typeof(T) == typeof(int))
-                {
-                    result.Add((T)(object)reader.ReadInt32());
-                }
+                result.Add(reader.ReadInt32());
             }
-            return Task.FromResult<List<T>?>(result);
+            return Task.FromResult<List<int>?>(result);
         }
     }
 }

@@ -8,7 +8,7 @@ namespace TransportR.Serialization.Protobuf.Services;
 /// <summary>
 /// Serializes batches using Protocol Buffers and compresses them with Zstd.
 /// </summary>
-public class ProtobufBatchSerializer : IBatchSerializer
+public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly int _compressionLevel;
 
@@ -17,7 +17,7 @@ public class ProtobufBatchSerializer : IBatchSerializer
         _compressionLevel = compressionLevel;
     }
 
-    public async Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    public async Task SerializeBatchAsync(Stream destination, List<T> batch)
     {
         // Use ZstdCompressionStream to wrap the destination stream
         // 'leaveOpen: true' is crucial because the destination stream (NetworkStream/Pipe)
@@ -29,7 +29,7 @@ public class ProtobufBatchSerializer : IBatchSerializer
         // Implicit Dispose flushes the Zstd frame.
     }
 
-    public async Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
         try 
         {

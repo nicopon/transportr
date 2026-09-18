@@ -8,11 +8,11 @@ using TransportR.Client.SignalR.Configuration;
 
 namespace TransportR.Tests.TestHelpers;
 
-public class StubSessionContext : ISessionContext
+public class StubSessionContext : ISessionContext<string>
 {
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; } = new StubLogger();
-    public IBatchSerializer Serializer { get; } = new StubBatchSerializer();
+    public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
     public HttpClient HttpClient { get; }
     
     // HubConnection is nullable/mockable?
@@ -47,9 +47,9 @@ public class StubLogger : ILogger, IDisposable
     public void Dispose() { }
 }
 
-public class StubBatchSerializer : IBatchSerializer
+public class StubBatchSerializer : IBatchSerializer<string>
 {
-    public Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    public Task SerializeBatchAsync(Stream destination, List<string> batch)
     {
         // Simple serialization
         using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
@@ -58,17 +58,17 @@ public class StubBatchSerializer : IBatchSerializer
         return Task.CompletedTask;
     }
 
-    public Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    public Task<List<string>?> DeserializeBatchAsync(Stream source)
     {
         using var reader = new BinaryReader(source, Encoding.UTF8, leaveOpen: true);
         try
         {
             var count = reader.ReadInt32();
             var bytes = reader.ReadBytes(1);
-            var list = new List<T>();
+            var list = new List<string>();
             for(int i=0; i<count; i++) list.Add(default!);
-            return Task.FromResult<List<T>?>(list);
+            return Task.FromResult<List<string>?>(list);
         }
-        catch(EndOfStreamException) { return Task.FromResult<List<T>?>(null); }
+        catch(EndOfStreamException) { return Task.FromResult<List<string>?>(null); }
     }
 }

@@ -4,7 +4,7 @@ using ZstdSharp;
 
 namespace TransportR.Serialization.Json.Services;
 
-public class JsonBatchSerializer : IBatchSerializer
+public class JsonBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly JsonSerializerOptions _options;
     private readonly int _compressionLevel;
@@ -19,7 +19,7 @@ public class JsonBatchSerializer : IBatchSerializer
         _compressionLevel = compressionLevel;
     }
 
-    public async Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    public async Task SerializeBatchAsync(Stream destination, List<T> batch)
     {
         // Wrap with Zstd Compression
         using var compressionStream = new CompressionStream(destination, level: _compressionLevel, leaveOpen: true);
@@ -27,7 +27,7 @@ public class JsonBatchSerializer : IBatchSerializer
         // Implicit Dispose flushes the Zstd frame
     }
 
-    public async Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
         try 
         {

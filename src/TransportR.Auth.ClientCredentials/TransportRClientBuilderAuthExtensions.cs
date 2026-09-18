@@ -8,8 +8,8 @@ public static class TransportRClientBuilderAuthExtensions
 {
     private static ClientCredentialsTokenProvider? _provider;
 
-    public static TransportRClientBuilder WithClientCredentials(
-        this TransportRClientBuilder builder, 
+    public static TransportRClientBuilder<T> WithClientCredentials<T>(
+        this TransportRClientBuilder<T> builder, 
         string tokenEndpoint, 
         string clientId, 
         string clientSecret, 

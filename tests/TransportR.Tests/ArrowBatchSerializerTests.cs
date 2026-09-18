@@ -2,6 +2,7 @@ using System.Buffers;
 using Apache.Arrow;
 using Apache.Arrow.Memory;
 using Apache.Arrow.Types;
+using TransportR.Interfaces;
 using TransportR.Protocol;
 using TransportR.Serialization.Arrow.Services;
 
@@ -11,7 +12,7 @@ namespace TransportR.Tests;
 /// The Arrow serializer, through the protocol's own read path.
 /// </summary>
 /// <remarks>
-/// Tests go through <see cref="BatchProtocol"/> rather than calling the serializer directly,
+/// Tests go through <see cref="BatchProtocol{T}"/> rather than calling the serializer directly,
 /// because how the body reaches it is part of what is under test: the protocol wraps the received
 /// memory in a stream, and it is that stream — not a copy of it — that lets the reader allocate
 /// through a pool.
@@ -40,12 +41,12 @@ public class ArrowBatchSerializerTests
     private static async Task<byte[]> WriteAsync(ArrowBatchSerializer serializer, List<RecordBatch> batches)
     {
         var buffer = new MemoryStream();
-        await new BatchProtocol(serializer).SerializeBatchAsync(buffer, batches);
+        await new BatchProtocol<RecordBatch>(serializer).SerializeBatchAsync(buffer, batches);
         return buffer.ToArray();
     }
 
     private static Task<List<RecordBatch>?> ReadAsync(ArrowBatchSerializer serializer, byte[] bytes)
-        => new BatchProtocol(serializer).ReadBatchBodyFromMemoryAsync<RecordBatch>(bytes, CancellationToken.None);
+        => new BatchProtocol<RecordBatch>(serializer).ReadBatchBodyFromMemoryAsync(bytes, CancellationToken.None);
 
     [Theory]
     [InlineData(true)]
@@ -197,15 +198,18 @@ public class ArrowBatchSerializerTests
     }
 
     [Fact]
-    public async Task A_Type_It_Does_Not_Carry_Is_Named_Rather_Than_Guessed()
+    public void A_Type_It_Does_Not_Carry_Is_Refused_By_The_Compiler()
     {
-        var serializer = new ArrowBatchSerializer();
-        var buffer = new MemoryStream();
+        // This replaces a test that asserted a NotSupportedException on a List<string>: that call
+        // does not compile any more, which is the whole point of closing the interface. What is
+        // still worth pinning is that the closure is the only one — a serializer that also
+        // satisfied IBatchSerializer of some other type would put the runtime failure back.
+        var carried = typeof(ArrowBatchSerializer).GetInterfaces()
+            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IBatchSerializer<>))
+            .Select(i => i.GetGenericArguments()[0])
+            .ToArray();
 
-        var ex = await Assert.ThrowsAsync<NotSupportedException>(
-            () => new BatchProtocol(serializer).SerializeBatchAsync(buffer, new List<string> { "a" }));
-
-        Assert.Contains("RecordBatch", ex.Message);
+        Assert.Equal([typeof(RecordBatch)], carried);
     }
 }
 

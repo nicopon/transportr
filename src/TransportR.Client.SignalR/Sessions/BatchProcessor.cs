@@ -15,11 +15,11 @@ namespace TransportR.Client.SignalR.Sessions;
 /// </summary>
 internal class BatchProcessor<T> : IAsyncDisposable
 {
-    private readonly ISessionContext _context;
+    private readonly ISessionContext<T> _context;
     private readonly string _transferId;
     private readonly int _batchSize;
     private readonly string _dataUrl;
-    private readonly BatchProtocol _protocol;
+    private readonly BatchProtocol<T> _protocol;
     
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
@@ -68,13 +68,13 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public int UnackedCount => _unackedBatches.Count;
     public int NextExpectedBatchId => _receiverState?.NextExpectedBatchId ?? 0;
 
-    public BatchProcessor(ISessionContext context, string transferId, int batchSize, string dataUrl)
+    public BatchProcessor(ISessionContext<T> context, string transferId, int batchSize, string dataUrl)
     {
         _context = context;
         _transferId = transferId;
         _batchSize = batchSize;
         _dataUrl = dataUrl;
-        _protocol = new BatchProtocol(context.Serializer);
+        _protocol = new BatchProtocol<T>(context.Serializer);
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
     }
 

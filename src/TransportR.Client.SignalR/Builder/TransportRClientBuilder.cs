@@ -9,23 +9,31 @@ using TransportR.Client.SignalR.Configuration;
 namespace TransportR.Client.SignalR;
 
 /// <summary>
-/// A fluent builder for configuring and creating a <see cref="SignalRDataClient{T}"/>.
+/// A fluent builder for configuring and creating a <see cref="SignalRDataClient{T}"/> carrying
+/// items of type <typeparamref name="T"/>.
 /// </summary>
-public class TransportRClientBuilder
+/// <remarks>
+/// The item type is declared here rather than at <see cref="Build"/> so that the serializer and
+/// the client agree at compile time: a serializer that cannot carry <typeparamref name="T"/>
+/// — <c>WithArrowSerialization</c> on anything but <c>RecordBatch</c> — is not an overload that
+/// exists, so the mismatch is a compile error rather than a throw on the first batch.
+/// </remarks>
+/// <typeparam name="T">The type of items transfers built by this builder will carry.</typeparam>
+public class TransportRClientBuilder<T>
 {
     private string? _url;
     private int _batchSize = 1000;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
     private ILoggerFactory? _loggerFactory;
-    private IBatchSerializer? _serializer;
+    private IBatchSerializer<T>? _serializer;
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
     /// </summary>
-    public TransportRClientBuilder WithUrl(string url)
+    public TransportRClientBuilder<T> WithUrl(string url)
     {
         _url = url;
         return this;
@@ -34,7 +42,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the default batch size for transfers.
     /// </summary>
-    public TransportRClientBuilder WithBatchSize(int batchSize)
+    public TransportRClientBuilder<T> WithBatchSize(int batchSize)
     {
         _batchSize = batchSize;
         return this;
@@ -43,7 +51,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the batch accumulation timeout.
     /// </summary>
-    public TransportRClientBuilder WithBatchTimeout(int timeoutMs)
+    public TransportRClientBuilder<T> WithBatchTimeout(int timeoutMs)
     {
         _batchFlushIntervalMs = timeoutMs;
         return this;
@@ -59,7 +67,7 @@ public class TransportRClientBuilder
     /// write, but nothing upstream of it. The window counts batches, so it bounds roughly
     /// <c>max × batch size</c> — see <see cref="ClientOptions.MaxInFlightBatches"/> for sizing.
     /// </remarks>
-    public TransportRClientBuilder WithMaxInFlightBatches(int max)
+    public TransportRClientBuilder<T> WithMaxInFlightBatches(int max)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(max, 0, nameof(max));
         _maxInFlightBatches = max;
@@ -69,7 +77,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the logger factory.
     /// </summary>
-    public TransportRClientBuilder WithLoggerFactory(ILoggerFactory loggerFactory)
+    public TransportRClientBuilder<T> WithLoggerFactory(ILoggerFactory loggerFactory)
     {
         _loggerFactory = loggerFactory;
         return this;
@@ -78,7 +86,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the batch serializer.
     /// </summary>
-    public TransportRClientBuilder WithSerializer(IBatchSerializer serializer)
+    public TransportRClientBuilder<T> WithSerializer(IBatchSerializer<T> serializer)
     {
         _serializer = serializer;
         return this;
@@ -87,7 +95,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the authentication token (static).
     /// </summary>
-    public TransportRClientBuilder WithAccessToken(string token)
+    public TransportRClientBuilder<T> WithAccessToken(string token)
     {
         _accessToken = token;
         return this;
@@ -96,7 +104,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Sets the authentication token provider (dynamic).
     /// </summary>
-    public TransportRClientBuilder WithTokenProvider(Func<Task<string>> provider)
+    public TransportRClientBuilder<T> WithTokenProvider(Func<Task<string>> provider)
     {
         _tokenProvider = provider;
         return this;
@@ -115,7 +123,7 @@ public class TransportRClientBuilder
     /// <summary>
     /// Builds the <see cref="SignalRDataClient{T}"/>.
     /// </summary>
-    public SignalRDataClient<T> Build<T>()
+    public SignalRDataClient<T> Build()
     {
         if (string.IsNullOrWhiteSpace(_url))
         {

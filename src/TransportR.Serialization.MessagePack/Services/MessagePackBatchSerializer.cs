@@ -4,7 +4,7 @@ using MessagePack.Resolvers;
 
 namespace TransportR.Serialization.MessagePack.Services;
 
-public class MessagePackBatchSerializer : IBatchSerializer
+public class MessagePackBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly MessagePackSerializerOptions _options;
 
@@ -22,13 +22,13 @@ public class MessagePackBatchSerializer : IBatchSerializer
             .WithCompression(MessagePackCompression.Lz4BlockArray);
     }
 
-    public async Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    public async Task SerializeBatchAsync(Stream destination, List<T> batch)
     {
         // Async serialization directly to the stream with compression
         await MessagePackSerializer.SerializeAsync(destination, batch, _options);
     }
 
-    public async Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
         return await MessagePackSerializer.DeserializeAsync<List<T>>(source, _options);
     }

@@ -12,8 +12,8 @@ public static class TransportRClientBuilderProtobufExtensions
     /// <param name="builder">The client builder.</param>
     /// <param name="compressionLevel">Zstd compression level (default -1).</param>
     /// <returns>The builder instance.</returns>
-    public static TransportRClientBuilder WithProtobufSerialization(this TransportRClientBuilder builder, int compressionLevel = -1)
+    public static TransportRClientBuilder<T> WithProtobufSerialization<T>(this TransportRClientBuilder<T> builder, int compressionLevel = -1)
     {
-        return builder.WithSerializer(new ProtobufBatchSerializer(compressionLevel));
+        return builder.WithSerializer(new ProtobufBatchSerializer<T>(compressionLevel));
     }
 }

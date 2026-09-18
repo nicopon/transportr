@@ -15,7 +15,7 @@ internal class SignalRTransferSignaling<T>
 {
     private readonly HubConnectionManager _connectionManager;
     private readonly SessionRegistry<T> _sessionRegistry;
-    private readonly ISessionContext _context;
+    private readonly ISessionContext<T> _context;
     private readonly ILogger _logger;
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
@@ -25,7 +25,7 @@ internal class SignalRTransferSignaling<T>
     public SignalRTransferSignaling(
         HubConnectionManager connectionManager,
         SessionRegistry<T> sessionRegistry,
-        ISessionContext context,
+        ISessionContext<T> context,
         ILogger logger,
         int defaultBatchSize,
         string dataUrl,

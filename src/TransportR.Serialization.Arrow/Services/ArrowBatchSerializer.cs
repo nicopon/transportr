@@ -42,8 +42,16 @@ namespace TransportR.Serialization.Arrow.Services;
 /// nothing here has to choose between a copy and losing that. Each batch returned is owned by the
 /// caller.
 /// </para>
+///
+/// <para>
+/// <b>This closes <see cref="IBatchSerializer{T}"/> over <see cref="RecordBatch"/> rather than
+/// carrying the item type per call.</b> It is the reason the interface is typed at all: this
+/// serializer cannot be generic, so on a per-call generic contract it could only refuse a wrong
+/// item type by throwing at the first batch, on a worker thread. Closed here, a client built on
+/// the wrong item type does not compile.
+/// </para>
 /// </remarks>
-public sealed class ArrowBatchSerializer : IBatchSerializer
+public sealed class ArrowBatchSerializer : IBatchSerializer<RecordBatch>
 {
     // One factory for the whole serializer: the interface requires implementations to be
     // thread-safe, and building a codec per chunk would allocate on the hot path.
@@ -71,9 +79,8 @@ public sealed class ArrowBatchSerializer : IBatchSerializer
         };
     }
 
-    public async Task SerializeBatchAsync<T>(Stream destination, List<T> batch)
+    public async Task SerializeBatchAsync(Stream destination, List<RecordBatch> batches)
     {
-        var batches = AsRecordBatches(batch);
         if (batches.Count == 0) return;
 
         // The schema comes off the first batch. A chunk holding batches of differing schemas
@@ -104,13 +111,8 @@ public sealed class ArrowBatchSerializer : IBatchSerializer
         }
     }
 
-    public async Task<List<T>?> DeserializeBatchAsync<T>(Stream source)
+    public async Task<List<RecordBatch>?> DeserializeBatchAsync(Stream source)
     {
-        if (typeof(T) != typeof(RecordBatch))
-            throw new NotSupportedException(
-                $"The Arrow serializer carries {nameof(RecordBatch)}, not {typeof(T).Name}. "
-              + "Build the client with a serializer that matches the item type.");
-
         var batches = new List<RecordBatch>();
         var probe = new ArrowStreamTerminationProbe(source);
         var reader = new ArrowStreamReader(probe, _allocator, _codecs, leaveOpen: true);
@@ -134,16 +136,7 @@ public sealed class ArrowBatchSerializer : IBatchSerializer
         // would mean the same thing but costs a caller an allocation to discover it.
         if (batches.Count == 0) return null;
 
-        return (List<T>)(object)batches;
-    }
-
-    private static List<RecordBatch> AsRecordBatches<T>(List<T> batch)
-    {
-        if (batch is List<RecordBatch> already) return already;
-
-        throw new NotSupportedException(
-            $"The Arrow serializer carries {nameof(RecordBatch)}, not {typeof(T).Name}. "
-          + "Build the client with a serializer that matches the item type.");
+        return batches;
     }
 
     /// <summary>

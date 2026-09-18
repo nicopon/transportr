@@ -21,11 +21,11 @@ internal class ReceiverState<T>
 
     private readonly ChannelWriter<T> _writer;
     private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body, int Count)> _buffer;
-    private readonly BatchProtocol _protocol;
+    private readonly BatchProtocol<T> _protocol;
 
     public int NextExpectedBatchId { get; private set; } = 0;
 
-    public ReceiverState(ChannelWriter<T> writer, BatchProtocol protocol, int startBatchId = 0)
+    public ReceiverState(ChannelWriter<T> writer, BatchProtocol<T> protocol, int startBatchId = 0)
     {
         _writer = writer;
         _buffer = [];
@@ -89,7 +89,7 @@ internal class ReceiverState<T>
 
     private async Task DeserializeAndWrite(ReadOnlyMemory<byte> compressedBody, int count)
     {
-         var items = await _protocol.ReadBatchBodyFromMemoryAsync<T>(compressedBody, CancellationToken.None);
+         var items = await _protocol.ReadBatchBodyFromMemoryAsync(compressedBody, CancellationToken.None);
 
         if (items != null)
         {

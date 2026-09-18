@@ -89,7 +89,7 @@ else
 }
 
 // Single Client
-var clientBuilder = new TransportRClientBuilder()
+var clientBuilder = new TransportRClientBuilder<Order>()
     .WithUrl(hubBaseUrl)
     .WithBatchSize(batchSize)
     .WithBatchTimeout(batchTimeoutMs)
@@ -144,7 +144,7 @@ else if (!string.IsNullOrEmpty(senderOptions.AccessToken))
     clientBuilder.WithAccessToken(senderOptions.AccessToken);
 }
 
-var broker = clientBuilder.Build<Order>();
+var broker = clientBuilder.Build();
 
 try
 {

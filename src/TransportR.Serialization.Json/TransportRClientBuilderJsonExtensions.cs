@@ -13,8 +13,8 @@ public static class TransportRClientBuilderJsonExtensions
     /// <param name="options">Optional custom JsonSerializerOptions.</param>
     /// <param name="compressionLevel">Zstd compression level (default -1).</param>
     /// <returns>The builder instance.</returns>
-    public static TransportRClientBuilder WithJsonSerialization(this TransportRClientBuilder builder, JsonSerializerOptions? options = null, int compressionLevel = -1)
+    public static TransportRClientBuilder<T> WithJsonSerialization<T>(this TransportRClientBuilder<T> builder, JsonSerializerOptions? options = null, int compressionLevel = -1)
     {
-        return builder.WithSerializer(new JsonBatchSerializer(options, compressionLevel));
+        return builder.WithSerializer(new JsonBatchSerializer<T>(options, compressionLevel));
     }
 }
