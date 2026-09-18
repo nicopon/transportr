@@ -29,7 +29,7 @@ Builds the entire solution in Release mode.
 
 ### `init.sh`
 
-Downloads Toxiproxy and generates the test data.
+Downloads Toxiproxy, reports where Redis will come from, and generates the test data.
 
 ```bash
 # Default: 2M items
@@ -46,6 +46,12 @@ Output: `data/orders.bin`
 
 It exits non-zero as soon as something it attempted fails, which is what makes
 `test-all.sh` able to judge it. A failed download leaves no half-written binary behind.
+
+It does **not** provision Redis. Only `linux-amd64` has a static build to fetch; elsewhere
+it reports which route `ha-redis` will take, and that scenario resolves Redis at run time —
+a native `redis-server` when the machine has one, a `redis:7-alpine` container otherwise.
+Override the image with `REDIS_IMAGE`. With neither, `ha-redis` fails at startup rather than
+being skipped.
 
 ### `run-benchmark.sh`
 
