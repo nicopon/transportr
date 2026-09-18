@@ -56,9 +56,10 @@ using TransportR.Client.SignalR;
 using TransportR.Serialization.MessagePack;
 
 // Connect to hub
-var sender = new SignalRDataClient<Order>(
-    hubBaseUrl: "http://localhost:5252",
-    serializer: new MessagePackBatchSerializer());
+var sender = new TransportRClientBuilder<Order>()
+    .WithUrl("http://localhost:5252")
+    .WithMessagePackSerialization()
+    .Build();
 
 await sender.ConnectAsync();
 
@@ -79,9 +80,10 @@ await transfer.CompleteAsync();
 using TransportR.Client.SignalR;
 using TransportR.Serialization.MessagePack;
 
-var receiver = new SignalRDataClient<Order>(
-    hubBaseUrl: "http://localhost:5252",
-    serializer: new MessagePackBatchSerializer());
+var receiver = new TransportRClientBuilder<Order>()
+    .WithUrl("http://localhost:5252")
+    .WithMessagePackSerialization()
+    .Build();
 
 receiver.OnTransferStarted += async transfer =>
 {
