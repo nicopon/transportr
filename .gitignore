@@ -31,5 +31,8 @@ tools/**
 x64/
 x86/
 
-# Working notes — unversioned by design (see .notes/README.md)
-.notes/
+# Working notes and sibling checkouts, both symlinks out of this repository.
+# No trailing slash: a pattern ending in `/` matches a directory only, so `.notes/`
+# left the symlink reported as an untracked file.
+.notes
+experiments
