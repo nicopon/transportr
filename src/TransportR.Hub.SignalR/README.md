@@ -53,7 +53,6 @@ TransportR.Hub.SignalR/
 │   └── ConnectionBridge.cs         # Stream bridge manager
 ├── Services/
 │   ├── BridgeCleanupService.cs     # Background cleanup
-│   ├── ClientManager.cs            # Legacy client tracker
 │   ├── DevIdentityProvider.cs      # Dev mode identity
 │   ├── InMemoryStateStore.cs       # Default state store
 │   ├── JwtIdentityProvider.cs      # JWT identity extraction

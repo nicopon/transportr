@@ -20,7 +20,6 @@ TransportR/
 │   ├── ITransportRServer.cs   # Server interface
 │   ├── ICommandClient.cs      # Client callback interface
 │   ├── ICommandHub.cs         # Hub methods interface
-│   ├── IClientManager.cs      # Client registry abstraction
 │   ├── ITransferManager.cs    # Transfer lifecycle abstraction
 │   └── IHubProgressMonitor.cs  # Hub-side progress monitoring interface
 ├── Models/
@@ -63,11 +62,10 @@ public interface IDataReceiver<T> : IDataClient
 }
 ```
 
-### IClientManager / ITransferManager (NEW)
+### ITransferManager
 
 ```csharp
 // For unit testing hub components
-public interface IClientManager { ... }
 public interface ITransferManager { ... }
 ```
 
