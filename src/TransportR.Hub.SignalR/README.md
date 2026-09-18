@@ -67,10 +67,8 @@ TransportR.Hub.SignalR/
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Register serializer (REQUIRED)
-builder.Services.AddSingleton<IBatchSerializer, MessagePackBatchSerializer>();
-
-// 2. Add TransportR services
+// The hub forwards opaque chunks and never deserializes a payload, so it registers no
+// serializer: that is a client-side decision between the two ends of a transfer.
 builder.Services.AddDataHub();
 
 // For HA deployment (Redis + Affinity):
