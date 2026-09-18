@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
+using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -122,10 +124,80 @@ public class SignalRIntegrationTests
         Assert.Contains("not reachable", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    private SignalRDataClient<string> CreateClient(HttpMessageHandler handler, string url, string logPrefix)
+    [Fact]
+    public async Task Heartbeat_ReportsWhetherTheHubStillKnowsTheConnection()
+    {
+        // 1. Start Server
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        var handler = server.CreateHandler();
+
+        // A raw connection: this exercises the hub method, not the client that drives it.
+        await using var connection = new HubConnectionBuilder()
+            .WithUrl("http://localhost/hub/command", o => o.HttpMessageHandlerFactory = _ => handler)
+            .Build();
+        await connection.StartAsync();
+
+        var clientId = Guid.NewGuid();
+        await connection.InvokeAsync(nameof(ICommandHub.Connect), clientId, new[] { "senders" });
+
+        // 2. Registered: the hub knows this connection.
+        Assert.True(await connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat)));
+
+        // 3. Drop the registration the way an expiry would - the connection stays up.
+        var store = host.Services.GetRequiredService<IStateStore>();
+        await store.DeleteClientAsync(clientId);
+
+        // 4. Connected but unknown. This is what discovery sees, and why the answer has to carry
+        //    more than a keep-alive: the client must know to register again.
+        Assert.False(await connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat)));
+    }
+
+    [Fact]
+    public async Task PresenceHeartbeat_ReRegistersAfterTheRegistrationIsLost()
+    {
+        // 1. Start Server. A short presence interval so the test does not wait a minute.
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        var handler = server.CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(
+            handler, "http://localhost", "receiver",
+            o => o.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(300));
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+        await Task.Delay(500);
+
+        Assert.Contains(await sender.GetReceiversAsync(), c => c.ClientId == receiver.ClientId);
+
+        // 2. Lose the receiver's registration while it stays connected - a hub restart, or an
+        //    eviction past the grace period.
+        var store = host.Services.GetRequiredService<IStateStore>();
+        await store.DeleteClientAsync(receiver.ClientId);
+        Assert.DoesNotContain(await sender.GetReceiversAsync(), c => c.ClientId == receiver.ClientId);
+
+        // 3. The presence heartbeat notices and registers again, with no transfer in flight and
+        //    nothing else prompting it.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        List<ClientInfo> receivers;
+        do
+        {
+            await Task.Delay(200);
+            receivers = await sender.GetReceiversAsync();
+        }
+        while (!receivers.Any(c => c.ClientId == receiver.ClientId) && DateTime.UtcNow < deadline);
+
+        Assert.Contains(receivers, c => c.ClientId == receiver.ClientId);
+    }
+
+    private SignalRDataClient<string> CreateClient(
+        HttpMessageHandler handler, string url, string logPrefix, Action<ClientOptions>? configure = null)
     {
         // Custom Connection Manager that uses TestServer's HttpMessageHandler
         var options = new ClientOptions();
+        configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
         
         // We need to bypass the standard HubConnectionBuilder.WithUrl and inject the handler

@@ -20,6 +20,7 @@ internal class SignalRTransferSignaling<T>
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
     private readonly Func<Receive<T>, Task>? _onTransferStarted;
+    private readonly Func<string, Task>? _onReconnected;
 
     public SignalRTransferSignaling(
         HubConnectionManager connectionManager,
@@ -28,8 +29,10 @@ internal class SignalRTransferSignaling<T>
         ILogger logger,
         int defaultBatchSize,
         string dataUrl,
-        Func<Receive<T>, Task>? onTransferStarted)
+        Func<Receive<T>, Task>? onTransferStarted,
+        Func<string, Task>? onReconnected = null)
     {
+        _onReconnected = onReconnected;
         _connectionManager = connectionManager;
         _sessionRegistry = sessionRegistry;
         _context = context;
@@ -94,8 +97,15 @@ internal class SignalRTransferSignaling<T>
                     _logger.LogError(ex, "Failed to trigger reconnect for session {TransferId}", session.TransferId);
                 }
             }
-            
-            await Task.CompletedTask;
+
+            // The registration still points at the old connection id, so the client is connected
+            // and invisible to discovery until it registers again. Registered here rather than in
+            // the client because this callback is re-applied when the connection is rebuilt, which
+            // an affinity redirect does.
+            if (_onReconnected != null)
+            {
+                await _onReconnected(connectionId ?? string.Empty);
+            }
         };
     }
 

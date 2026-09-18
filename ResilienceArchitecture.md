@@ -97,9 +97,35 @@ break a transfer that was about to resume. `OnDisconnectedAsync` instead stamps
     dropped registration is kept before eviction. It is the window in which a reconnecting client
     can claim its registration back.
 -   **`ConnectedTtlSeconds`** (default `3600 s`) is a backstop for registrations orphaned by a hub
-    that died without running `OnDisconnectedAsync`. Any hub call from that client pushes it back,
-    so it is not an idle timer. It applies to stores with server-side expiry (Redis); the in-memory
-    store keeps connected registrations for the lifetime of the process.
+    that died without running `OnDisconnectedAsync`. It applies to stores with server-side expiry
+    (Redis); the in-memory store keeps connected registrations for the lifetime of the process.
+-   **`Heartbeat()`** is what refreshes it. The client invokes it every
+    `PresenceHeartbeatInterval` (default `60 s`) for as long as it is connected, whether or not a
+    transfer is running, so an idle client never expires. Keep the interval well below
+    `ConnectedTtlSeconds`.
+
+> **The per-transfer heartbeats cannot do this job.** `SenderHeartbeat` / `ReceiverHeartbeat` live
+> on `DataSession`, which exists only while a transfer does, and they report transfer statistics
+> into `TransferState` — they never touch the registration. Presence is a property of the client,
+> not of a transfer.
+
+### 1c. Losing a Registration While Connected
+
+Three things leave a client connected but unknown to the hub: a hub restart, a registration evicted
+past its grace period, and a **SignalR reconnection**, which gives the client a new connection id
+while the stored registration still names the old one. In all three, discovery returns nothing for
+that client and nobody can open a transfer against it — while its own in-flight transfers keep
+working, because resumption is entirely data-plane.
+
+Recovery is the client's, and has two paths:
+
+-   `Heartbeat()` returns **`false`** when the hub holds no registration for the calling
+    connection. The client answers by invoking `Connect` again.
+-   On `Reconnected`, the client re-registers immediately rather than waiting up to a full
+    heartbeat interval. This is wired through the connection-rebuild callback, so it survives an
+    affinity redirect rebuilding the `HubConnection`.
+
+A `chaos` run shows this firing about ten times over two million rows.
 
 Without this policy the two implementations fail in opposite directions — an in-memory registration
 lives forever, and a Redis one expires on a fixed timer whether or not the client is still there.

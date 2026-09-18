@@ -256,6 +256,23 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         }
     }
     
+    public async Task<bool> Heartbeat()
+    {
+        // Resolving the client by its live connection is itself the keep-alive: a store with
+        // server-side expiry pushes the registration's TTL back on this lookup.
+        var client = await GetClientByConnectionAsync(Context.ConnectionId);
+
+        if (client == null)
+        {
+            _logger.LogInformation(
+                "Heartbeat from unregistered connection {ConnectionId}. Asking the client to register again.",
+                Context.ConnectionId);
+            return false;
+        }
+
+        return true;
+    }
+
     public async Task SenderHeartbeat(string transferId, long itemsSent, long acksReceived)
     {
         await _transferManager.UpdateSenderStatsAsync(transferId, itemsSent, acksReceived);

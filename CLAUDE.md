@@ -111,6 +111,11 @@ marked `DisconnectedAtUtc` rather than deleted, and evicted after `DisconnectedG
 (`ClientRegistryConfiguration`). `GetReceivers` exposes the marker and never filters on it: a caller
 finding nobody fails outright, whereas one trying a dead client retries.
 
+Presence is kept alive by `ICommandHub.Heartbeat()`, invoked every `PresenceHeartbeatInterval`
+independently of any transfer, and returning `false` when the hub no longer knows the connection so
+the client re-registers. The per-transfer `SenderHeartbeat`/`ReceiverHeartbeat` cannot serve this:
+they only exist while a transfer does and they feed `TransferState`, not the registration.
+
 ### Sender/receiver client model
 
 `SignalRDataClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`

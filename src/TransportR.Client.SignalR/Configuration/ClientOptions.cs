@@ -26,9 +26,30 @@ public class ClientOptions
     public int StreamBufferSize { get; set; } = 512 * 1024;
 
     /// <summary>
-    /// Interval for heartbeat reporting. Default: 1 second.
+    /// Interval for per-transfer heartbeat reporting. Default: 1 second.
     /// </summary>
+    /// <remarks>
+    /// This reports transfer statistics and only runs while a transfer does. It does not keep the
+    /// client's registration alive — see <see cref="PresenceHeartbeatInterval"/>.
+    /// </remarks>
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Interval at which the client tells the hub it is still there, independently of any
+    /// transfer. Default: 60 seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what keeps a registration alive while the client sits idle between transfers, and
+    /// what detects that the hub no longer knows this connection — after a hub restart, an evicted
+    /// registration, or a SignalR reconnection that produced a new connection id. In all three the
+    /// client is connected but invisible to discovery until it registers again.
+    /// </para>
+    /// <para>
+    /// Keep it comfortably below the hub's <c>ConnectedTtlSeconds</c>, which is what it refreshes.
+    /// </para>
+    /// </remarks>
+    public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
     /// Debounce duration for reconnection attempts. Default: 2 seconds.

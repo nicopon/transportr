@@ -71,13 +71,22 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             logger,
             defaultBatchSize,
             dataUrl,
-            (t) => OnTransferStarted?.Invoke(t) ?? Task.CompletedTask
+            (t) => OnTransferStarted?.Invoke(t) ?? Task.CompletedTask,
+            async _ =>
+            {
+                // A reconnection gives this client a new connection id while the hub's registration
+                // still points at the old one. The presence heartbeat would catch it within one
+                // interval; doing it here closes the window immediately.
+                if (_registered) await ReRegisterAsync("SignalR reconnection");
+            }
         );
         signaling.Initialize();
     }
 
 
     private IEnumerable<string>? _lastConnectGroups;
+    private bool _registered;
+    private Timer? _presenceTimer;
 
     public async Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)
     {
@@ -89,12 +98,74 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             ClientId, groupsList != null ? string.Join(", ", groupsList) : "none");
 
         await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, cancellationToken);
+        _registered = true;
+
+        StartPresenceHeartbeat();
+    }
+
+    /// <summary>
+    /// Tells the hub this client is still there, whether or not a transfer is running, and
+    /// re-registers if the hub says it no longer knows this connection.
+    /// </summary>
+    /// <remarks>
+    /// The per-transfer heartbeat cannot do this: it only exists while a transfer does, and it
+    /// reports transfer statistics rather than the liveness of the client itself.
+    /// </remarks>
+    private void StartPresenceHeartbeat()
+    {
+        if (_presenceTimer != null) return;
+
+        var interval = (int)_options.PresenceHeartbeatInterval.TotalMilliseconds;
+        _presenceTimer = new Timer(async _ => await SendPresenceHeartbeatAsync(), null, interval, interval);
+    }
+
+    private async Task SendPresenceHeartbeatAsync()
+    {
+        try
+        {
+            if (_connectionManager.Connection.State != HubConnectionState.Connected) return;
+
+            var known = await _connectionManager.Connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat));
+            if (!known)
+            {
+                await ReRegisterAsync("the hub no longer knows this connection");
+            }
+        }
+        catch (Exception ex)
+        {
+            // A failed heartbeat is not fatal: the next tick retries, and a dropped connection is
+            // SignalR's problem, not this timer's.
+            _logger.LogDebug(ex, "Presence heartbeat failed for {ClientId}", ClientId);
+        }
+    }
+
+    private async Task ReRegisterAsync(string reason)
+    {
+        try
+        {
+            var groupsList = _lastConnectGroups?.ToList();
+            _logger.LogInformation("Re-registering Client {ClientId} ({Reason}, Groups=[{Groups}])",
+                ClientId, reason, groupsList != null ? string.Join(", ", groupsList) : "none");
+
+            await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to re-register Client {ClientId}", ClientId);
+        }
     }
 
     public async Task DisconnectAsync()
     {
         _logger.LogInformation("Disconnecting Client {ClientId}...", ClientId);
-        
+
+        _registered = false;
+        if (_presenceTimer != null)
+        {
+            await _presenceTimer.DisposeAsync();
+            _presenceTimer = null;
+        }
+
         // Stop all sessions
         await _sessionRegistry.DisposeAsync();
         
