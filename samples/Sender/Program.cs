@@ -95,6 +95,16 @@ var clientBuilder = new TransportRClientBuilder()
     .WithBatchTimeout(batchTimeoutMs)
     .WithLoggerFactory(loggerFactory);
 
+if (senderOptions.MaxInFlightBatches is { } maxInFlight)
+{
+    clientBuilder.WithMaxInFlightBatches(maxInFlight);
+    logger.LogInformation("Send window: {Max} batches in flight", maxInFlight);
+}
+else
+{
+    logger.LogInformation("Send window: unbounded");
+}
+
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 

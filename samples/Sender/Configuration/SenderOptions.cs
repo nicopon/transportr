@@ -6,6 +6,12 @@ public class SenderOptions
     public string HubUrl { get; set; } = "http://localhost:5252/hub/command";
     public int BatchSize { get; set; } = 5000;
     public int BatchTimeoutMs { get; set; } = 500;
+
+    /// <summary>
+    /// Caps how many batches may be in flight before the producer is made to wait.
+    /// Null (the default) keeps the historical unbounded behaviour.
+    /// </summary>
+    public int? MaxInFlightBatches { get; set; }
     public bool EnableAuth { get; set; } = false;
     public string OutputDirectory { get; set; } = "output";
     public string Group { get; set; } = "senders";

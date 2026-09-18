@@ -138,6 +138,10 @@ export Sender__HubUrl="$HUB_URL"
 export Sender__EnableAuth="${ENABLE_AUTH:-false}"
 export Sender__BatchSize="$BATCH_SIZE"
 export Sender__BatchFlushIntervalMs="$BATCH_FLUSH_INTERVAL_MS"
+# Only exported when a scenario asks for it; unset means the historical unbounded sender.
+if [ -n "$MAX_IN_FLIGHT_BATCHES" ]; then
+    export Sender__MaxInFlightBatches="$MAX_IN_FLIGHT_BATCHES"
+fi
 export Sender__SourceFilePath="$PROJECT_ROOT/data/orders.bin"
 export Sender__Group="senders"
 export Sender__OutputDirectory="$OUTPUT_DIR"
