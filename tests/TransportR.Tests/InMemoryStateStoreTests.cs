@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using TransportR.Configuration;
 using TransportR.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -180,5 +182,72 @@ public class InMemoryStateStoreTests
             null,
             DateTime.UtcNow.AddHours(1),
             DateTime.UtcNow);
+    }
+
+    // ---- Registration lifetime ----
+
+    private static InMemoryStateStore StoreWithGrace(int graceSeconds) =>
+        new(Options.Create(new ClientRegistryConfiguration { DisconnectedGraceSeconds = graceSeconds }));
+
+    private static ClientRegistration Registration(Guid clientId, string connectionId, DateTime? disconnectedAt = null) =>
+        new(clientId, connectionId, ["senders"], null, null, DateTime.UtcNow, disconnectedAt);
+
+    [Fact]
+    public async Task SaveClient_OnReconnect_DropsTheStaleConnectionIndexEntry()
+    {
+        // Arrange: same client, new connection - what a reconnect looks like.
+        var clientId = Guid.NewGuid();
+        await _store.SaveClientAsync(Registration(clientId, "conn-old"));
+
+        // Act
+        await _store.SaveClientAsync(Registration(clientId, "conn-new"));
+
+        // Assert: the old connection id no longer resolves, the new one does.
+        Assert.Null(await _store.GetClientByConnectionIdAsync("conn-old"));
+        var current = await _store.GetClientByConnectionIdAsync("conn-new");
+        Assert.Equal(clientId, current!.ClientId);
+    }
+
+    [Fact]
+    public async Task GetClient_WhileWithinGrace_StillReturnsADisconnectedClient()
+    {
+        // Arrange: dropped a moment ago. A reconnecting client must find its registration.
+        var store = StoreWithGrace(300);
+        var clientId = Guid.NewGuid();
+        await store.SaveClientAsync(Registration(clientId, "conn-1", DateTime.UtcNow));
+
+        // Assert
+        Assert.NotNull(await store.GetClientAsync(clientId));
+        Assert.Single(await store.GetAllClientsAsync());
+    }
+
+    [Fact]
+    public async Task GetClient_PastGrace_EvictsTheRegistration()
+    {
+        // Arrange: dropped longer ago than the grace period allows.
+        var store = StoreWithGrace(60);
+        var clientId = Guid.NewGuid();
+        await store.SaveClientAsync(
+            Registration(clientId, "conn-1", DateTime.UtcNow.AddSeconds(-120)));
+
+        // Assert: gone from every lookup, not just filtered out of one.
+        Assert.Null(await store.GetClientAsync(clientId));
+        Assert.Null(await store.GetClientByConnectionIdAsync("conn-1"));
+        Assert.Empty(await store.GetAllClientsAsync());
+    }
+
+    [Fact]
+    public async Task GetAllClients_NeverEvictsAConnectedClient()
+    {
+        // Arrange: connected, registered long ago, idle ever since. Nothing should remove it -
+        // a caller that finds nobody fails outright, whereas one trying a dead client retries.
+        var store = StoreWithGrace(1);
+        var clientId = Guid.NewGuid();
+        await store.SaveClientAsync(
+            new ClientRegistration(clientId, "conn-1", ["senders"], null, null, DateTime.UtcNow.AddHours(-9)));
+
+        // Assert
+        Assert.Single(await store.GetAllClientsAsync());
+        Assert.NotNull(await store.GetClientAsync(clientId));
     }
 }

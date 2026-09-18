@@ -106,6 +106,11 @@ client registrations and `TransferSession`s go through it, with three implementa
 `ProxyStateStore` in `TransportR.TestProxy` (the reference HA test harness, not a product feature).
 A new state-carrying concept for HA needs a home in this interface, not a hub-local field.
 
+Client registrations outlive their connection on purpose (a reconnect reclaims them), so they are
+marked `DisconnectedAtUtc` rather than deleted, and evicted after `DisconnectedGraceSeconds`
+(`ClientRegistryConfiguration`). `GetReceivers` exposes the marker and never filters on it: a caller
+finding nobody fails outright, whereas one trying a dead client retries.
+
 ### Sender/receiver client model
 
 `SignalRDataClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`

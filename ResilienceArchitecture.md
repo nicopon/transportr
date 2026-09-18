@@ -83,6 +83,27 @@ sequenceDiagram
 Both Sender and Receiver rely on standard `IOException` or `HttpRequestException` when reading/writing to the stream.
 The Hub **DOES NOT** actively notify clients of disconnections via SignalR (to avoid race conditions).
 
+### 1b. Registration Lifetime (Hub-Side)
+
+A client registration is **not deleted** when its control connection drops: on an unstable network
+the same client usually reconnects within seconds under the same `ClientId`, and removing it would
+break a transfer that was about to resume. `OnDisconnectedAsync` instead stamps
+`DisconnectedAtUtc`, which `GetReceivers` exposes through `ClientInfo`.
+
+-   **Nothing filters on it.** A caller that finds nobody fails outright, whereas a caller that
+    tries a dead client simply retries, so hiding a briefly silent client is the worse error.
+    Callers with more than one candidate should prefer those with no value set.
+-   **`DisconnectedGraceSeconds`** (default `300 s`, matching the Bridge Timeout) is how long a
+    dropped registration is kept before eviction. It is the window in which a reconnecting client
+    can claim its registration back.
+-   **`ConnectedTtlSeconds`** (default `3600 s`) is a backstop for registrations orphaned by a hub
+    that died without running `OnDisconnectedAsync`. Any hub call from that client pushes it back,
+    so it is not an idle timer. It applies to stores with server-side expiry (Redis); the in-memory
+    store keeps connected registrations for the lifetime of the process.
+
+Without this policy the two implementations fail in opposite directions — an in-memory registration
+lives forever, and a Redis one expires on a fixed timer whether or not the client is still there.
+
 ### 2. Stream Handshake (Reachability & Resume)
 
 Instead of querying the Hub for a "Checkpoint", the Sender asks the Receiver directly **through the new data stream**:

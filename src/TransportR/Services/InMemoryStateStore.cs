@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Options;
+using TransportR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;
 
@@ -14,24 +16,61 @@ public class InMemoryStateStore : IStateStore
     private readonly ConcurrentDictionary<string, Guid> _connectionIndex = new(); // connectionId -> clientId
     private readonly ConcurrentDictionary<string, TransferSession> _sessions = new(); 
 
+    private readonly TimeSpan _disconnectedGrace;
+
+    public InMemoryStateStore(IOptions<ClientRegistryConfiguration>? config = null)
+    {
+        var settings = config?.Value ?? new ClientRegistryConfiguration();
+        _disconnectedGrace = TimeSpan.FromSeconds(settings.DisconnectedGraceSeconds);
+    }
+
     // ========== Clients ==========
 
     public Task SaveClientAsync(ClientRegistration client)
     {
+        // A reconnecting client comes back under a new ConnectionId. Drop the index entry pointing
+        // at the old one, or it accumulates for the lifetime of the process and keeps resolving to
+        // a connection that is gone.
+        if (_clients.TryGetValue(client.ClientId, out var previous) &&
+            previous.ConnectionId != client.ConnectionId)
+        {
+            _connectionIndex.TryRemove(previous.ConnectionId, out _);
+        }
+
         _clients[client.ClientId] = client;
         _connectionIndex[client.ConnectionId] = client.ClientId;
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Evicts a registration whose connection dropped more than the grace period ago, the way
+    /// sessions are expired lazily below. Without this a registration lives for the lifetime of
+    /// the process: nothing calls <see cref="DeleteClientAsync"/> on a disconnect, by design.
+    /// </summary>
+    private bool IsExpired(ClientRegistration client)
+    {
+        if (client.DisconnectedAtUtc is not { } disconnectedAt) return false;
+        if (DateTime.UtcNow - disconnectedAt <= _disconnectedGrace) return false;
+
+        _clients.TryRemove(client.ClientId, out _);
+        _connectionIndex.TryRemove(client.ConnectionId, out _);
+        return true;
+    }
+
     public Task<ClientRegistration?> GetClientAsync(Guid clientId)
     {
-        return Task.FromResult(_clients.TryGetValue(clientId, out var client) ? client : null);
+        if (_clients.TryGetValue(clientId, out var client) && !IsExpired(client))
+        {
+            return Task.FromResult<ClientRegistration?>(client);
+        }
+        return Task.FromResult<ClientRegistration?>(null);
     }
 
     public Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)
     {
         if (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
-            _clients.TryGetValue(clientId, out var client))
+            _clients.TryGetValue(clientId, out var client) &&
+            !IsExpired(client))
         {
             return Task.FromResult<ClientRegistration?>(client);
         }
@@ -40,7 +79,8 @@ public class InMemoryStateStore : IStateStore
 
     public Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync()
     {
-        return Task.FromResult<IReadOnlyList<ClientRegistration>>(_clients.Values.ToList());
+        var live = _clients.Values.Where(c => !IsExpired(c)).ToList();
+        return Task.FromResult<IReadOnlyList<ClientRegistration>>(live);
     }
 
     public Task DeleteClientAsync(Guid clientId)

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
+using TransportR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;
 
@@ -18,15 +20,30 @@ public class RedisStateStore : IStateStore
 
     // Keys and TTLs
     private const string KeyPrefix = "transportr:";
-    private static readonly TimeSpan ClientTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan CheckpointTtl = TimeSpan.FromHours(24);
 
-    public RedisStateStore(IConnectionMultiplexer redis, ILogger<RedisStateStore> logger)
+    // A connected registration and a dropped one are not kept for the same reason, so they do not
+    // get the same TTL. The old fixed 5 minutes applied to both, which meant a client that was
+    // simply idle between transfers vanished from discovery while still connected.
+    private readonly TimeSpan _connectedTtl;
+    private readonly TimeSpan _disconnectedGrace;
+
+    public RedisStateStore(
+        IConnectionMultiplexer redis,
+        ILogger<RedisStateStore> logger,
+        IOptions<ClientRegistryConfiguration>? config = null)
     {
         _redis = redis;
         _logger = logger;
         _db = _redis.GetDatabase();
+
+        var settings = config?.Value ?? new ClientRegistryConfiguration();
+        _connectedTtl = TimeSpan.FromSeconds(settings.ConnectedTtlSeconds);
+        _disconnectedGrace = TimeSpan.FromSeconds(settings.DisconnectedGraceSeconds);
     }
+
+    private TimeSpan TtlFor(ClientRegistration client) =>
+        client.DisconnectedAtUtc.HasValue ? _disconnectedGrace : _connectedTtl;
 
     // ========== Transfers (HA Sessions) ==========
 
@@ -91,11 +108,12 @@ public class RedisStateStore : IStateStore
         var key = $"{KeyPrefix}clients:{client.ClientId}";
         var connKey = $"{KeyPrefix}conn:{client.ConnectionId}";
         var json = JsonSerializer.Serialize(client);
-        
-        await _db.StringSetAsync(key, json, ClientTtl);
+        var ttl = TtlFor(client);
+
+        await _db.StringSetAsync(key, json, ttl);
         
         // Secondary index: connectionId -> clientId (for O(1) lookup)
-        await _db.StringSetAsync(connKey, client.ClientId.ToString(), ClientTtl);
+        await _db.StringSetAsync(connKey, client.ClientId.ToString(), ttl);
         
         // Also add to a set for GetAllClients enumeration
         await _db.SetAddAsync($"{KeyPrefix}client_ids", client.ClientId.ToString());
@@ -121,7 +139,20 @@ public class RedisStateStore : IStateStore
         if (!Guid.TryParse(clientIdStr.ToString(), out var clientId)) return null;
         
         // 2. Get client by ID
-        return await GetClientAsync(clientId);
+        var client = await GetClientAsync(clientId);
+        if (client == null) return null;
+
+        // 3. The hub resolves a client by connection on every call it makes, so reaching here is
+        //    proof the client is still talking to us. Push the expiry back: ConnectedTtlSeconds is
+        //    a backstop for registrations orphaned by a hub that died, not an idle timer.
+        //    A dropped registration is deliberately left to run out its grace period.
+        if (!client.DisconnectedAtUtc.HasValue)
+        {
+            await _db.KeyExpireAsync($"{KeyPrefix}clients:{clientId}", _connectedTtl);
+            await _db.KeyExpireAsync(connKey, _connectedTtl);
+        }
+
+        return client;
     }
 
     public async Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync()

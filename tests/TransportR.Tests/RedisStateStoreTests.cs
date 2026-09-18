@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using TransportR.Configuration;
 using StackExchange.Redis;
 using Testcontainers.Redis;
 using TransportR.Interfaces;
@@ -196,5 +198,71 @@ public class RedisStateStoreTests : IAsyncLifetime
             null,
             DateTime.UtcNow.AddHours(1),
             DateTime.UtcNow);
+    }
+
+    // ---- Registration lifetime ----
+
+    private RedisStateStore StoreWith(int connectedTtlSeconds, int graceSeconds) =>
+        new(_multiplexer, _logger, Options.Create(new ClientRegistryConfiguration
+        {
+            ConnectedTtlSeconds = connectedTtlSeconds,
+            DisconnectedGraceSeconds = graceSeconds
+        }));
+
+    [DockerAvailableFact]
+    public async Task SaveClient_UsesTheConnectedTtl_WhenStillConnected()
+    {
+        // Arrange
+        var store = StoreWith(connectedTtlSeconds: 3600, graceSeconds: 60);
+        var clientId = Guid.NewGuid();
+
+        // Act
+        await store.SaveClientAsync(
+            new ClientRegistration(clientId, "conn-1", ["senders"], null, null, DateTime.UtcNow));
+
+        // Assert: a connected client must not be evicted on a short timer - idling between
+        // transfers is not the same as being gone.
+        var ttl = await _multiplexer.GetDatabase().KeyTimeToLiveAsync($"transportr:clients:{clientId}");
+        Assert.NotNull(ttl);
+        Assert.True(ttl > TimeSpan.FromMinutes(30), $"Expected the connected TTL, got {ttl}");
+    }
+
+    [DockerAvailableFact]
+    public async Task SaveClient_UsesTheGrace_OnceDisconnected()
+    {
+        // Arrange
+        var store = StoreWith(connectedTtlSeconds: 3600, graceSeconds: 60);
+        var clientId = Guid.NewGuid();
+
+        // Act: what OnDisconnectedAsync writes.
+        await store.SaveClientAsync(
+            new ClientRegistration(clientId, "conn-1", ["senders"], null, null, DateTime.UtcNow, DateTime.UtcNow));
+
+        // Assert: kept long enough for a reconnect to claim it back, then evicted by Redis.
+        var ttl = await _multiplexer.GetDatabase().KeyTimeToLiveAsync($"transportr:clients:{clientId}");
+        Assert.NotNull(ttl);
+        Assert.True(ttl <= TimeSpan.FromSeconds(60), $"Expected the grace TTL, got {ttl}");
+    }
+
+    [DockerAvailableFact]
+    public async Task GetClientByConnectionId_PushesTheExpiryBack_ForAConnectedClient()
+    {
+        // Arrange: a registration already close to expiring.
+        var store = StoreWith(connectedTtlSeconds: 3600, graceSeconds: 60);
+        var clientId = Guid.NewGuid();
+        await store.SaveClientAsync(
+            new ClientRegistration(clientId, "conn-1", ["senders"], null, null, DateTime.UtcNow));
+
+        var db = _multiplexer.GetDatabase();
+        await db.KeyExpireAsync($"transportr:clients:{clientId}", TimeSpan.FromSeconds(30));
+        await db.KeyExpireAsync("transportr:conn:conn-1", TimeSpan.FromSeconds(30));
+
+        // Act: the hub resolves the client by connection on every call it makes.
+        var found = await store.GetClientByConnectionIdAsync("conn-1");
+
+        // Assert
+        Assert.NotNull(found);
+        var ttl = await db.KeyTimeToLiveAsync($"transportr:clients:{clientId}");
+        Assert.True(ttl > TimeSpan.FromMinutes(30), $"Expected the expiry to be pushed back, got {ttl}");
     }
 }

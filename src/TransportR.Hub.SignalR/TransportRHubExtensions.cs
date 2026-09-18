@@ -86,6 +86,7 @@ public static class TransportRHubExtensions
         
         // Data plane configuration (bridge timeout)
         services.Configure<DataPlaneConfiguration>(_ => { });
+        services.Configure<ClientRegistryConfiguration>(_ => { });
         
         // HttpContextAccessor needed for affinity token extraction
         services.AddHttpContextAccessor();
