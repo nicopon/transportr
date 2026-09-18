@@ -47,10 +47,15 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         var client = await GetClientByConnectionAsync(Context.ConnectionId);
         if (client != null)
         {
-            // Do NOT delete the client on disconnect. In chaos/unstable networks, 
-            // the client might reconnect shortly with the same ClientId.
-            // Rely on StateStore TTL or BridgeCleanupService to remove stale state.
-            // await _stateStore.DeleteClientAsync(client.ClientId);
+            // Do NOT delete the client on disconnect. In chaos/unstable networks, the client
+            // usually reconnects within seconds under the same ClientId, and deleting the
+            // registration would break a transfer that was about to resume.
+            //
+            // But do not throw the signal away either: this is the only moment the hub knows for
+            // certain that a connection is gone, and discovery has nothing else to go on. Record
+            // it so GetReceivers can expose it; a fresh Connect writes a new registration with no
+            // marker, which clears it.
+            await _stateStore.SaveClientAsync(client with { DisconnectedAtUtc = DateTime.UtcNow });
         }
         
         _logger.LogInformation("Client disconnected: {ConnectionId}", Context.ConnectionId);
@@ -106,13 +111,13 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         // If no flow control service, return all other clients
         if (_flowControlService == null)
         {
-            return otherClients.Select(c => new ClientInfo { ClientId = c.ClientId, Groups = c.Groups }).ToList();
+            return otherClients.Select(ToClientInfo).ToList();
         }
         
         // Filter to only clients where ANY source group can send to ANY target group
         var authorizedReceivers = otherClients
             .Where(r => _flowControlService.CanSendTo(sourceClient.Groups, r.Groups))
-            .Select(c => new ClientInfo { ClientId = c.ClientId, Groups = c.Groups })
+            .Select(ToClientInfo)
             .ToList();
         
         _logger.LogDebug("GetReceivers: [{SourceGroups}] -> {Count} authorized receivers", 
@@ -209,22 +214,37 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private async Task ExecuteHandshakeAsync(string transferId, int batchSize, ClientRegistration sourceClient, ClientRegistration targetClient, int timeoutMs)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
-        try 
+        try
         {
-            await Clients.Client(targetClient.ConnectionId)
-                .InvokeAsync<bool>(nameof(ICommandClient.GetReadyToReceive), transferId, sourceClient.ClientId, cts.Token);
-            
+            try
+            {
+                await Clients.Client(targetClient.ConnectionId)
+                    .InvokeAsync<bool>(nameof(ICommandClient.GetReadyToReceive), transferId, sourceClient.ClientId, cts.Token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The usual cause is a registration that outlived its process: the client is still
+                // in the state store, but SignalR has no such connection any more. Left untranslated
+                // this escapes as a non-HubException and reaches the caller as "An unexpected error
+                // occurred invoking 'InitTransfer'", which says nothing and costs an hour to chase.
+                // Detail stays in the hub log; the client gets something it can act on.
+                _logger.LogWarning(ex, "Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}. Registration is likely stale.",
+                    targetClient.ClientId, targetClient.ConnectionId, transferId);
+                await _transferManager.UnregisterParticipantsAsync(transferId);
+                throw new HubException($"Target client {targetClient.ClientId} is not reachable.");
+            }
+
             try
             {
                 await Clients.Client(Context.ConnectionId)
                     .InvokeAsync<bool>(nameof(ICommandClient.GetReadyToSend), transferId, batchSize, targetClient.ClientId, cts.Token);
             }
-            catch(Exception ex)
+            catch(Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogWarning(ex, "Sender failed to ready for {TransferId}. Cancelling Receiver.", transferId);
                 await _transferManager.UnregisterParticipantsAsync(transferId);
                 await Clients.Client(targetClient.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
-                throw;
+                throw new HubException("Source client failed to prepare for the transfer.");
             }
         }
         catch(OperationCanceledException)
@@ -288,6 +308,17 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     }
 
     // ========== Helpers ==========
+
+    /// <summary>
+    /// Projects a registration onto what discovery is allowed to reveal: identity, groups, and
+    /// whether the control connection is currently up. Nothing about the hub itself.
+    /// </summary>
+    private static ClientInfo ToClientInfo(ClientRegistration client) => new()
+    {
+        ClientId = client.ClientId,
+        Groups = client.Groups,
+        DisconnectedAtUtc = client.DisconnectedAtUtc
+    };
 
     private async Task<ClientRegistration?> GetClientByConnectionAsync(string connectionId)
     {

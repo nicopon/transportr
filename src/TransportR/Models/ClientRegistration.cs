@@ -9,4 +9,5 @@ public record ClientRegistration(
     HashSet<string> Groups,
     string? AffinityToken,
     DateTime? TokenExpiry,
-    DateTime RegisteredAt);
+    DateTime RegisteredAt,
+    DateTime? DisconnectedAtUtc = null);

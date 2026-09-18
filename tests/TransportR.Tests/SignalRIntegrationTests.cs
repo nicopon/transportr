@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -58,6 +59,67 @@ public class SignalRIntegrationTests
         // Assert
         Assert.NotNull(sendSession);
         Assert.True(getReadyCalled, "Receiver OnTransferStarted should have been triggered");
+    }
+
+    [Fact]
+    public async Task GetReceivers_ShouldReportDisconnection_WithoutHidingTheClient()
+    {
+        // 1. Start Server
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        var handler = server.CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+        await Task.Delay(500);
+
+        // 2. While connected, the receiver carries no disconnection marker.
+        var whileUp = await sender.GetReceiversAsync();
+        var liveEntry = Assert.Single(whileUp, c => c.ClientId == receiver.ClientId);
+        Assert.Null(liveEntry.DisconnectedAtUtc);
+
+        // 3. Drop the receiver's control connection.
+        var receiverId = receiver.ClientId;
+        await receiver.DisposeAsync();
+        await Task.Delay(500);
+
+        // 4. The registration is still returned - deleting it would break a transfer that was
+        //    about to resume - but it now says when the connection went away.
+        var afterDrop = await sender.GetReceiversAsync();
+        var staleEntry = Assert.Single(afterDrop, c => c.ClientId == receiverId);
+        Assert.NotNull(staleEntry.DisconnectedAtUtc);
+    }
+
+    [Fact]
+    public async Task InitTransfer_AgainstStaleRegistration_ShouldFailWithAnActionableMessage()
+    {
+        // 1. Start Server
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        var handler = server.CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+        await Task.Delay(500);
+
+        var receiverId = receiver.ClientId;
+        await receiver.DisposeAsync();
+        await Task.Delay(500);
+
+        // 2. The registration outlived the connection, so the handshake invokes a connection that
+        //    no longer exists. SignalR always prefixes its generic sentence, but it appends a
+        //    HubException's own message after it - so an untranslated IOException here leaves the
+        //    caller with the prefix and nothing else.
+        var ex = await Assert.ThrowsAsync<HubException>(
+            () => sender.InitTransferAsync(receiverId, batchSize: 100));
+
+        Assert.Contains("not reachable", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private SignalRDataClient<string> CreateClient(HttpMessageHandler handler, string url, string logPrefix)
