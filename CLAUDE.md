@@ -150,16 +150,22 @@ stall from the hub). This is the *only* place the hub unilaterally kills a trans
 
 ### Backpressure
 
-Both ends are bounded and the two compose, entirely within the data plane — see "Backpressure" in
-`ResilienceArchitecture.md`. The sender's `MaxInFlightBatches` counts **batches** and its slot is
-taken *by the producer, before serialization* (moving it behind the serializer converts a managed
-backlog into an off-heap one); the receiver's `ReceiveBufferCapacity` counts **items and wire
-bytes**, whichever binds first, because an item count is not a bound when an item is an Arrow
-record batch and a byte budget is a clumsy one for small records. A full receive buffer parks the
-read loop, which withholds the ack that would reopen the sender's window — so the receiver's byte
-bound reaches the sender transitively, which is why the send window does not need a byte
-dimension of its own. A chunk larger than the whole byte budget is still admitted into an empty
-buffer: the bound must throttle, never stall.
+Both ends can be bounded, the two compose, and **both are `null` by default** — see
+"Backpressure" in `ResilienceArchitecture.md`. Opt-in is deliberate: the right figure depends on
+item size, which only the caller knows, so a default would be a guess nobody goes looking for.
+`Build()` warns when neither is set.
+
+The sender's `MaxInFlightBatches` counts **batches**, and its slot is taken *by the producer,
+before serialization* — moving it behind the serializer converts a managed backlog into an
+off-heap one. That placement is also why it cannot count bytes: the serialized size is not known
+yet. It does not need to, because the receiver's `ReceiveBufferCapacity` reaches it — a full
+receive buffer parks the read loop, which withholds the ack that reopens the send window.
+
+`ReceiveBufferCapacity` counts **items and wire bytes**, whichever binds first: an item count is
+not a bound when an item is an Arrow record batch, and a byte budget is a clumsy one for small
+records. A chunk larger than the whole byte budget is still admitted into an empty buffer — the
+bound must throttle, never stall. `null` means no bound; a `BufferCapacity` with neither
+dimension set is refused rather than treated as one.
 
 ### Auth
 

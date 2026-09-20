@@ -174,7 +174,11 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 | End | Option | Counts | Default |
 |---|---|---|---|
 | Sender | `ClientOptions.MaxInFlightBatches` | batches flushed but not yet acknowledged | `null` — unbounded |
-| Receiver | `ClientOptions.ReceiveBufferCapacity` | items **and** wire bytes, first to bind | 10 000 items / 64 MB |
+| Receiver | `ClientOptions.ReceiveBufferCapacity` | items **and** wire bytes, first to bind | `null` — unbounded |
+
+**Both are opt-in, and that is a decision rather than an omission.** The figure that makes a bound useful depends on how large an item is, which only the caller knows: for record-sized payloads an unbounded buffer is a memory spike, for multi-megabyte ones it is the process. A default would be a guess wearing the costume of a safeguard, and the wrong guess is worse than none because nobody looks for a setting that appears to be handled. `Build()` warns when neither end is set, so the absence is loud rather than silent.
+
+**Out of the box there is therefore no backpressure anywhere**, and a consumer slower than its producer is absorbed in memory until something dies. Set at least one end. Setting the receiver is the better single choice: it reaches the sender through the chain above, whereas the send window does not bound what the receiver holds.
 
 The sender's window is taken **by the producer, before serialization**. Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
 
