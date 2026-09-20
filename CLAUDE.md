@@ -17,8 +17,10 @@ the pitch/comparison-to-Kafka-and-gRPC, and the three docs below for the design.
 
 ## Build & Test
 
-Target frameworks: multi-target `net8.0;net10.0` for the libraries under `src/`, `net10.0` only for
-samples/tests. CI (`.github/workflows/dotnet.yml`) builds against the .NET 8 SDK.
+Target frameworks: `net8.0;net10.0` for `TransportR`, `TransportR.Client.SignalR`,
+`TransportR.Hub.SignalR`, `TransportR.FlowControl` and `TransportR.Auth.SimpleIdp`; the other six
+libraries under `src/` target `net10.0` only, as do samples and tests. Whether that split is
+intended is an open packaging question, not a statement of intent. CI (`.github/workflows/dotnet.yml`) builds against the .NET 8 SDK.
 
 ```bash
 dotnet restore
@@ -70,7 +72,7 @@ handoff.
 
 This split is the central design decision and shows up everywhere: SignalR (`CommandHub` /
 `TransportR.Hub.SignalR/Hubs/CommandHub.cs`) only ever does presence/discovery/handshake
-(`Connect`, `GetAvailableClients`, `InitTransfer`) — it never touches bulk bytes. Data itself moves
+(`Connect`, `GetReceivers`, `InitTransfer`) — it never touches bulk bytes. Data itself moves
 over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
 /api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
 without deserializing them. Reliability, resumption and even transfer-completion detection are all

@@ -16,9 +16,9 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 
 | Component | Delay | Description |
 |-----------|-------|---------|
-| **Reconnect Debounce** | 2 s | Prevents reconnection spam (Client side) |
+| **Reconnect probe interval** | 2 s | Wait between connectivity probes while a session is `Reconnecting` (hard-coded) |
 | **Pong Wait** | 10 s timeout | HTTP stream Ping/Pong Handshake |
-| **HTTP Backoff** | 100 ms → 5 s | Exponential (Restart data streams) |
+| **SignalR connect backoff** | 500 ms → 5 s | Exponential over 5 attempts, on the initial hub connection only (hard-coded). Restarting a data stream is not backed off. |
 | **Bridge Timeout** | 300 s | Hub cancels a non-active bridge waiting for a peer (`BridgeTimeoutSeconds`) |
 | **Transfer Inactivity** | 60 s | Hub terminates a transfer gone fully silent (`TransferInactivityTimeoutSeconds`) |
 | **Stalled Progress** | disabled | Opt-in: alive but not advancing (`StalledProgressTimeoutSeconds`) |
@@ -49,7 +49,6 @@ sequenceDiagram
     end
 
     Note over S: TriggerReconnect() called
-    Note over S: Debounce 2s verified
 
     Note over S,R: Restart HTTP Streams (Autonomously)
 

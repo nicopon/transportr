@@ -59,7 +59,7 @@ TransportR occupies a **specific niche**: hub-mediated bulk transfer for network
 - **Preserve core simplicity**:
   - Dumb-pipe architecture (Hub forwards bytes, doesn't deserialize)
   - Point-to-point only (one sender → one receiver per transfer)
-  - ACK/NACK reliability without persistence
+  - ACK-based reliability without persistence
   - Minimal infrastructure (single .NET app + optional Redis)
 
 ## 📝 Documentation

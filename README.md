@@ -24,6 +24,7 @@ dotnet add package TransportR.Hub.SignalR
 dotnet add package TransportR.Serialization.MessagePack  # Binary + LZ4 (fastest)
 dotnet add package TransportR.Serialization.Protobuf     # Binary + Zstd
 dotnet add package TransportR.Serialization.Json         # Human-readable (debugging)
+dotnet add package TransportR.Serialization.Arrow        # Apache Arrow RecordBatch
 ```
 
 ---
@@ -37,17 +38,20 @@ Any ASP.NET Core application can become a TransportR hub with just a few lines:
 ```csharp
 // Program.cs
 using TransportR.Hub.SignalR;
-using TransportR.Serialization.MessagePack;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDataHub()
-    .WithMessagePackSerialization();
+    .UseDevMode()   // trusts client-provided identity — see the Security guide before production
+    .Build();
 
 var app = builder.Build();
 app.MapDataHub();
 app.Run();
 ```
+
+The hub picks no serializer: it forwards opaque bytes and never decodes a payload. Serialization
+is a client-side choice, below.
 
 ### 2. Send Data (Sender Client)
 
@@ -111,7 +115,6 @@ await Task.Delay(Timeout.Infinite); // Keep listening
 | **Seamless Reconnection** | Automatic recovery from network interruptions |
 | **Group Routing** | Logical groups for routing and access control |
 | **High Availability** | Optional Redis state store + sticky sessions |
-| **OpenTelemetry** | Native metrics and tracing support (`transportr.bytes.sent`, `transportr.batches.received`...) |
 
 ---
 
@@ -125,7 +128,7 @@ TransportR integrates seamlessly with standard .NET authentication:
 
 **Quick start option:** For development or testing, use the included **SimpleIdp** package (`TransportR.Auth.SimpleIdp`) — a lightweight embedded identity provider based on OpenIddict. No external IdP required.
 
-📖 See the [Security Architecture Guide](./docs/SecurityArchitecture.md) for detailed configuration.
+📖 See the [Security Architecture Guide](./SecurityArchitecture.md) for detailed configuration.
 
 ---
 
@@ -174,9 +177,9 @@ Firewall rules: N × M                  Firewall rules: N + M
 
 | Guide | Description |
 |-------|-------------|
-| [Architecture](./docs/TransportRArchitecture.md) | System design and data flow |
-| [Resilience](./docs/ResilienceArchitecture.md) | Reconnection and fault tolerance |
-| [Security](./docs/SecurityArchitecture.md) | OIDC, groups, and access control |
+| [Architecture](./TransportRArchitecture.md) | System design and data flow |
+| [Resilience](./ResilienceArchitecture.md) | Reconnection and fault tolerance |
+| [Security](./SecurityArchitecture.md) | OIDC, groups, and access control |
 
 ---
 
@@ -191,6 +194,7 @@ TransportR/
 │   ├── TransportR.Serialization.MessagePack/
 │   ├── TransportR.Serialization.Protobuf/
 │   ├── TransportR.Serialization.Json/
+│   ├── TransportR.Serialization.Arrow/
 │   ├── TransportR.FlowControl/         # Group-based access control
 │   ├── TransportR.Auth.ClientCredentials/ # OAuth2 client credentials
 │   ├── TransportR.Auth.SimpleIdp/      # Embedded dev Identity Provider
@@ -212,12 +216,20 @@ TransportR/
 
 ## 🔧 Configuration
 
-| Environment Variable | Default | Description |
-|---------------------|---------|-------------|
-| `BATCH_SIZE` | `500` | Items per batch |
-| `BATCH_FLUSH_INTERVAL_MS` | `1000` | Auto-flush interval (ms) |
-| `HUB_URL` | `http://localhost:5252` | Hub endpoint |
-| `LOG_LEVEL` | `Warning` | Logging verbosity |
+The library reads no environment variable: a client is configured on its builder, a hub on
+`AddDataHub()`. The variables used by `scripts/` belong to the benchmark samples, not to the
+packages — see [`scripts/README.md`](./scripts/README.md).
+
+| Builder call | Default | What it sets |
+|---|---|---|
+| `WithBatchSize(n)` | `1000` | Items per batch |
+| `WithBatchTimeout(ms)` | `1000` | Flush a partial batch after this long |
+| `WithMaxInFlightBatches(n)` | unbounded | Sender-side backpressure, in batches |
+| `WithReceiveCapacity(items, bytes)` | unbounded | Receiver-side backpressure, first bound reached wins |
+
+**Both backpressure bounds are opt-in and `Build()` warns when neither is set.** The right figure
+depends on how large an item is, which only the caller knows; left unset, a consumer slower than
+its producer is absorbed in memory rather than throttled.
 
 ---
 

@@ -17,6 +17,7 @@ TransportR.Hub.SignalR/                  # SignalR Hub + HTTP API server
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
 TransportR.Serialization.Protobuf/       # Protobuf + Zstd serializer
 TransportR.Serialization.Json/           # System.Text.Json serializer (debug)
+TransportR.Serialization.Arrow/          # Apache Arrow RecordBatch serializer
 TransportR.FlowControl/                  # Group-based access control
 TransportR.Auth.ClientCredentials/       # OAuth2 Client Credentials
 TransportR.Auth.SimpleIdp/               # Lightweight Identity Provider
@@ -31,7 +32,7 @@ TransportR.Storage.Redis/                # Redis State Store implementation
 | **Dumb Pipe Architecture** | Hub forwards variable-length opaque bytes without deserialization |
 | **Reliable Delivery** | Packet-level ACK with automatic retry |
 | **Group-based Access** | Route transfers by logical groups |
-| **Observability** | Native OpenTelemetry metrics |
+| **Observability** | Hub-side byte counting via `IHubProgressMonitor` |
 
 ---
 
@@ -45,9 +46,9 @@ sequenceDiagram
     participant H as DataHub
     participant R as Receiver
 
-    R->>H: 1. Connect (canReceive=true)
-    S->>H: 2. Connect (canSend=true)
-    S->>H: 3. GetAvailableClients()
+    R->>H: 1. Connect(groups)
+    S->>H: 2. Connect(groups)
+    S->>H: 3. GetReceivers()
     H-->>S: [Receiver]
     S->>H: 4. InitTransfer(ReceiverId)
     H->>R: GetReadyToReceive(TransferId)
@@ -77,7 +78,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 1. **Control Plane (SignalR)**
     - **Role**: "The Coordinator"
-    - **Methods**: `Connect`, `GetAvailableClients`, `InitTransfer`
+    - **Methods**: `Connect`, `GetReceivers`, `InitTransfer`
     - **Responsibility**: Manages presence, lightweight signaling, and state synchronization. It negotiates the transfer parameters but never touches the bulk data.
 
 2. **Data Plane (HTTP Streaming)**
@@ -131,30 +132,14 @@ TransportR supports horizontal scaling (Active/Active) for Hubs:
 | `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR/Interfaces/IBatchSerializer.cs) |
 | `IHubProgressMonitor` | Hub-side monitoring (bytes only) | [IHubProgressMonitor.cs](src/TransportR/Interfaces/IHubProgressMonitor.cs) |
 
-> The hub operates as a "dumb-pipe" and only tracks bytes. Client-side monitoring uses `TransportRMetrics` OpenTelemetry counters.
+> The hub operates as a "dumb-pipe" and only tracks bytes.
 
----
+## Observability
 
-## OpenTelemetry Metrics
-
-The library exposes native metrics via `TransportRMetrics`:
-
-```csharp
-// Usage in your application
-builder.Services.AddOpenTelemetry()
-    .WithMetrics(metrics => metrics.AddMeter("TransportR"));
-```
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `transportr.bytes.sent` | Counter | Compressed bytes sent |
-| `transportr.bytes.received` | Counter | Compressed bytes received |
-| `transportr.batches.sent` | Counter | Batches sent |
-| `transportr.batches.received` | Counter | Batches received |
-| `transportr.acks.sent/received` | Counter | ACKs sent/received |
-| `transportr.complete.ack.sent/received` | Counter | CompleteAcks sent/received |
-| `transportr.retries` | Counter | Retry attempts |
-| `transportr.items.processed` | Counter | Items processed |
+**The packages emit no metrics of their own.** Two hooks are provided and the host decides what to
+do with them: `IHubProgressMonitor` on the hub side, and the `TransferInfo` records
+`GetTransfers()` returns on the client side. `samples/DataHub` builds its own OpenTelemetry meter
+on top of the first — copy it rather than expect one from the package.
 
 ---
 

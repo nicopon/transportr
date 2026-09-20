@@ -26,13 +26,11 @@ TransportR/
 │   ├── ClientInfo.cs          # Connected client information
 │   ├── ClientIdentity.cs      # Client identity from JWT
 │   └── TransferInfo.cs        # Transfer statistics
-├── Protocol/
-│   ├── BatchProtocol.cs       # Batch serialization wrapper
-│   ├── ChunkProtocol.cs       # ChunkType enum
-│   ├── ChunkHeader.cs         # 30-byte binary header
-│   └── ChunkIO.cs             # Async read/write operations
-└── Metrics/
-    └── TransportRMetrics.cs   # OpenTelemetry metrics
+└── Protocol/
+    ├── ChunkType.cs           # The six chunk types
+    ├── ChunkHeader.cs         # 30-byte binary header
+    ├── ChunkIO.cs             # Async read/write operations
+    └── WireRoutes.cs          # The endpoints both ends agree on
 ```
 
 ## Key Interfaces
