@@ -5,6 +5,13 @@
 # sampler writes one row per process per second to $OUTPUT_DIR/rss.csv; a scenario then declares a
 # ceiling (MAX_RECEIVER_RSS_MB / MAX_SENDER_RSS_MB) and run-benchmark.sh fails the run when the
 # peak goes over it, the same way it fails on a wrong line count.
+#
+# SAMPLE_RSS=true records without asserting, for a scenario run to be measured rather than held to
+# a figure. Declaring a ceiling implies it.
+#
+# An assertion with no samples behind it FAILS. A ceiling that passes because the sampler died,
+# because a pid never resolved or because a role was misspelled is worse than no ceiling: it
+# reports a property nobody measured.
 
 declare -a SAMPLED_PROCESSES=()
 RSS_SAMPLER_PID=""
@@ -57,23 +64,47 @@ stop_rss_sampler() {
     return 0
 }
 
-# Peak RSS in MB for a role, or 0 when nothing was sampled for it.
+# How many samples were recorded for a role.
+sample_count() {
+    local out
+    out="$(rss_csv_path)"
+    if [ ! -f "$out" ]; then echo 0; return 0; fi
+    awk -F, -v role="$1" 'NR > 1 && $2 == role { n++ } END { printf "%d", n }' "$out"
+}
+
+# Peak RSS in MB for a role. Only meaningful once sample_count says there is something behind it.
 peak_rss_mb() {
     local out
     out="$(rss_csv_path)"
-    [ -f "$out" ] || { echo 0; return 0; }
+    if [ ! -f "$out" ]; then echo 0; return 0; fi
     awk -F, -v role="$1" 'NR > 1 && $2 == role && $4 + 0 > max { max = $4 + 0 } END { printf "%d", max / 1024 }' "$out"
 }
 
-# Fail the run when a role's peak went over its declared ceiling.
+# Fail the run when a role's peak went over its declared ceiling, or when nothing was sampled.
 assert_peak_rss() {
     local role="$1"
     local ceiling_mb="$2"
-    if [ -z "$ceiling_mb" ]; then return 0; fi
+
+    local samples
+    samples=$(sample_count "$role")
+
+    # Sampled without a ceiling: report, assert nothing. A scenario run to produce a figure has
+    # to print the figure, or it produced nothing.
+    if [ -z "$ceiling_mb" ]; then
+        if [ "$samples" -gt 0 ]; then
+            echo "Peak $role RSS: $(peak_rss_mb "$role") MB over ${samples} samples (no ceiling)"
+        fi
+        return 0
+    fi
+
+    if [ "$samples" -eq 0 ]; then
+        log_error "❌ Error: $role declares a ${ceiling_mb} MB ceiling but no RSS sample was recorded"
+        return 1
+    fi
 
     local peak
     peak=$(peak_rss_mb "$role")
-    echo "Peak $role RSS: ${peak} MB (ceiling ${ceiling_mb} MB)"
+    echo "Peak $role RSS: ${peak} MB over ${samples} samples (ceiling ${ceiling_mb} MB)"
 
     if [ "$peak" -gt "$ceiling_mb" ]; then
         log_error "❌ Error: $role peaked at ${peak} MB, over the ${ceiling_mb} MB ceiling"

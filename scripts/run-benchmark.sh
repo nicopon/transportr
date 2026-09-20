@@ -248,8 +248,8 @@ start_receivers "$NUM_RECEIVERS"
 # Start Sender
 start_sender
 
-# Memory sampling, when the scenario declares a ceiling to hold the run to
-if [ -n "$MAX_RECEIVER_RSS_MB" ] || [ -n "$MAX_SENDER_RSS_MB" ]; then
+# Memory sampling: on when the scenario asks to be measured, and implied by declaring a ceiling
+if [ "$SAMPLE_RSS" == "true" ] || [ -n "$MAX_RECEIVER_RSS_MB" ] || [ -n "$MAX_SENDER_RSS_MB" ]; then
     for rpid in "${RECEIVER_PIDS[@]}"; do sample_rss_for receiver "$rpid"; done
     if [ -n "$SENDER_PID" ]; then sample_rss_for sender "$SENDER_PID"; fi
     start_rss_sampler
