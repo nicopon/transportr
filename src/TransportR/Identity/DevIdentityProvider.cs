@@ -59,7 +59,7 @@ public class DevIdentityProvider : IClientIdentityProvider
         _logger?.LogInformation("DevIdentityProvider: Resolved identity - ClientId={ClientId}, Groups=[{Groups}] (DEV MODE)",
             providedClientId.Value, string.Join(", ", groups));
 
-        return new ClientIdentity(providedClientId.Value, groups, TokenExpiry: null);
+        return new ClientIdentity(providedClientId.Value, groups, TokenExpiry: null, Subject: null);
     }
 }
 

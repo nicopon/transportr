@@ -65,6 +65,7 @@ Unified benchmark runner with scenario support.
 |----------|-------------|
 | `default` | Dev mode without authentication |
 | `oidc` | OIDC authentication with TestIdp |
+| `data-plane-probe` | OIDC run that asks the live hub to refuse anonymous and wrong-role stream requests |
 | `chaos` | Network chaos simulation |
 | `ha` | HA mode (2 Hubs + TestProxy) with sticky sessions |
 | `ha-redis` | Redis State Store (single hub, for HA preparation) |

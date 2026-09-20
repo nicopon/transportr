@@ -27,7 +27,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Scenarios to run (in order)
-SCENARIOS="default embedded-idp oidc chaos chaos-bounded slow-receiver ha-redis"
+SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded slow-receiver ha-redis"
 
 # Track results
 FAILED=0

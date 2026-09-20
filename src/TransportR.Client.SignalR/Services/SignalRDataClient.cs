@@ -251,7 +251,6 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     #region ISessionContext Implementation
 
-    Guid ISessionConfig.ClientId => ClientId;
     ILogger ISessionConfig.Logger => _logger;
     IBatchSerializer<T> ISessionConfig<T>.Serializer => _serializer;
     HttpClient IStreamTransport.HttpClient => _httpClient;

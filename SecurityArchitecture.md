@@ -31,13 +31,25 @@ The `transportr:` prefix allows coexistence with other apps on a shared IDP.
 
 ## Security Guarantees
 
+Both planes are stated separately, because they are armed separately.
+
 | Threat | Protection |
 |--------|------------|
-| Unauthenticated access | JWT required when auth enabled |
+| Unauthenticated access to the control plane | JWT required when auth enabled |
+| Unauthenticated access to the data plane | JWT required when auth enabled; **open in dev mode** |
+| A third party streaming into or out of a transfer | The caller's token subject must match the participant that registered |
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | FlowControl validates permissions |
 | Token tampering | Signature verified against IDP |
 | Expired tokens | `exp` claim validated |
+
+In dev mode the data plane serves anyone who knows a transfer id: there is no attested identity to
+compare, so the participant check does not run. That is the same trust as the rest of dev mode,
+where the hub believes the group a client announces.
+
+The participant check is only as fine-grained as the subject the IdP attests. Two processes sharing
+one set of client credentials share one subject, and so can take each other's place in a transfer;
+they cannot take the other role's place. Issue one IdP client per participant to separate them.
 
 ---
 

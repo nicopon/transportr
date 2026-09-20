@@ -9,6 +9,7 @@
 # Scenarios:
 #   default  - Dev mode (no auth)
 #   oidc     - OIDC with TestIdp
+#   data-plane-probe - OIDC, plus refusal checks against the live stream routes
 #   chaos    - Network chaos simulation
 #   ha-redis - Redis State Store (no chaos)
 #
@@ -247,6 +248,13 @@ start_receivers "$NUM_RECEIVERS"
 
 # Start Sender
 start_sender
+
+# Data plane probe: runs against the live transfer, so it has to sit between the sender starting
+# and the wait for completion.
+if [ "$PROBE_DATA_PLANE" == "true" ]; then
+    source "$SCRIPT_DIR/lib/probe.sh"
+    probe_data_plane || exit 1
+fi
 
 # Memory sampling: on when the scenario asks to be measured, and implied by declaring a ceiling
 if [ "$SAMPLE_RSS" == "true" ] || [ -n "$MAX_RECEIVER_RSS_MB" ] || [ -n "$MAX_SENDER_RSS_MB" ]; then

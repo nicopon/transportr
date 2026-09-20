@@ -262,7 +262,6 @@ public class BatchProcessorTests
 
     private class StubSessionContext : ISessionContext<string>
     {
-        public Guid ClientId { get; } = Guid.NewGuid();
         public ILogger Logger { get; } = new StubLogger();
         public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
         // Both null: BatchProcessor reaches neither. The transport lives behind

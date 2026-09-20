@@ -1,8 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using TransportR.Configuration;
+using TransportR.Hub.SignalR.Controllers;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
@@ -134,16 +137,37 @@ public static class TransportRHubExtensions
     /// <summary>
     /// Maps the CommandHub and StreamController endpoints.
     /// </summary>
+    /// <param name="requireAuth">
+    /// Arms authorization on both planes. The host must have called <c>UseAuthentication()</c> and
+    /// <c>UseAuthorization()</c>; leaving it false leaves the data plane open to anyone who knows a
+    /// transfer id, which is the documented meaning of dev mode.
+    /// </param>
     public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool requireAuth = false)
     {
         var hubEndpoint = endpoints.MapHub<CommandHub>("/hub/command");
-        
+
         if (requireAuth)
         {
             hubEndpoint.RequireAuthorization();
         }
-        
-        endpoints.MapControllers();
+
+        var controllers = endpoints.MapControllers();
+
+        if (requireAuth)
+        {
+            // MapControllers hands back one convention builder for every controller the host has
+            // registered — including the embedded IdP's token endpoint, which must stay anonymous
+            // or no client could ever obtain the token this asks for. Hence the filter.
+            controllers.Add(builder =>
+            {
+                var action = builder.Metadata.OfType<ControllerActionDescriptor>().FirstOrDefault();
+                if (action?.ControllerTypeInfo.AsType() == typeof(StreamController))
+                {
+                    builder.Metadata.Add(new AuthorizeAttribute());
+                }
+            });
+        }
+
         return endpoints;
     }
 }

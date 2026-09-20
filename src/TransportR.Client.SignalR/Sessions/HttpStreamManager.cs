@@ -199,7 +199,6 @@ internal class HttpStreamManager : IAsyncDisposable
         
         var request = new HttpRequestMessage(isWrite ? HttpMethod.Post : HttpMethod.Get, url);
         request.Headers.Add("X-Connection-Type", type.ToString());
-        request.Headers.Add("X-Client-Id", _config.ClientId.ToString());
 
         // Cookie header handled by shared CookieContainer in HttpClient
 

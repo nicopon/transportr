@@ -85,7 +85,8 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             identity.Groups.ToHashSet(),
             affinityToken,
             identity.TokenExpiry,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            Subject: identity.Subject);
         
         await _stateStore.SaveClientAsync(registration);
         

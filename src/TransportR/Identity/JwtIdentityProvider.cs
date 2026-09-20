@@ -44,10 +44,23 @@ public class JwtIdentityProvider : IClientIdentityProvider
             return null;
         }
 
-        // Extract clientId from 'sub' claim or use provided/generate new
+        // ASP.NET Core's JwtBearer handler maps 'sub' onto NameIdentifier unless the host sets
+        // MapInboundClaims=false, so the same claim arrives under either name depending on a
+        // setting this library does not own.
+        var subject = user.FindFirst("sub")?.Value
+                   ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrEmpty(subject))
+        {
+            // Without an attested subject the data plane has nothing to check a stream caller
+            // against, and would refuse every stream after a Connect that appeared to succeed.
+            _logger?.LogWarning("JwtIdentityProvider: Token carries no subject claim");
+            return null;
+        }
+
+        // Extract clientId from the subject or use provided/generate new
         Guid clientId;
-        var subClaim = user.Claims.FirstOrDefault(c => c.Type == "sub");
-        if (subClaim != null && Guid.TryParse(subClaim.Value, out var parsedId))
+        if (Guid.TryParse(subject, out var parsedId))
         {
             clientId = parsedId;
         }
@@ -77,9 +90,9 @@ public class JwtIdentityProvider : IClientIdentityProvider
             }
         }
 
-        _logger?.LogInformation("JwtIdentityProvider: Resolved identity - ClientId={ClientId}, Groups=[{Groups}], Expiry={Expiry}",
-            clientId, string.Join(", ", groups), tokenExpiry?.ToString("u") ?? "N/A");
+        _logger?.LogInformation("JwtIdentityProvider: Resolved identity - ClientId={ClientId}, Subject={Subject}, Groups=[{Groups}], Expiry={Expiry}",
+            clientId, subject, string.Join(", ", groups), tokenExpiry?.ToString("u") ?? "N/A");
 
-        return new ClientIdentity(clientId, groups, tokenExpiry);
+        return new ClientIdentity(clientId, groups, tokenExpiry, subject);
     }
 }

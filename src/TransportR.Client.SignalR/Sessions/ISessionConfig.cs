@@ -15,7 +15,6 @@ namespace TransportR.Client.SignalR.Sessions;
 /// </remarks>
 public interface ISessionConfig
 {
-    Guid ClientId { get; }
     ILogger Logger { get; }
     int BatchFlushIntervalMs { get; }
     ClientOptions Options { get; }

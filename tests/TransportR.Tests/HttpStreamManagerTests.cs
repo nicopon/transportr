@@ -110,7 +110,6 @@ public class HttpStreamManagerTests
 
     private class StubSessionContext : ISessionContext
     {
-        public Guid ClientId { get; } = Guid.NewGuid();
         public ILogger Logger { get; } = new StubLogger();
         public HttpClient HttpClient { get; }
         
