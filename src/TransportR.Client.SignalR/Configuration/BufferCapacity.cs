@@ -24,10 +24,11 @@ namespace TransportR.Client.SignalR.Configuration;
 /// the bound with that ratio in mind, as you would any buffer.
 /// </para>
 /// <para>
-/// <b>An item larger than <see cref="MaxBytes"/> is still admitted into an empty buffer.</b>
+/// <b>A chunk that exceeds either dimension outright is still admitted into an empty buffer.</b>
 /// Refusing it would be a permanent stall rather than backpressure: nothing will ever free space
-/// for an item that does not fit an empty buffer. The consequence is that a byte bound throttles
-/// but never blocks, which is what makes it safe to apply by default.
+/// for a chunk that does not fit an empty buffer, and a chunk cannot be admitted in parts — a
+/// batch is the smallest unit the protocol can resend. The consequence is that these bounds
+/// throttle but never block, which is what makes them safe to apply by default.
 /// </para>
 /// </remarks>
 public readonly record struct BufferCapacity

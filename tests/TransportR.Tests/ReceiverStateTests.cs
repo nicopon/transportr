@@ -165,6 +165,47 @@ public class ReceiverStateTests
         Assert.Equal(0, _receiverState.ReorderedChunks);
     }
 
+    [Fact]
+    public async Task ProcessBatchAsync_CutPartWayThroughABatch_DoesNotDeliverItTwiceOnResend()
+    {
+        // Arrange: a buffer with one slot left, and a three-item batch to put through it. This is
+        // the shape a reconnection takes in the field - the token that the read loop carries is
+        // cancelled somewhere in the middle of handing a batch over.
+        var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(3));
+        var state = new ReceiverState<int>(buffer, new MockBatchSerializer());
+
+        var first = CreateMockPayload(new[] { 1, 2 });
+        await state.ProcessBatchAsync(0, new ArrayMemoryOwner(first), first);
+
+        var second = CreateMockPayload(new[] { 3, 4, 5 });
+        using var cts = new CancellationTokenSource();
+        var cut = state.ProcessBatchAsync(1, new ArrayMemoryOwner(second), second, cts.Token);
+        Assert.NotSame(cut, await Task.WhenAny(cut, Task.Delay(300)));
+
+        // Act
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cut);
+
+        // The batch was never acknowledged, so the sender resends it whole - that is the only
+        // granularity the 30-byte header can express.
+        Assert.Equal(1, state.NextExpectedBatchId);
+
+        var consumed = new List<int>();
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var item in buffer.ReadAllAsync(CancellationToken.None)) consumed.Add(item);
+        });
+
+        var resent = CreateMockPayload(new[] { 3, 4, 5 });
+        await state.ProcessBatchAsync(1, new ArrayMemoryOwner(resent), resent);
+        buffer.Complete();
+        await consumer.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Assert: the consumer saw each item once. Anything the cut batch had already published
+        // arrives a second time here, and nothing downstream can tell the copy from the original.
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, consumed);
+    }
+
     private static byte[] CreateMockPayload(int[] items)
     {
         // Create a simple mock payload that our MockBatchSerializer can deserialize

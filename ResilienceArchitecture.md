@@ -139,6 +139,8 @@ Instead of querying the Hub for a "Checkpoint", the Sender asks the Receiver dir
 
 This ensures that resumption is based on the **Receiver's actual state**, which is the ultimate source of truth.
 
+**A batch is the smallest thing this can name**, so the receiver hands one to its consumer whole or not at all: capacity for every item is taken before the first is published, and the hand-off is not cancellable. A batch stopped half way would raise no `NextExpectedBatchId`, be resent whole, and deliver its published prefix to the consumer twice.
+
 ```csharp
 // Sender Logic
 await ChunkIO.WriteChunkAsync(stream, pingChunk);
@@ -187,7 +189,7 @@ That placement is also why the sender's window cannot count bytes: the serialize
 
 **Bytes are wire bytes** — the serialized payload as it arrived, charged to a chunk before it is decoded and returned item by item as the consumer takes them. It is the only size available without knowing what the item type costs on the heap, and it is not that cost: Arrow IPC bodies are close to their decoded buffers less whatever LZ4 saved, while MessagePack records decode to several times their wire size. Size the bound against that expansion.
 
-**A chunk larger than the whole byte budget is still admitted into an empty buffer.** Refusing it would be a permanent stall rather than backpressure, since nothing can ever free room for it. Lowering the byte bound therefore throttles a transfer and cannot deadlock one.
+**A chunk larger than the whole budget — in either dimension — is still admitted into an empty buffer.** Refusing it would be a permanent stall rather than backpressure, since nothing can ever free room for it, and a chunk cannot be handed over in parts. Lowering either bound therefore throttles a transfer and cannot deadlock one.
 
 ---
 

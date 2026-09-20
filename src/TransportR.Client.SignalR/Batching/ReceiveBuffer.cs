@@ -18,25 +18,29 @@ namespace TransportR.Client.SignalR.Batching;
 /// not do was mean anything for a payload whose items are megabytes apiece.
 /// </para>
 /// <para>
-/// <b>The item dimension is the channel's own bound</b>, which already knows how to park a writer
-/// and wake it. <b>The byte dimension is the credit gate below</b>, because a channel cannot
-/// weigh what it holds.
+/// <b>A chunk goes in whole or not at all, and that is what the shape of this class is for.</b>
+/// Capacity for every item is taken up front, so the hand-off below is a sequence of writes into
+/// an unbounded channel that cannot block and cannot be cancelled. A chunk stopped half way
+/// would be resent whole — a batch is the smallest thing the 30-byte header can name — and every
+/// item already handed over would reach the consumer twice.
 /// </para>
 /// <para>
-/// <b>Credit is taken for a whole chunk before it is decoded, and returned item by item as the
-/// consumer takes them.</b> Taking it after decoding would bound the same number while holding
-/// one more decoded chunk than necessary — the peak would be the bound plus two chunks instead of
-/// plus one — which for Arrow is exactly the memory the bound exists to deny.
+/// <b>Both dimensions are one credit gate, taken in two steps.</b> The chunk's wire size is known
+/// from its header and is charged before decoding; its item count is not known until after. Both
+/// are charged before the first item is published, which is what keeps the hand-off atomic, and
+/// both are returned item by item as the consumer takes them.
 /// </para>
 /// </remarks>
 internal sealed class ReceiveBuffer<T>
 {
     private readonly record struct Entry(T Item, long Cost);
 
-    private readonly Channel<Entry> _channel;
+    private readonly Channel<Entry> _channel = Channel.CreateUnbounded<Entry>();
+    private readonly int? _maxItems;
     private readonly long? _maxBytes;
 
     private readonly object _gate = new();
+    private int _bufferedItems;
     private long _bufferedBytes;
     private bool _completed;
     private TaskCompletionSource? _spaceAvailable;
@@ -53,13 +57,8 @@ internal sealed class ReceiveBuffer<T>
                 "A receive capacity needs at least one of the two dimensions bounded. Pass null "
               + "for an unbounded buffer.", nameof(capacity));
 
+        _maxItems = capacity?.MaxItems;
         _maxBytes = capacity?.MaxBytes;
-        _channel = capacity?.MaxItems is { } maxItems
-            ? Channel.CreateBounded<Entry>(new BoundedChannelOptions(maxItems)
-            {
-                FullMode = BoundedChannelFullMode.Wait
-            })
-            : Channel.CreateUnbounded<Entry>();
     }
 
     /// <summary>
@@ -76,18 +75,22 @@ internal sealed class ReceiveBuffer<T>
     /// </summary>
     /// <remarks>
     /// Decoding is passed in rather than done by the caller so that the order — reserve, decode,
-    /// publish, and give back whatever was reserved but never published — cannot be got wrong
-    /// from outside, on a path where getting it wrong leaks capacity until the buffer wedges shut.
+    /// reserve, publish, and give back whatever was reserved but never published — cannot be got
+    /// wrong from outside, on a path where getting it wrong either leaks capacity until the buffer
+    /// wedges shut or hands the consumer part of a chunk that is about to be resent.
     /// </remarks>
     /// <param name="wireBytes">The chunk's payload length, as it arrived.</param>
     /// <param name="decode">Produces the chunk's items. Called once, after capacity is taken.</param>
-    /// <param name="ct">Cancels a wait for capacity and the hand-off.</param>
+    /// <param name="ct">
+    /// Cancels a wait for capacity, which is the only waiting this method does. It does not reach
+    /// the hand-off: once the first item of a chunk is published the rest follow unconditionally.
+    /// </param>
     /// <returns>The number of items written to the buffer.</returns>
     public async Task<int> WriteChunkAsync(long wireBytes, Func<Task<List<T>?>> decode, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(wireBytes, nameof(wireBytes));
 
-        await AcquireAsync(wireBytes, ct).ConfigureAwait(false);
+        await AcquireAsync(items: 0, wireBytes, ct).ConfigureAwait(false);
 
         List<T>? items;
         try
@@ -96,14 +99,24 @@ internal sealed class ReceiveBuffer<T>
         }
         catch
         {
-            Release(wireBytes);
+            Release(items: 0, wireBytes);
             throw;
         }
 
         if (items is null || items.Count == 0)
         {
-            Release(wireBytes);
+            Release(items: 0, wireBytes);
             return 0;
+        }
+
+        try
+        {
+            await AcquireAsync(items.Count, bytes: 0, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            Release(items: 0, wireBytes);
+            throw;
         }
 
         // Split so the shares add up to exactly what was reserved: the remainder rides on the
@@ -117,14 +130,20 @@ internal sealed class ReceiveBuffer<T>
             for (; written < items.Count; written++)
             {
                 var cost = written == 0 ? firstShare : share;
-                await _channel.Writer.WriteAsync(new Entry(items[written], cost), ct).ConfigureAwait(false);
+
+                // TryWrite rather than WriteAsync: on an unbounded channel it only ever fails
+                // because the buffer was completed under us, and saying so here keeps the fact
+                // that this loop never waits from depending on how a channel overload behaves.
+                if (!_channel.Writer.TryWrite(new Entry(items[written], cost)))
+                    throw new ChannelClosedException();
             }
         }
         catch
         {
+            // Only teardown reaches here, and nothing will be resent into a completed buffer.
             // What made it in is the consumer's to release; what did not is ours.
             var published = written == 0 ? 0 : firstShare + (written - 1) * share;
-            Release(wireBytes - published);
+            Release(items.Count - written, wireBytes - published);
             throw;
         }
 
@@ -150,13 +169,13 @@ internal sealed class ReceiveBuffer<T>
             }
             finally
             {
-                Release(entry.Cost);
+                Release(items: 1, entry.Cost);
             }
         }
     }
 
     /// <summary>
-    /// Signals that no more chunks will arrive, and releases a writer parked on the byte gate.
+    /// Signals that no more chunks will arrive, and releases a writer parked on the credit gate.
     /// </summary>
     public void Complete()
     {
@@ -178,13 +197,16 @@ internal sealed class ReceiveBuffer<T>
     /// would only lose fairness, which is worth knowing before anyone parallelises the read path.
     /// </para>
     /// <para>
-    /// <b>An empty buffer admits anything.</b> A chunk larger than the whole bound would otherwise
-    /// wait for room that, by definition, nothing can ever free.
+    /// <b>An empty buffer admits anything.</b> A chunk larger than the whole bound — in either
+    /// dimension — would otherwise wait for room that, by definition, nothing can ever free.
+    /// Emptiness is measured in items and not in bytes, because only the consumer taking an item
+    /// gives capacity back, and because the byte reservation this method makes before a chunk is
+    /// decoded would otherwise make the buffer look occupied to the item step that follows it.
     /// </para>
     /// </remarks>
-    private async ValueTask AcquireAsync(long bytes, CancellationToken ct)
+    private async ValueTask AcquireAsync(int items, long bytes, CancellationToken ct)
     {
-        if (_maxBytes is not { } max) return;
+        if (_maxItems is null && _maxBytes is null) return;
 
         while (true)
         {
@@ -193,8 +215,9 @@ internal sealed class ReceiveBuffer<T>
             {
                 if (_completed) throw new ChannelClosedException();
 
-                if (_bufferedBytes == 0 || _bufferedBytes + bytes <= max)
+                if (_bufferedItems == 0 || Fits(items, bytes))
                 {
+                    _bufferedItems += items;
                     _bufferedBytes += bytes;
                     return;
                 }
@@ -208,20 +231,30 @@ internal sealed class ReceiveBuffer<T>
     }
 
     /// <remarks>
+    /// Called under <see cref="_gate"/>. An unset dimension does not bind, so a capacity carrying
+    /// only one of the two is answered by that one alone.
+    /// </remarks>
+    private bool Fits(int items, long bytes)
+        => (_maxItems is not { } maxItems || _bufferedItems + items <= maxItems)
+        && (_maxBytes is not { } maxBytes || _bufferedBytes + bytes <= maxBytes);
+
+    /// <remarks>
     /// <b>The lock is taken on every item the consumer takes, and that is deliberate.</b> An
     /// attempt to skip it — decrement interlocked, enter the lock only when a flag says a writer
     /// is parked — deadlocks: the consumer can decrement and read the flag inside the window
     /// where the writer has decided to park but not yet raised it, and if that was the last item
     /// the wake never comes. Making it sound needs a Dekker pair with an explicit memory
-    /// barrier, which is not worth an unattributed few percent on a path where the byte bound
+    /// barrier, which is not worth an unattributed few percent on a path where the bound
     /// usually never binds at all.
     /// </remarks>
-    private void Release(long bytes)
+    private void Release(int items, long bytes)
     {
-        if (_maxBytes is null || bytes == 0) return;
+        if (_maxItems is null && _maxBytes is null) return;
+        if (items == 0 && bytes == 0) return;
 
         lock (_gate)
         {
+            _bufferedItems -= items;
             _bufferedBytes -= bytes;
             _spaceAvailable?.TrySetResult();
             _spaceAvailable = null;

@@ -165,8 +165,9 @@ receive buffer parks the read loop, which withholds the ack that reopens the sen
 
 `ReceiveBufferCapacity` counts **items and wire bytes**, whichever binds first: an item count is
 not a bound when an item is an Arrow record batch, and a byte budget is a clumsy one for small
-records. A chunk larger than the whole byte budget is still admitted into an empty buffer — the
-bound must throttle, never stall. `null` means no bound; a `BufferCapacity` with neither
+records. A chunk larger than the whole budget, in either dimension, is still admitted into an
+empty buffer — the bound must throttle, never stall, and a batch is handed to the consumer whole
+or not at all, because a resend cannot name anything smaller. `null` means no bound; a `BufferCapacity` with neither
 dimension set is refused rather than treated as one.
 
 ### Auth

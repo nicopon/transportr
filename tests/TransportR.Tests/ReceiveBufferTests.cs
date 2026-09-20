@@ -70,22 +70,37 @@ public class ReceiveBufferTests
     public async Task Items_ParkTheWriterOnceTheCountIsReached()
     {
         // Arrange
-        var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(2));
+        var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(3));
+        await WriteChunk(buffer, wireBytes: 20, 1, 2);
 
-        // Act: three items into a buffer that holds two.
-        var write = WriteChunk(buffer, wireBytes: 30, 1, 2, 3);
+        // Act: two more items into one remaining slot.
+        var write = WriteChunk(buffer, wireBytes: 20, 3, 4);
 
-        // Assert
+        // Assert: the whole chunk waits - the slot that is free is not offered to half of it.
         Assert.True(await IsParked(write));
 
-        // Act: the consumer takes one.
+        // Act: the consumer takes one, and comes back for the next.
         var enumerator = buffer.ReadAllAsync(CancellationToken.None).GetAsyncEnumerator();
         await enumerator.MoveNextAsync();
         await enumerator.MoveNextAsync();
 
         // Assert: the writer resumes.
-        Assert.Equal(3, await write.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(2, await write.WaitAsync(TimeSpan.FromSeconds(5)));
         await enumerator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Items_AChunkLongerThanTheWholeCountIsStillAdmittedIntoAnEmptyBuffer()
+    {
+        // Arrange: a batch of five hundred against a bound of two.
+        var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(2));
+
+        // Act
+        var write = WriteChunk(buffer, wireBytes: 30, 1, 2, 3, 4, 5);
+
+        // Assert: same rule as the byte dimension, and for the same reason - nothing can ever
+        // free room for a chunk that does not fit an empty buffer, and a chunk cannot be split.
+        Assert.Equal(5, await write.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     // ---- The byte dimension ----
@@ -207,11 +222,12 @@ public class ReceiveBufferTests
     {
         // Arrange: ten thousand records would fit the byte budget many times over.
         var buffer = new ReceiveBuffer<int>(BufferCapacity.ItemsAndBytes(2, 1_000_000));
+        await WriteChunk(buffer, wireBytes: 30, 1, 2);
 
         // Act
-        var write = WriteChunk(buffer, wireBytes: 30, 1, 2, 3);
+        var write = WriteChunk(buffer, wireBytes: 30, 3);
 
-        // Assert
+        // Assert: sixty bytes against a megabyte, and it still waits.
         Assert.True(await IsParked(write));
     }
 
@@ -263,6 +279,30 @@ public class ReceiveBufferTests
 
         // Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Cancellation_PartWayThroughAChunk_PublishesNoneOfIt()
+    {
+        // Arrange: two items in, one slot left, and a three-item chunk to put through it.
+        var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(3));
+        await WriteChunk(buffer, wireBytes: 20, 1, 2);
+
+        using var cts = new CancellationTokenSource();
+        var write = buffer.WriteChunkAsync(30, () => Task.FromResult<List<int>?>([3, 4, 5]), cts.Token);
+        Assert.True(await IsParked(write));
+
+        // Act: the stream is cut while the chunk is going in.
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Assert: nothing of that chunk reached the consumer. The caller has no way to say "I took
+        // the first two of these" - a batch is the smallest thing the protocol can resend - so
+        // anything left behind here is handed over twice when the sender resends it.
+        buffer.Complete();
+        var received = new List<int>();
+        await foreach (var item in buffer.ReadAllAsync(CancellationToken.None)) received.Add(item);
+        Assert.Equal(new[] { 1, 2 }, received);
     }
 
     [Fact]
