@@ -235,10 +235,10 @@ public class BatchProcessorTests
         public Guid ClientId { get; } = Guid.NewGuid();
         public ILogger Logger { get; } = new StubLogger();
         public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
-        public HttpClient HttpClient => null!; // Not used in BatchProcessor logic directly (only via HttpStreamManager which is mocked out or not used)
-        // Wait, BatchProcessor doesn't use HttpClient directly.
-        
-        public HubConnection HubConnection => null!; // Not used in logic tested
+        // Both null: BatchProcessor reaches neither. The transport lives behind
+        // HttpStreamManager, which these tests do not start.
+        public HttpClient HttpClient => null!;
+        public HubConnection HubConnection => null!;
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
         public ClientOptions Options { get; } = new ClientOptions();

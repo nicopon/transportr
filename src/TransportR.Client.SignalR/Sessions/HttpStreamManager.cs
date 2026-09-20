@@ -184,10 +184,9 @@ internal class HttpStreamManager : IAsyncDisposable
                  return new StreamResult(false, true, ex.Message);
             }
             
-            // Loop assumes we only loop for 401 retry. 
-            // Any other path returns.
-            // Wait, if we get exception, we return. We rely on DataSession to restart us.
-            // Only 401 retries internally.
+            // Only a 401 loops here, to retry once with a refreshed token. Every other path
+            // returns, including an exception: restarting a broken stream is DataSession's, so
+            // that the decision to retry is taken where the session state is known.
         }
         
         return new StreamResult(true, false, "Canceled");

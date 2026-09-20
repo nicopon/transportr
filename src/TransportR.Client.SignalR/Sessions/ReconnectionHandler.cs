@@ -119,7 +119,8 @@ internal class ReconnectionHandler<T> : IDisposable
 
     public void Dispose()
     {
-        // No heavy resources to dispose, maybe CTS if stored?
-        // _signalRProbeTcs etc are task sources, GC handles them.
+        // Nothing to release: the probe state is task completion sources, which the collector
+        // takes. Kept as IDisposable so a caller's using block does not change shape if that
+        // stops being true.
     }
 }

@@ -101,7 +101,8 @@ public class TransferManager : ITransferManager
 
     public async Task CompleteTransferAsync(string transferId)
     {
-        // For now, completion is equivalent to cleanup
+        // Completion is cleanup, and that is the design rather than a shortcut: the hub keeps
+        // no transfer history to move a finished transfer into.
         await RemoveTransferAsync(transferId).ConfigureAwait(false);
     }
     

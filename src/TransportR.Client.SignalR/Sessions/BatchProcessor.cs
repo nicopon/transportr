@@ -333,7 +333,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
         _context.Logger.LogDebug("Received Ping, sent Pong(nextExpected={NextExpected}) for Transfer={TransferId}", nextExpected, _transferId);
     }
     
-    // Event callback for Pong? Or just expose state?
     public event Action<int>? OnPongReceived;
     public event Action? OnCompleteAckReceived;
     public event Func<Task>? OnCompleteReceived;
@@ -355,7 +354,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         int lastBatchIdFromSender = chunk.Header.BatchId;
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
         
-        // Validation: Have we received all batches up to lastBatchId?
+        // Validation: every batch up to lastBatchId must already be in.
         // If lastBatchIdFromSender is -1, it means 0 batches sent. NextExpected should be 0.
         // If lastBatchIdFromSender is 10. We expect to have processed 0..10. So NextExpected should be 11.
         // So condition is: NextExpected <= lastBatchIdFromSender.

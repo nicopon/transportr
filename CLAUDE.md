@@ -179,6 +179,26 @@ they are not meant to be production identity providers.
 - **Strict over tolerant**: don't silently auto-correct dirty input or add backward-compat shims in
   code — if a tolerance mechanism seems useful, propose it as an explicit option instead of building
   it in quietly.
+- **Comments say why, not what.** A comment restating the line below it is deleted, not reworded.
+  A doc comment carries what a caller cannot read off the signature — ownership, threading, what
+  breaks if it is ignored — and stops there.
+- **No deliberation in committed code.** A comment that asks a question, weighs two options, or
+  opens with "for now" / "let's assume" / "actually" / "wait" is thinking, not documentation: it
+  tells the next reader the matter is settled when it is not. Resolve it, or move it to `.notes/`
+  and leave a one-line pointer. `./scripts/lint-comments.sh` enforces this and runs in CI ahead
+  of the build.
+- **A doc comment outlives nothing.** When a member goes, its `///` block goes with it.
+- **Prose has a budget, and it is spent.** The transfer lifecycle is already described in this
+  file, three `*Architecture.md` files, seven package READMEs and the XML docs. Before describing
+  a mechanism in a fifth place, delete one of the four — two sources for one subject are two
+  sources that will diverge. A new document needs the same justification as a new interface.
+- **Say what you did not check.** A `Verified:` line names what was run; when a change or a review
+  touched only part of a surface, it also names what it did not cover ("7 of 94 source files",
+  "unit tests only, no scenario"). Verification that does not state its perimeter reads as if it
+  had none.
+- **Measure interleaved, or do not quote a number.** This machine drifts ~10% between sessions, so
+  a before/after run in two sittings measures the sitting. Alternate the two builds in one sitting
+  and report the spread, not just the means.
 - **Scope discipline**: TransportR is deliberately not a message broker. Flag (rather than silently
   implement) anything that pushes it toward pub/sub, hub-side persistence/replay, or topic routing —
   point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces before

@@ -118,12 +118,10 @@ internal class HubConnectionManager : IAsyncDisposable
         // Rebuild (this triggers registrationCallback)
         BuildAndConfigureConnection();
         
-        // Reconnect logic (caller must handle Connect invoke?)
-        // The caller (SignalRDataClient) needs to call StartAsync + ConnectAsync.
-        // We can just call start here?
-        // But ConnectAsync usually takes args (clientId, groups).
-        // Pass a reconnectAction?
-        
+        // Starting the connection is ours; re-registering on it is not. ConnectAsync needs the
+        // client id and the groups, which live on SignalRDataClient, so the caller hands us the
+        // re-registration as a callback rather than this type learning about groups.
+
         await StartAsync(CancellationToken.None);
         await reconnectAction();
     }

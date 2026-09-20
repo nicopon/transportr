@@ -15,9 +15,7 @@ public class StubSessionContext : ISessionContext<string>
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
     public HttpClient HttpClient { get; }
     
-    // HubConnection is nullable/mockable?
-    // ISessionContext returns HubConnection (not nullable in interface?).
-    // Usually tests mock it or return null if not used. 
+    // Null: HubConnection is sealed and not mockable, and nothing under test here reaches it.
     // We'll return null! for now, risking NRE if accessed.
     public HubConnection HubConnection => null!; 
     

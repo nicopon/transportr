@@ -320,27 +320,18 @@ internal class DataSession<T> : IDataSession<T>
                             }
                             else
                             {
-                                // Success completion (stream ended normally)
-                                // If receiver, and 204/Success -> Completed?
-                                // Let's check logic:
-                                // ReadLoop returns on 404/204 in HttpStreamManager.
-                                // If 404 -> HttpStreamManager returns Fatal "Transfer Gone".
-                                // If 204 -> Success? 
-                                // Actually HttpStreamManager returns Success on normal finish.
-                                // If stream ends naturally, it's success.
-                                
-                                // For now, if stream ends and we are not Completed, it might be a disconnect?
-                                // HttpStreamManager returns IsRetryable=true on exception.
-                                // IsSuccess=true means graceful close.
-                                // Graceful close during Streaming means... connection drop? Or finish?
-                                
-                                // If we are not in Completing state, graceful close is weird unless it's EOF.
-                                // We treat as Reconnecting if not Fatal.
-                                
-                                // Wait, HttpStreamManager returns Success only if "isRead" loop finishes or "isWrite" finish.
+                                // A graceful close means only that the stream ended, not that
+                                // the transfer did: HttpStreamManager reports success whenever a
+                                // read or write loop finishes without throwing, and a dropped
+                                // connection can end one that way. What the two cases are told
+                                // apart by is the phase, below — in the completing phase the
+                                // close is the expected end, outside it the peer went away and
+                                // we reconnect. A 404 does not arrive here at all; it is fatal
+                                // and handled in the branch above.
                                 _config.Logger.LogInformation("Stream finished successfully. Re-evaluating state.");
                                 
-                                // If we are just starting, maybe verify?
+                                // Already Completed means the domino sequence finished before
+                                // this stream unwound; there is nothing left to decide.
                                 if (_fsm.CurrentState != SessionState.Completed)
                                 {
                                     if (IsInCompletingPhase)
@@ -369,9 +360,9 @@ internal class DataSession<T> : IDataSession<T>
                          var online = await _reconnectionHandler.ProbeConnectivityAsync(token);
                          if (online)
                          {
-                             // SignalR is back. Is Handshake needed?
-                             // Handshake is done via the NEW stream.
-                             // So we just transition to Streaming, but with "PrepareForHandshake" flag?
+                             // SignalR is back. The handshake rides the new data stream rather
+                             // than the control plane, so there is nothing to do here but arm it
+                             // and let Streaming open that stream.
                              _reconnectionHandler.PrepareForHandshake();
                              _fsm.TransitionTo(SessionState.Streaming);
                          }
@@ -404,13 +395,10 @@ internal class DataSession<T> : IDataSession<T>
         
         if (IsSender)
         {
-            // Step 1: Execute Handshake IF we are reconnecting (or new stream)
-            // Since we always start a new stream in "Streaming", we should always ping/pong?
-            // Or only if we flagged it?
-            // _reconnectionHandler tracks the "PongReceived" TCS.
-            // It returns -1 if timeout/fail, or NextExpectedID.
-            
-            // We always try handshake to be safe and sync with receiver
+            // Every stream starts with the handshake, new or resumed alike. Doing it only on a
+            // flagged reconnection would make the sender's idea of where the receiver stands
+            // depend on the client having noticed the cut, which is exactly what it cannot be
+            // trusted to know. Returns -1 on timeout, otherwise the receiver's NextExpectedId.
             int nextExpectedFromPong = await _reconnectionHandler.ExecuteHandshakeAsync(outputStream, transferGuid, token);
             bool didPingPong = nextExpectedFromPong >= 0;
             
@@ -574,13 +562,11 @@ internal class DataSession<T> : IDataSession<T>
                 {
                     var items = _batchProcessor.ItemsReceived;
                     var acks = _batchProcessor.AcksSent;
-                    // Note: BatchProcessor doesn't expose _lastAckedBatchId in public API, only via stats?
-                    // We can track it or expose it.
-                    // Let's assume NextExpectedBatchId - 1 is last acked for simplicity or expose it.
-                    // ReceiverState tracks NextExpected. LastAcked is close.
-                    // BatchProcessor doesn't expose it.
-                    // Let's assume items count is rough proxy?
-                    // Or add LastAckedBatchId to BatchProcessor public API.
+                    // -1 is "not reported", not a batch id: BatchProcessor maintains
+                    // _lastAckedBatchId and does not expose it. The hub uses this heartbeat for
+                    // liveness and progress counters, both of which items and acks carry, so
+                    // nothing reads the field today. Exposing it is on the roadmap rather than
+                    // done here, the value being a wire field nobody consumes.
                     await _signalR.HubConnection.InvokeAsync(nameof(ICommandHub.ReceiverHeartbeat), TransferId, items, acks, -1);
                 }
             }

@@ -145,11 +145,8 @@ public class TransportRClientBuilder<T>
         // Defaults
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger<SignalRDataClient<T>>();
-        // If no serializer provided, we can't build? Or rely on default?
-        // Protocol requires BinaryPrimitives.
-        // Assuming Serializer is mandatory or user must provide one.
-        // There is no public default implementation visible here
-        // Let's assume user must provide it (as per previous constructor).
+        // The serializer is mandatory and there is no default: picking one for the caller would
+        // pick their wire format, and the serialization packages are separate on purpose.
         if (_serializer == null)
         {
             throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
