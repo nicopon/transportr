@@ -17,16 +17,26 @@ internal class PooledMemoryOwner : IMemoryOwner<byte>
         _memory = _array.AsMemory(0, memory.Length);
     }
 
-    public Memory<byte> Memory => _array != null 
-        ? _array.AsMemory(0, _memory.Length) 
-        : throw new ObjectDisposedException(nameof(PooledMemoryOwner));
+    public Memory<byte> Memory
+    {
+        get
+        {
+            // Read once: testing the field and then indexing it lets a concurrent disposal turn an
+            // ObjectDisposedException into a NullReferenceException.
+            var array = _array;
+            return array is not null
+                ? array.AsMemory(0, _memory.Length)
+                : throw new ObjectDisposedException(nameof(PooledMemoryOwner));
+        }
+    }
 
+    /// <remarks>
+    /// Idempotent, and it has to be: the buffer comes from a pool, so returning it twice hands one
+    /// array to two renters. That corrupts unrelated data and throws nothing here.
+    /// </remarks>
     public void Dispose()
     {
-        if (_array != null)
-        {
-            ArrayPool<byte>.Shared.Return(_array);
-            _array = null;
-        }
+        var array = Interlocked.Exchange(ref _array, null);
+        if (array is not null) ArrayPool<byte>.Shared.Return(array);
     }
 }
