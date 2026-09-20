@@ -1,0 +1,23 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <!-- Snippets are copied from the documents and stay shaped like the documents. -->
+    <NoWarn>$(NoWarn);CS1998;IDE0290</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
+  </ItemGroup>
+
+</Project>
