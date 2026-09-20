@@ -46,7 +46,7 @@ public class ArrowBatchSerializerTests
     }
 
     private static Task<List<RecordBatch>?> ReadAsync(ArrowBatchSerializer serializer, byte[] bytes)
-        => new BatchProtocol<RecordBatch>(serializer).ReadBatchBodyFromMemoryAsync(bytes, CancellationToken.None);
+        => new BatchProtocol<RecordBatch>(serializer).ReadBatchBodyFromMemoryAsync(bytes);
 
     [Theory]
     [InlineData(true)]

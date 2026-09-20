@@ -202,6 +202,26 @@ public class BatchProcessorTests
         Assert.Equal(100, processor.ItemsReceived);
     }
 
+    [Fact]
+    public async Task DisposeAsync_ReleasesAReadLoopParkedOnTheByteGate()
+    {
+        // Arrange: a budget of one chunk, filled.
+        _stubContext.Options.ReceiveBufferCapacity = BufferCapacity.ItemsAndBytes(10_000, 24);
+        var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+        await processor.ProcessChunkAsync(CreateBatchChunk(batchId: 0, itemCount: 2));
+
+        var blocked = processor.ProcessChunkAsync(CreateBatchChunk(batchId: 1, itemCount: 2));
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(300)));
+
+        // Act: the session goes away while the consumer is behind. The parked loop cannot reach
+        // the finally that would otherwise complete the buffer, so disposal has to do it.
+        await processor.DisposeAsync();
+
+        // Assert
+        await Assert.ThrowsAsync<ChannelClosedException>(() => blocked.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
     private sealed class ArrayMemoryOwner(byte[] data) : IMemoryOwner<byte>
     {
         public Memory<byte> Memory => data;

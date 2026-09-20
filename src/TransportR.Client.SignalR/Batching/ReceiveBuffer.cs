@@ -201,6 +201,15 @@ internal sealed class ReceiveBuffer<T>
         }
     }
 
+    /// <remarks>
+    /// <b>The lock is taken on every item the consumer takes, and that is deliberate.</b> An
+    /// attempt to skip it — decrement interlocked, enter the lock only when a flag says a writer
+    /// is parked — deadlocks: the consumer can decrement and read the flag inside the window
+    /// where the writer has decided to park but not yet raised it, and if that was the last item
+    /// the wake never comes. Making it sound needs a Dekker pair with an explicit memory
+    /// barrier, which is not worth an unattributed few percent on a path where the byte bound
+    /// usually never binds at all.
+    /// </remarks>
     private void Release(long bytes)
     {
         if (_maxBytes is null || bytes == 0) return;

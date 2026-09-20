@@ -102,12 +102,31 @@ internal class ReceiverState<T>
     /// available without knowing what <typeparamref name="T"/> costs on the heap. The sender
     /// strips the item-count prefix before writing, so this is already the serialized body alone.
     /// </remarks>
+    /// <remarks>
+    /// The token cancels the wait for capacity and the hand-off, not the decoding between them:
+    /// nothing under the serializer interface takes one.
+    /// </remarks>
     private Task DeserializeAndWrite(ReadOnlyMemory<byte> compressedBody, CancellationToken ct)
     {
         return _buffer.WriteChunkAsync(
             compressedBody.Length,
-            () => _protocol.ReadBatchBodyFromMemoryAsync(compressedBody, ct),
+            () => _protocol.ReadBatchBodyFromMemoryAsync(compressedBody),
             ct);
+    }
+
+    /// <summary>
+    /// Drops the chunks held out of order, returning their pooled memory.
+    /// </summary>
+    /// <remarks>
+    /// Called when a reconnection replaces this state. Dropping them is correct — the sender
+    /// resends everything from <see cref="NextExpectedBatchId"/>, which is below every id held
+    /// here — but the buffers they sit in come from a pool and were previously abandoned with
+    /// the instance, one leak per reconnection that had chunks in hand.
+    /// </remarks>
+    public void DiscardReordered()
+    {
+        foreach (var (owner, _) in _reorderBuffer.Values) owner.Dispose();
+        _reorderBuffer.Clear();
     }
 
     /// <summary>

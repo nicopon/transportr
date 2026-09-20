@@ -112,6 +112,24 @@ public class ReceiverStateTests
     }
 
     [Fact]
+    public async Task DiscardReordered_ReturnsTheMemoryOfChunksHeldOutOfOrder()
+    {
+        // Arrange: batch 1 arrives first and is held.
+        var payload = CreateMockPayload(new[] { 4, 5, 6 });
+        var owner = new ArrayMemoryOwner(payload);
+        await _receiverState.ProcessBatchAsync(1, owner, payload);
+        Assert.Equal(1, _receiverState.ReorderedChunks);
+        Assert.False(owner.IsDisposed);
+
+        // Act: a reconnection replaces this state.
+        _receiverState.DiscardReordered();
+
+        // Assert: pooled buffers go back, rather than away with the instance.
+        Assert.Equal(0, _receiverState.ReorderedChunks);
+        Assert.True(owner.IsDisposed);
+    }
+
+    [Fact]
     public async Task Complete_EndsTheConsumersEnumeration()
     {
         // Arrange

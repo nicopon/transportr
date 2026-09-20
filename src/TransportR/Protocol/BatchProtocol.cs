@@ -28,7 +28,13 @@ public class BatchProtocol<T>
     /// <summary>
     /// Reads the batch body from memory.
     /// </summary>
-    public async Task<List<T>?> ReadBatchBodyFromMemoryAsync(ReadOnlyMemory<byte> bodyBytes, CancellationToken ct)
+    /// <remarks>
+    /// Takes no cancellation token, because there is nowhere to honour one:
+    /// <see cref="IBatchSerializer{T}.DeserializeBatchAsync"/> does not accept one, and the
+    /// source is memory already read off the wire. A token accepted here and passed nowhere
+    /// would tell a caller that decoding is interruptible when it is not.
+    /// </remarks>
+    public async Task<List<T>?> ReadBatchBodyFromMemoryAsync(ReadOnlyMemory<byte> bodyBytes)
     {
          Stream sourceStream;
 

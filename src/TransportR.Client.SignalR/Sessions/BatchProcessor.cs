@@ -100,6 +100,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
     {
         _receiveBuffer ??= new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
+
+        // A reconnection replaces the state; the chunks it held out of order go back to the pool
+        // rather than away with the instance. The sender resends them from startBatchId.
+        _receiverState?.DiscardReordered();
+
         _receiverState = new ReceiverState<T>(_receiveBuffer, _protocol, startBatchId);
         return Task.CompletedTask;
     }
@@ -463,6 +468,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
         // Not disposed on purpose: a producer may still be unwinding out of a cancelled wait on
         // it, and SemaphoreSlim only needs disposing once AvailableWaitHandle has been used.
         _inFlightSlots = null;
+
+        // Same reason, other end: a read loop parked on the byte gate has to be let go. The
+        // session token reaches it too, but only one of the two is an explicit release, and the
+        // parked loop cannot reach the finally that would otherwise complete the buffer.
+        _receiveBuffer?.Complete();
+        _receiverState?.DiscardReordered();
         
         foreach(var kvp in _unackedBatches)
         {
