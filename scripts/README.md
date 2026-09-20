@@ -68,6 +68,8 @@ Unified benchmark runner with scenario support.
 | `chaos` | Network chaos simulation |
 | `ha` | HA mode (2 Hubs + TestProxy) with sticky sessions |
 | `ha-redis` | Redis State Store (single hub, for HA preparation) |
+| `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
+| `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
 
 ---
 
@@ -100,6 +102,18 @@ Run: `./scripts/run-benchmark.sh custom`
 
 ---
 
+## Asserting memory
+
+A scenario that declares `MAX_RECEIVER_RSS_MB` or `MAX_SENDER_RSS_MB` turns on RSS sampling: one
+row per process per second into `$OUTPUT_DIR/rss.csv`, and a run that peaks over its ceiling fails
+the same way a wrong line count does. Scenarios that declare neither sample nothing and cost
+nothing.
+
+This is what makes a memory claim checkable rather than asserted. `slow-receiver` holds the
+receiver under 300 MB where its control, which differs only by the byte bound, reaches 870 MB.
+
+---
+
 ## Architecture
 
 ```
@@ -111,6 +125,7 @@ scripts/
 ├── lib/
 │   ├── common.sh        # Utilities, logging
 │   ├── process.sh       # Process management
+│   ├── memory.sh        # RSS sampling and peak assertions
 │   └── idp.sh           # TestIdp for OIDC
 └── scenarios/
     ├── default.env

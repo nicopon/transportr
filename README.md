@@ -107,6 +107,7 @@ await Task.Delay(Timeout.Infinite); // Keep listening
 | **Auto-batching** | Configurable batch size and timeout for optimal throughput |
 | **Pluggable Serialization** | MessagePack (fastest), Protobuf, or JSON — with built-in LZ4/Zstd compression |
 | **Reliable Delivery** | ACK-based with automatic retry and reordering |
+| **Bounded Memory** | Backpressure at both ends — the receive buffer is bounded in items *and* bytes, so a slow consumer costs time, not RAM |
 | **Seamless Reconnection** | Automatic recovery from network interruptions |
 | **Group Routing** | Logical groups for routing and access control |
 | **High Availability** | Optional Redis state store + sticky sessions |

@@ -163,6 +163,29 @@ The Hub employs a **TransferCleanupService** that monitors all active transfers.
 
 In a multi-hub deployment behind a load balancer with sticky sessions, the Hub ensures clients connect to the correct instance using `AffinityRedirectException`.
 
+### 5. Backpressure (Both Ends, Data Plane Only)
+
+A slow consumer must cost the transfer time, not memory. There is no control-plane message for this: the pushback is the data plane throttling itself, end to end, and the hub takes no part in it.
+
+**The chain.** A full receive buffer parks the receiver's read loop. A parked read loop stops draining the HTTP response body, which closes the TCP window back to the hub, which blocks the hub's forwarding write, which blocks the sender's HTTP write. And because a batch is acknowledged only *after* it lands in the receive buffer, the acknowledgement that would reopen the sender's in-flight window is withheld for as long as the consumer is behind. One slow consumer therefore stops the producer, without anyone being told.
+
+**The two bounds, and their units.**
+
+| End | Option | Counts | Default |
+|---|---|---|---|
+| Sender | `ClientOptions.MaxInFlightBatches` | batches flushed but not yet acknowledged | `null` — unbounded |
+| Receiver | `ClientOptions.ReceiveBufferCapacity` | items **and** wire bytes, first to bind | 10 000 items / 64 MB |
+
+The sender's window is taken **by the producer, before serialization**. Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
+
+That placement is also why the sender's window cannot count bytes: the serialized size is not known until after the point where the slot is taken. A byte-accurate sender window would need the caller to price an item before it is serialized. It is not needed for the memory to be bounded — the receiver's byte bound reaches the sender through the chain above.
+
+**Receive capacity is two-dimensional because one unit cannot serve both payload shapes.** Ten thousand items is a memory figure when an item is an order and a meaningless one when it is a multi-megabyte record batch; a byte budget is the reverse. Both are declared and the first one reached binds, so neither kind of payload has to disable the other's bound.
+
+**Bytes are wire bytes** — the serialized payload as it arrived, charged to a chunk before it is decoded and returned item by item as the consumer takes them. It is the only size available without knowing what the item type costs on the heap, and it is not that cost: Arrow IPC bodies are close to their decoded buffers less whatever LZ4 saved, while MessagePack records decode to several times their wire size. Size the bound against that expansion.
+
+**A chunk larger than the whole byte budget is still admitted into an empty buffer.** Refusing it would be a permanent stall rather than backpressure, since nothing can ever free room for it. Lowering the byte bound therefore throttles a transfer and cannot deadlock one.
+
 ---
 
 ## Protocol Chunk Types

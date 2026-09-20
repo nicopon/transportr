@@ -49,7 +49,8 @@ running real processes via the scripts, which double as both benchmark and non-r
 ./scripts/run-benchmark.sh oidc      # external TestIdp + OIDC
 ./scripts/run-benchmark.sh chaos     # Toxiproxy-injected network faults mid-transfer
 ./scripts/run-benchmark.sh ha-redis  # Redis-backed IStateStore, single hub
-./scripts/test-all.sh                # runs default, embedded-idp, oidc, chaos, ha-redis in sequence; exit 1 on any failure
+./scripts/run-benchmark.sh slow-receiver  # throttled consumer, asserts a receiver memory ceiling
+./scripts/test-all.sh                # runs every scenario in test-all.sh's list in sequence; exit 1 on any failure
 ./scripts/verify-loop.sh             # runs test-all.sh 4× back-to-back (flake/leak hunting)
 ```
 
@@ -126,7 +127,8 @@ they only exist while a transfer does and they feed `TransferState`, not the reg
 `Send<T>` handle (`src/TransportR/Abstractions/Send.cs`); a receiver registers `OnTransferStarted`
 and consumes a `Receive<T>` handle via `IAsyncEnumerable`. `BatchAccumulator` buffers items
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
-loop; `ReceiverState` tracks ordering/dedup on the receiving side. `HubConnectionManager` owns the
+loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands decoded items to
+`ReceiveBuffer`. `HubConnectionManager` owns the
 SignalR connection and its reconnection lifecycle; `HttpStreamManager` owns the data-plane HTTP
 streams and restarts them on `IOException`/`HttpRequestException` (the hub never proactively
 notifies clients of a disconnect — see "Disconnection Detection" in `ResilienceArchitecture.md`).
@@ -145,6 +147,19 @@ bridges entirely**; `TransferCleanupService` terminates a transfer with no activ
 off by default — one that is alive but making no progress. Heartbeats refresh activity but not
 progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
 stall from the hub). This is the *only* place the hub unilaterally kills a transfer.
+
+### Backpressure
+
+Both ends are bounded and the two compose, entirely within the data plane — see "Backpressure" in
+`ResilienceArchitecture.md`. The sender's `MaxInFlightBatches` counts **batches** and its slot is
+taken *by the producer, before serialization* (moving it behind the serializer converts a managed
+backlog into an off-heap one); the receiver's `ReceiveBufferCapacity` counts **items and wire
+bytes**, whichever binds first, because an item count is not a bound when an item is an Arrow
+record batch and a byte budget is a clumsy one for small records. A full receive buffer parks the
+read loop, which withholds the ack that would reopen the sender's window — so the receiver's byte
+bound reaches the sender transitively, which is why the send window does not need a byte
+dimension of its own. A chunk larger than the whole byte budget is still admitted into an empty
+buffer: the bound must throttle, never stall.
 
 ### Auth
 
