@@ -1,3 +1,5 @@
+using TransportR.Configuration;
+
 namespace TransportR.Client.SignalR.Configuration;
 
 /// <summary>
@@ -86,4 +88,30 @@ public class ClientOptions
     /// </para>
     /// </remarks>
     public int? MaxInFlightBatches { get; set; }
+
+    /// <summary>
+    /// How much the receiver may hold for a consumer that is behind, before the incoming stream
+    /// is made to wait. Default: 10 000 items or 64 MB of wire payload, whichever comes first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the receiving end of the same backpressure the sender's
+    /// <see cref="MaxInFlightBatches"/> applies at the other end, and the two compose: a full
+    /// receive buffer parks the read loop, which withholds the acknowledgement that would reopen
+    /// the sender's window.
+    /// </para>
+    /// <para>
+    /// <b>Both dimensions are bounded by default, because neither alone is a bound.</b> A count
+    /// of items says nothing when an item is a multi-megabyte Arrow record batch; a count of
+    /// bytes is a clumsy way to hold ten thousand small records. The byte figure is <i>wire</i>
+    /// bytes — see <see cref="BufferCapacity"/> for what that does and does not measure, and size
+    /// it against how much your items expand when decoded.
+    /// </para>
+    /// <para>
+    /// A single chunk larger than the byte bound is still admitted, so lowering this throttles a
+    /// transfer and cannot stall one.
+    /// </para>
+    /// </remarks>
+    public BufferCapacity ReceiveBufferCapacity { get; set; } =
+        BufferCapacity.ItemsAndBytes(10_000, 64 * 1024 * 1024);
 }

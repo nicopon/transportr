@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Threading.Channels;
 using TransportR.Protocol;
 
 namespace TransportR.Client.SignalR.Batching;
@@ -19,16 +18,24 @@ internal class ReceiverState<T>
         public int? BatchIdToAck { get; init; }
     }
 
-    private readonly ChannelWriter<T> _writer;
-    private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body, int Count)> _buffer;
+    private readonly ReceiveBuffer<T> _buffer;
+    private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body)> _reorderBuffer;
     private readonly BatchProtocol<T> _protocol;
 
     public int NextExpectedBatchId { get; private set; } = 0;
 
-    public ReceiverState(ChannelWriter<T> writer, BatchProtocol<T> protocol, int startBatchId = 0)
+    /// <summary>
+    /// Chunks currently held out of order, waiting for the one before them. Counted rather than
+    /// bounded: these hold serialized bytes outside the receive buffer's budget, and over a single
+    /// ordered stream the count should stay at zero. A bound built before a measurement showed
+    /// otherwise would be a second budget guarding nothing.
+    /// </summary>
+    public int ReorderedChunks => _reorderBuffer.Count;
+
+    public ReceiverState(ReceiveBuffer<T> buffer, BatchProtocol<T> protocol, int startBatchId = 0)
     {
-        _writer = writer;
-        _buffer = [];
+        _buffer = buffer;
+        _reorderBuffer = [];
         _protocol = protocol;
         NextExpectedBatchId = startBatchId;
     }
@@ -37,11 +44,10 @@ internal class ReceiverState<T>
     /// Processes an incoming batch, handling reordering and deserialization.
     /// </summary>
     /// <param name="batchId">The batch identifier.</param>
-    /// <param name="count">Number of items in the batch.</param>
     /// <param name="owner">Memory owner for the batch payload (will be disposed after processing).</param>
     /// <param name="compressedBody">The compressed batch payload.</param>
     /// <returns>Result indicating what ACK to send.</returns>
-    public async Task<ReceiveResult> ProcessBatchAsync(int batchId, int count, IMemoryOwner<byte> owner, ReadOnlyMemory<byte> compressedBody)
+    public async Task<ReceiveResult> ProcessBatchAsync(int batchId, IMemoryOwner<byte> owner, ReadOnlyMemory<byte> compressedBody, CancellationToken ct = default)
     {
         if (batchId < NextExpectedBatchId) 
         {
@@ -53,7 +59,7 @@ internal class ReceiverState<T>
         {
             try
             {
-                await DeserializeAndWrite(compressedBody, count);
+                await DeserializeAndWrite(compressedBody, ct);
             }
             finally
             {
@@ -62,13 +68,13 @@ internal class ReceiverState<T>
             
             NextExpectedBatchId++;
 
-            while (_buffer.ContainsKey(NextExpectedBatchId))
+            while (_reorderBuffer.ContainsKey(NextExpectedBatchId))
             {
-                var (bufOwner, bufBody, bufCount) = _buffer[NextExpectedBatchId];
-                _buffer.Remove(NextExpectedBatchId);
+                var (bufOwner, bufBody) = _reorderBuffer[NextExpectedBatchId];
+                _reorderBuffer.Remove(NextExpectedBatchId);
                 try
                 {
-                    await DeserializeAndWrite(bufBody, bufCount);
+                    await DeserializeAndWrite(bufBody, ct);
                 }
                 finally
                 {
@@ -82,22 +88,26 @@ internal class ReceiverState<T>
         else
         {
             // Out-of-order batch: buffer it and ACK (TCP guarantees eventual delivery)
-            _buffer[batchId] = (owner, compressedBody, count);
+            _reorderBuffer[batchId] = (owner, compressedBody);
             return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
         }
     }
 
-    private async Task DeserializeAndWrite(ReadOnlyMemory<byte> compressedBody, int count)
+    /// <summary>
+    /// Hands a chunk to the receive buffer, which charges it against the configured capacity
+    /// before it is decoded and parks here for as long as the consumer is behind.
+    /// </summary>
+    /// <remarks>
+    /// The chunk's payload length is what gets charged — the wire size, which is the only size
+    /// available without knowing what <typeparamref name="T"/> costs on the heap. The sender
+    /// strips the item-count prefix before writing, so this is already the serialized body alone.
+    /// </remarks>
+    private Task DeserializeAndWrite(ReadOnlyMemory<byte> compressedBody, CancellationToken ct)
     {
-         var items = await _protocol.ReadBatchBodyFromMemoryAsync(compressedBody, CancellationToken.None);
-
-        if (items != null)
-        {
-            foreach (var item in items)
-            {
-                await _writer.WriteAsync(item);
-            }
-        }
+        return _buffer.WriteChunkAsync(
+            compressedBody.Length,
+            () => _protocol.ReadBatchBodyFromMemoryAsync(compressedBody, ct),
+            ct);
     }
 
     /// <summary>
@@ -105,6 +115,6 @@ internal class ReceiverState<T>
     /// </summary>
     public void Complete()
     {
-        _writer.TryComplete();
+        _buffer.Complete();
     }
 }

@@ -517,7 +517,7 @@ internal class DataSession<T> : IDataSession<T>
                     break;
                 }
 
-                await _batchProcessor.ProcessChunkAsync(chunkData.Value);
+                await _batchProcessor.ProcessChunkAsync(chunkData.Value, token);
                 
                 // Exit when entering completing phase (receiver got Complete chunk) or fully completed
                 if (IsInCompletingPhase || IsCompleted)

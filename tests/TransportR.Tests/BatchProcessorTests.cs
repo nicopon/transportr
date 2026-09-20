@@ -1,10 +1,12 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.IO.Pipelines;
 using System.Threading.Channels;
 using System.Text;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
+using TransportR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -135,6 +137,75 @@ public class BatchProcessorTests
         // Assert: Task should complete
         await completeTask; 
         Assert.True(completeTask.IsCompletedSuccessfully);
+    }
+
+    // ---- Receive capacity (ClientOptions.ReceiveBufferCapacity) ----
+
+    /// <summary>
+    /// Builds the chunk the stub serializer expects: a 4-byte count, then ten bytes per item.
+    /// </summary>
+    private ChunkData CreateBatchChunk(int batchId, int itemCount)
+    {
+        var payload = new byte[4 + 10 * itemCount];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, itemCount);
+        var owner = new ArrayMemoryOwner(payload);
+        return new ChunkData(
+            ChunkHeader.CreateBatch(_transferId, batchId, itemCount, payload.Length), owner, payload.Length);
+    }
+
+    [Fact]
+    public async Task ProcessChunk_WhenTheByteBudgetIsFull_ParksTheReadLoop()
+    {
+        // Arrange: a budget of one chunk. The item count is nowhere near its own bound, which is
+        // the whole point - this is the case ten thousand items never caught.
+        _stubContext.Options.ReceiveBufferCapacity = BufferCapacity.ItemsAndBytes(10_000, 24);
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        await processor.ProcessChunkAsync(CreateBatchChunk(batchId: 0, itemCount: 2));
+
+        // Act: the second chunk has no room.
+        var blocked = processor.ProcessChunkAsync(CreateBatchChunk(batchId: 1, itemCount: 2));
+
+        // Assert: parked. This is what stops the read loop draining the HTTP body, which is what
+        // pushes back to the sender.
+        Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(300)));
+
+        // Act: the consumer takes the first chunk's items.
+        var enumerator = processor.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
+        await enumerator.MoveNextAsync();
+        await enumerator.MoveNextAsync();
+        await enumerator.MoveNextAsync();
+
+        // Assert: the read loop resumes.
+        await blocked.WaitAsync(TimeSpan.FromSeconds(5));
+        await enumerator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ProcessChunk_WithinTheBudget_DoesNotParkTheReadLoop()
+    {
+        // Arrange: the default capacity, which no test-sized chunk comes near.
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        // Act
+        var pump = Task.Run(async () =>
+        {
+            for (var i = 0; i < 20; i++)
+                await processor.ProcessChunkAsync(CreateBatchChunk(batchId: i, itemCount: 5));
+        });
+
+        // Assert
+        Assert.Same(pump, await Task.WhenAny(pump, Task.Delay(TimeSpan.FromSeconds(5))));
+        await pump;
+        Assert.Equal(100, processor.ItemsReceived);
+    }
+
+    private sealed class ArrayMemoryOwner(byte[] data) : IMemoryOwner<byte>
+    {
+        public Memory<byte> Memory => data;
+        public void Dispose() { }
     }
 
     // ========== STUBS ==========

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions; // Restore
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Configuration;
+using TransportR.Configuration;
 
 namespace TransportR.Client.SignalR;
 
@@ -25,6 +26,7 @@ public class TransportRClientBuilder<T>
     private int _batchSize = 1000;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
+    private BufferCapacity? _receiveCapacity;
     private ILoggerFactory? _loggerFactory;
     private IBatchSerializer<T>? _serializer;
     private string? _accessToken;
@@ -71,6 +73,26 @@ public class TransportRClientBuilder<T>
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(max, 0, nameof(max));
         _maxInFlightBatches = max;
+        return this;
+    }
+
+    /// <summary>
+    /// Bounds what the receiver holds for a consumer that is behind. Defaults to 10 000 items or
+    /// 64 MB of wire payload, whichever comes first.
+    /// </summary>
+    /// <remarks>
+    /// Raise the byte figure for throughput on a fast consumer, lower it to cap the receiver's
+    /// footprint. The count and the byte figure are both bounds and the first one reached is the
+    /// one that applies, so an Arrow consumer is held by the bytes and a record consumer by the
+    /// count without either having to disable the other — see <see cref="BufferCapacity"/>.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithReceiveCapacity(BufferCapacity capacity)
+    {
+        if (capacity.IsEmpty)
+            throw new ArgumentException(
+                "A receive capacity needs at least one of the two dimensions bounded.", nameof(capacity));
+
+        _receiveCapacity = capacity;
         return this;
     }
 
@@ -148,6 +170,8 @@ public class TransportRClientBuilder<T>
             BatchFlushIntervalMs = _batchFlushIntervalMs,
             MaxInFlightBatches = _maxInFlightBatches
         };
+
+        if (_receiveCapacity is { } capacity) options.ReceiveBufferCapacity = capacity;
         
         var hubUrl = _url.TrimEnd('/');
         var controlUrl = $"{hubUrl}/hub/command";

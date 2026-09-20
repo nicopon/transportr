@@ -1,6 +1,6 @@
 using System.Buffers;
-using System.Threading.Channels;
 using TransportR.Client.SignalR.Batching;
+using TransportR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Xunit;
@@ -12,15 +12,16 @@ namespace POC_DataProxy.Tests;
 /// </summary>
 public class ReceiverStateTests
 {
-    private readonly Channel<int> _channel;
+    private readonly ReceiveBuffer<int> _buffer;
     private readonly BatchProtocol<int> _protocol;
     private readonly ReceiverState<int> _receiverState;
 
     public ReceiverStateTests()
     {
-        _channel = Channel.CreateUnbounded<int>();
+        // Wide enough that nothing here parks on capacity - these tests are about ordering.
+        _buffer = new ReceiveBuffer<int>(BufferCapacity.ItemsAndBytes(1000, 1024 * 1024));
         _protocol = new BatchProtocol<int>(new MockBatchSerializer());
-        _receiverState = new ReceiverState<int>(_channel.Writer, _protocol);
+        _receiverState = new ReceiverState<int>(_buffer, _protocol);
     }
 
     [Fact]
@@ -38,7 +39,7 @@ public class ReceiverStateTests
         var owner = new ArrayMemoryOwner(payload);
 
         // Act
-        var result = await _receiverState.ProcessBatchAsync(0, 3, owner, payload);
+        var result = await _receiverState.ProcessBatchAsync(0, owner, payload);
 
         // Assert
         Assert.True(result.IsProcessed);
@@ -54,7 +55,7 @@ public class ReceiverStateTests
         var owner = new ArrayMemoryOwner(payload);
 
         // Act
-        var result = await _receiverState.ProcessBatchAsync(1, 3, owner, payload);
+        var result = await _receiverState.ProcessBatchAsync(1, owner, payload);
 
         // Assert
         Assert.True(result.IsProcessed);
@@ -68,14 +69,14 @@ public class ReceiverStateTests
         // Arrange - First, receive batch 0
         var payload1 = CreateMockPayload(new[] { 1, 2, 3 });
         var owner1 = new ArrayMemoryOwner(payload1);
-        await _receiverState.ProcessBatchAsync(0, 3, owner1, payload1);
+        await _receiverState.ProcessBatchAsync(0, owner1, payload1);
 
         // Send duplicate batch 0 again
         var payload2 = CreateMockPayload(new[] { 1, 2, 3 });
         var owner2 = new ArrayMemoryOwner(payload2);
 
         // Act
-        var result = await _receiverState.ProcessBatchAsync(0, 3, owner2, payload2);
+        var result = await _receiverState.ProcessBatchAsync(0, owner2, payload2);
 
         // Assert
         Assert.True(result.IsProcessed);
@@ -89,12 +90,12 @@ public class ReceiverStateTests
         // Arrange - Send batches out of order: 2, 1, 0
         var payload2 = CreateMockPayload(new[] { 7, 8, 9 });
         var owner2 = new ArrayMemoryOwner(payload2);
-        await _receiverState.ProcessBatchAsync(2, 3, owner2, payload2);
+        await _receiverState.ProcessBatchAsync(2, owner2, payload2);
         Assert.Equal(0, _receiverState.NextExpectedBatchId);
 
         var payload1 = CreateMockPayload(new[] { 4, 5, 6 });
         var owner1 = new ArrayMemoryOwner(payload1);
-        await _receiverState.ProcessBatchAsync(1, 3, owner1, payload1);
+        await _receiverState.ProcessBatchAsync(1, owner1, payload1);
         Assert.Equal(0, _receiverState.NextExpectedBatchId);
 
         // Now send batch 0 - should trigger processing of 0, 1, 2
@@ -102,7 +103,7 @@ public class ReceiverStateTests
         var owner0 = new ArrayMemoryOwner(payload0);
 
         // Act
-        var result = await _receiverState.ProcessBatchAsync(0, 3, owner0, payload0);
+        var result = await _receiverState.ProcessBatchAsync(0, owner0, payload0);
 
         // Assert
         Assert.True(result.IsProcessed);
@@ -111,16 +112,42 @@ public class ReceiverStateTests
     }
 
     [Fact]
-    public void Complete_ClosesChannel()
+    public async Task Complete_EndsTheConsumersEnumeration()
     {
+        // Arrange
+        var payload = CreateMockPayload(new[] { 1, 2, 3 });
+        await _receiverState.ProcessBatchAsync(0, new ArrayMemoryOwner(payload), payload);
+
         // Act
         _receiverState.Complete();
 
+        // Assert: what was already buffered is still delivered, then the enumeration ends.
+        var received = new List<int>();
+        await foreach (var item in _buffer.ReadAllAsync(CancellationToken.None))
+            received.Add(item);
+
+        Assert.Equal(new[] { 1, 2, 3 }, received);
+    }
+
+    [Fact]
+    public async Task ProcessBatchAsync_OutOfOrder_IsCountedWhileHeld()
+    {
+        // Arrange
+        Assert.Equal(0, _receiverState.ReorderedChunks);
+        var payload1 = CreateMockPayload(new[] { 4, 5, 6 });
+
+        // Act: batch 1 before batch 0.
+        await _receiverState.ProcessBatchAsync(1, new ArrayMemoryOwner(payload1), payload1);
+
+        // Assert: held, and visible as held - these bytes sit outside the receive buffer's budget.
+        Assert.Equal(1, _receiverState.ReorderedChunks);
+
+        // Act: the gap closes.
+        var payload0 = CreateMockPayload(new[] { 1, 2, 3 });
+        await _receiverState.ProcessBatchAsync(0, new ArrayMemoryOwner(payload0), payload0);
+
         // Assert
-        Assert.True(_channel.Reader.Completion.IsCompleted || _channel.Reader.Completion.IsFaulted ==  false);
-        
-        // Verify writer is complete
-        Assert.False(_channel.Writer.TryWrite(999)); // Should fail since writer is complete
+        Assert.Equal(0, _receiverState.ReorderedChunks);
     }
 
     private static byte[] CreateMockPayload(int[] items)

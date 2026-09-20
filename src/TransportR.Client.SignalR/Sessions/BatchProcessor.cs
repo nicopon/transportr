@@ -23,7 +23,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
-    private Channel<T>? _receiveChannel;
+    private ReceiveBuffer<T>? _receiveBuffer;
     
     // Sender State
     private BatchAccumulator<T>? _batchAccumulator;
@@ -98,9 +98,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     public Task StartReceiverAsync()
     {
-        _receiveChannel ??= Channel.CreateBounded<T>(10000);
+        _receiveBuffer ??= new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
-        _receiverState = new ReceiverState<T>(_receiveChannel.Writer, _protocol, startBatchId);
+        _receiverState = new ReceiverState<T>(_receiveBuffer, _protocol, startBatchId);
         return Task.CompletedTask;
     }
 
@@ -118,8 +118,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken token)
     {
-        if (_receiveChannel == null) throw new InvalidOperationException("Receiver not started");
-        return _receiveChannel.Reader.ReadAllAsync(token);
+        if (_receiveBuffer == null) throw new InvalidOperationException("Receiver not started");
+        return _receiveBuffer.ReadAllAsync(token);
     }
 
     public async Task CompleteSenderAsync(CancellationToken token)
@@ -139,7 +139,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     public void CompleteReceiver()
     {
-        _receiveChannel?.Writer.TryComplete();
+        _receiveBuffer?.Complete();
         _sendChannel.Writer.TryComplete(); // Allow Control WriteLoop to exit
     }
     
@@ -158,12 +158,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
         _completeAckReceived = new TaskCompletionSource();
     }
 
-    public async Task ProcessChunkAsync(ChunkData chunk)
+    public async Task ProcessChunkAsync(ChunkData chunk, CancellationToken ct = default)
     {
         switch (chunk.Header.Type)
         {
             case ChunkType.Batch:
-                await HandleBatchChunkAsync(chunk);
+                await HandleBatchChunkAsync(chunk, ct);
                 break;
             case ChunkType.BatchAck:
                 HandleBatchAck(chunk.Header.BatchId);
@@ -249,14 +249,24 @@ internal class BatchProcessor<T> : IAsyncDisposable
         await _sendChannel.Writer.WriteAsync(new BatchControlMessage(batchId, entry), ct);
     }
     
-    private async Task HandleBatchChunkAsync(ChunkData chunk)
+    private async Task HandleBatchChunkAsync(ChunkData chunk, CancellationToken ct)
     {
         if (_receiverState == null) return;
         
         var owner = new PooledMemoryOwner(chunk.Payload);
-        var rxResult = await _receiverState.ProcessBatchAsync(chunk.Header.BatchId, chunk.Header.Count, owner, owner.Memory);
+        var rxResult = await _receiverState.ProcessBatchAsync(chunk.Header.BatchId, owner, owner.Memory, ct);
         
         Interlocked.Add(ref _itemsReceived, chunk.Header.Count);
+
+        // Chunks held out of order carry serialized bytes that no budget counts. Over an ordered
+        // stream this should never fire; it is here so that "should never" is something a run can
+        // contradict, rather than a second budget built against an intuition.
+        if (_receiverState.ReorderedChunks > 0)
+        {
+            _context.Logger.LogDebug(
+                "Holding {Count} out-of-order chunk(s) for Transfer={TransferId}, outside the receive budget",
+                _receiverState.ReorderedChunks, _transferId);
+        }
 
         if (rxResult.BatchIdToAck.HasValue)
         {
