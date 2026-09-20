@@ -5,7 +5,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions; // Restore
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Configuration;
-using TransportR.Configuration;
 
 namespace TransportR.Client.SignalR;
 
@@ -77,20 +76,34 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Bounds what the receiver holds for a consumer that is behind. Defaults to 10 000 items or
-    /// 64 MB of wire payload, whichever comes first.
+    /// Bounds what the receiver holds for a consumer that is behind. Unbounded by default — the
+    /// counterpart of <see cref="WithMaxInFlightBatches"/> at the other end of the transfer.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Pass a count, a wire-byte budget, or both; the first one reached is the one that binds,
+    /// so an Arrow consumer is held by the bytes and a record consumer by the count without
+    /// either having to disable the other. At least one is required — calling this to bound
+    /// nothing is a contradiction, and not calling it is how you say that.
+    /// </para>
+    /// <para>
     /// Raise the byte figure for throughput on a fast consumer, lower it to cap the receiver's
-    /// footprint. The count and the byte figure are both bounds and the first one reached is the
-    /// one that applies, so an Arrow consumer is held by the bytes and a record consumer by the
-    /// count without either having to disable the other — see <see cref="BufferCapacity"/>.
+    /// footprint. See <see cref="BufferCapacity"/> for what a wire byte does and does not
+    /// measure.
+    /// </para>
     /// </remarks>
+    /// <param name="maxItems">Maximum buffered items, or <c>null</c> not to bound the count.</param>
+    /// <param name="maxBytes">Maximum buffered wire bytes, or <c>null</c> not to bound the size.</param>
+    public TransportRClientBuilder<T> WithReceiveCapacity(int? maxItems = null, long? maxBytes = null)
+        => WithReceiveCapacity(BufferCapacity.Of(maxItems, maxBytes));
+
+    /// <inheritdoc cref="WithReceiveCapacity(int?, long?)"/>
     public TransportRClientBuilder<T> WithReceiveCapacity(BufferCapacity capacity)
     {
         if (capacity.IsEmpty)
             throw new ArgumentException(
-                "A receive capacity needs at least one of the two dimensions bounded.", nameof(capacity));
+                "A receive capacity needs at least one of the two dimensions bounded. Leave it "
+              + "unset for an unbounded receiver.", nameof(capacity));
 
         _receiveCapacity = capacity;
         return this;
@@ -158,7 +171,19 @@ public class TransportRClientBuilder<T>
             MaxInFlightBatches = _maxInFlightBatches
         };
 
-        if (_receiveCapacity is { } capacity) options.ReceiveBufferCapacity = capacity;
+        options.ReceiveBufferCapacity = _receiveCapacity;
+
+        // Neither end bounded is a supported configuration and the right one for a consumer that
+        // keeps up, so this is a warning and not a refusal. It is loud because the failure it
+        // precedes is not: nothing pushes back anywhere, and a consumer that falls behind is
+        // paid for in the sender's memory and then the receiver's, until one of them dies.
+        if (_maxInFlightBatches is null && _receiveCapacity is null)
+        {
+            logger.LogWarning(
+                "No backpressure configured: neither WithMaxInFlightBatches nor WithReceiveCapacity "
+              + "is set, so a consumer slower than the producer is absorbed in memory rather than "
+              + "throttled.");
+        }
         
         var hubUrl = _url.TrimEnd('/');
         var controlUrl = $"{hubUrl}/hub/command";

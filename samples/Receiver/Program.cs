@@ -10,7 +10,6 @@ using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension
 using TransportR.Serialization.Json; // Extension
-using TransportR.Configuration;
 
 // Note: BatchTimeoutMs is not used by the Receiver, but required by constructor.
 var batchTimeoutMs = 1000; // Default value, as it's not used by the receiver.
@@ -91,21 +90,13 @@ var clientBuilder = new TransportRClientBuilder<Order>()
     .WithBatchTimeout(batchTimeoutMs)
     .WithLoggerFactory(loggerFactory);
 
-// Receive capacity: only override when a scenario asked for one, so the default stays the
-// default in every run that is not about capacity.
-if (receiverOptions.ReceiveMaxItems is { } maxItems || receiverOptions.ReceiveMaxBytes is { } _)
+// Receive capacity: unbounded unless a scenario asks for one.
+if (receiverOptions.ReceiveMaxItems is not null || receiverOptions.ReceiveMaxBytes is not null)
 {
-    var capacity = (receiverOptions.ReceiveMaxItems, receiverOptions.ReceiveMaxBytes) switch
-    {
-        ({ } items, { } bytes) => BufferCapacity.ItemsAndBytes(items, bytes),
-        ({ } items, null) => BufferCapacity.Items(items),
-        (null, { } bytes) => BufferCapacity.Bytes(bytes),
-        _ => default
-    };
-
     logger.LogInformation("Receive capacity: {Items} items / {Bytes} wire bytes",
-        capacity.MaxItems?.ToString() ?? "unbounded", capacity.MaxBytes?.ToString() ?? "unbounded");
-    clientBuilder.WithReceiveCapacity(capacity);
+        receiverOptions.ReceiveMaxItems?.ToString() ?? "unbounded",
+        receiverOptions.ReceiveMaxBytes?.ToString() ?? "unbounded");
+    clientBuilder.WithReceiveCapacity(receiverOptions.ReceiveMaxItems, receiverOptions.ReceiveMaxBytes);
 }
 
 if (receiverOptions.ConsumeItemsPerSecond > 0)

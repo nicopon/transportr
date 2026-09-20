@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using TransportR.Client.SignalR.Batching;
-using TransportR.Configuration;
+using TransportR.Client.SignalR.Configuration;
 using Xunit;
 
 namespace TransportR.Tests;
@@ -20,9 +20,48 @@ public class ReceiveBufferTests
     // ---- Construction ----
 
     [Fact]
-    public void Constructor_WithNeitherDimension_IsRefused()
+    public void Constructor_WithAnExplicitlyEmptyCapacity_IsRefused()
     {
-        Assert.Throws<ArgumentException>(() => new ReceiveBuffer<int>(default));
+        // default(BufferCapacity) is a capacity built wrong, not a request for no bound. Null is
+        // how that request is made, and conflating the two would swallow the mistake.
+        Assert.Throws<ArgumentException>(() => new ReceiveBuffer<int>(default(BufferCapacity)));
+    }
+
+    [Fact]
+    public async Task Constructor_WithNullCapacity_BoundsNothing()
+    {
+        // Arrange
+        var buffer = new ReceiveBuffer<int>(null);
+
+        // Act: far more than any bound this type can express, acknowledged by nobody.
+        var fill = Task.Run(async () =>
+        {
+            for (var i = 0; i < 2000; i++) await WriteChunk(buffer, wireBytes: 1_000_000, i);
+        });
+
+        // Assert
+        Assert.Same(fill, await Task.WhenAny(fill, Task.Delay(TimeSpan.FromSeconds(5))));
+        await fill;
+        Assert.Equal(0, buffer.BufferedBytes);
+    }
+
+    [Theory]
+    [InlineData(5, null, 5, null)]
+    [InlineData(null, 5L, null, 5L)]
+    [InlineData(5, 7L, 5, 7L)]
+    public void Of_BuildsFromTheShapeConfigurationBindingProduces(
+        int? items, long? bytes, int? expectedItems, long? expectedBytes)
+    {
+        var capacity = BufferCapacity.Of(items, bytes);
+
+        Assert.Equal(expectedItems, capacity.MaxItems);
+        Assert.Equal(expectedBytes, capacity.MaxBytes);
+    }
+
+    [Fact]
+    public void Of_WithNeitherDimension_IsRefused()
+    {
+        Assert.Throws<ArgumentException>(() => BufferCapacity.Of(null, null));
     }
 
     // ---- The item dimension ----

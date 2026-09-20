@@ -6,7 +6,7 @@ using System.Text;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
-using TransportR.Configuration;
+using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -183,9 +183,39 @@ public class BatchProcessorTests
     }
 
     [Fact]
+    public void ReceiveCapacity_IsUnboundedByDefault()
+    {
+        // The default is no bound at all, matching MaxInFlightBatches at the other end. A
+        // default that silently bounded would be a guess, and this is the test that keeps one
+        // from creeping back in.
+        Assert.Null(new ClientOptions().ReceiveBufferCapacity);
+    }
+
+    [Fact]
+    public async Task ProcessChunk_WithNoCapacityConfigured_NeverParksTheReadLoop()
+    {
+        // Arrange: the default, which bounds nothing.
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        // Act: far more than any bound, consumed by nobody.
+        var pump = Task.Run(async () =>
+        {
+            for (var i = 0; i < 500; i++)
+                await processor.ProcessChunkAsync(CreateBatchChunk(batchId: i, itemCount: 50));
+        });
+
+        // Assert
+        Assert.Same(pump, await Task.WhenAny(pump, Task.Delay(TimeSpan.FromSeconds(5))));
+        await pump;
+        Assert.Equal(25000, processor.ItemsReceived);
+    }
+
+    [Fact]
     public async Task ProcessChunk_WithinTheBudget_DoesNotParkTheReadLoop()
     {
-        // Arrange: the default capacity, which no test-sized chunk comes near.
+        // Arrange: a capacity no test-sized chunk comes near.
+        _stubContext.Options.ReceiveBufferCapacity = BufferCapacity.ItemsAndBytes(10_000, 1 << 20);
         await using var processor = CreateProcessor();
         await processor.StartReceiverAsync();
 

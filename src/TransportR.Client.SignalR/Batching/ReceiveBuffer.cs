@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using TransportR.Configuration;
+using TransportR.Client.SignalR.Configuration;
 
 namespace TransportR.Client.SignalR.Batching;
 
@@ -41,14 +41,20 @@ internal sealed class ReceiveBuffer<T>
     private bool _completed;
     private TaskCompletionSource? _spaceAvailable;
 
-    public ReceiveBuffer(BufferCapacity capacity)
+    /// <param name="capacity">
+    /// <c>null</c> for no bound at all. An instance with neither dimension set is refused:
+    /// <c>null</c> says "I want no bound", a default-constructed capacity says "I built this
+    /// wrong", and conflating the two hides the second.
+    /// </param>
+    public ReceiveBuffer(BufferCapacity? capacity)
     {
-        if (capacity.IsEmpty)
+        if (capacity is { IsEmpty: true })
             throw new ArgumentException(
-                "A receive buffer needs at least one of the two dimensions bounded.", nameof(capacity));
+                "A receive capacity needs at least one of the two dimensions bounded. Pass null "
+              + "for an unbounded buffer.", nameof(capacity));
 
-        _maxBytes = capacity.MaxBytes;
-        _channel = capacity.MaxItems is { } maxItems
+        _maxBytes = capacity?.MaxBytes;
+        _channel = capacity?.MaxItems is { } maxItems
             ? Channel.CreateBounded<Entry>(new BoundedChannelOptions(maxItems)
             {
                 FullMode = BoundedChannelFullMode.Wait

@@ -1,6 +1,6 @@
 using System.Buffers;
 using TransportR.Client.SignalR.Batching;
-using TransportR.Configuration;
+using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Xunit;

@@ -1,8 +1,9 @@
-namespace TransportR.Configuration;
+namespace TransportR.Client.SignalR.Configuration;
 
 /// <summary>
 /// How much a transfer buffer may hold before the side filling it is made to wait, expressed in
-/// items, in bytes, or in both.
+/// items, in bytes, or in both. A <c>null</c> capacity, not an instance of this, is how a caller
+/// says they want no bound.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -74,6 +75,19 @@ public readonly record struct BufferCapacity
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxBytes, 0, nameof(maxBytes));
         return new BufferCapacity(maxItems, maxBytes);
     }
+
+    /// <summary>
+    /// Builds a capacity from two optional dimensions, which is the shape configuration binding
+    /// produces. Throws when both are absent — that is <c>null</c>, not a capacity.
+    /// </summary>
+    public static BufferCapacity Of(int? maxItems, long? maxBytes) => (maxItems, maxBytes) switch
+    {
+        ({ } items, { } bytes) => ItemsAndBytes(items, bytes),
+        ({ } items, null) => Items(items),
+        (null, { } bytes) => Bytes(bytes),
+        _ => throw new ArgumentException(
+            "A capacity needs at least one of the two dimensions. Use null for no bound.", nameof(maxItems))
+    };
 
     /// <summary>
     /// True when neither dimension is set, which is the value a default-constructed instance

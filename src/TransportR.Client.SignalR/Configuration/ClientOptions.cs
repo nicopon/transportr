@@ -1,5 +1,3 @@
-using TransportR.Configuration;
-
 namespace TransportR.Client.SignalR.Configuration;
 
 /// <summary>
@@ -91,27 +89,31 @@ public class ClientOptions
 
     /// <summary>
     /// How much the receiver may hold for a consumer that is behind, before the incoming stream
-    /// is made to wait. Default: 10 000 items or 64 MB of wire payload, whichever comes first.
+    /// is made to wait. <c>null</c> (the default) means unbounded.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This is the receiving end of the same backpressure the sender's
-    /// <see cref="MaxInFlightBatches"/> applies at the other end, and the two compose: a full
-    /// receive buffer parks the read loop, which withholds the acknowledgement that would reopen
-    /// the sender's window.
+    /// This is the receiving end of the same backpressure <see cref="MaxInFlightBatches"/>
+    /// applies at the other, and the two compose: a full receive buffer parks the read loop,
+    /// which withholds the acknowledgement that would reopen the sender's window. Left unset at
+    /// both ends, nothing anywhere pushes back and a slow consumer is paid for in memory.
     /// </para>
     /// <para>
-    /// <b>Both dimensions are bounded by default, because neither alone is a bound.</b> A count
-    /// of items says nothing when an item is a multi-megabyte Arrow record batch; a count of
-    /// bytes is a clumsy way to hold ten thousand small records. The byte figure is <i>wire</i>
-    /// bytes — see <see cref="BufferCapacity"/> for what that does and does not measure, and size
-    /// it against how much your items expand when decoded.
+    /// <b>Unbounded by default, for the same reason the send window is.</b> The right figure
+    /// depends on how large an item is, which only the caller knows, and a default would be a
+    /// guess dressed as a safeguard. Set it.
+    /// </para>
+    /// <para>
+    /// <b>Two dimensions, because neither alone is a bound.</b> A count of items says nothing
+    /// when an item is a multi-megabyte Arrow record batch; a byte budget is a clumsy way to
+    /// hold ten thousand small records. Declare both and the first one reached binds. The byte
+    /// figure is <i>wire</i> bytes — see <see cref="BufferCapacity"/> for what that does and does
+    /// not measure.
     /// </para>
     /// <para>
     /// A single chunk larger than the byte bound is still admitted, so lowering this throttles a
     /// transfer and cannot stall one.
     /// </para>
     /// </remarks>
-    public BufferCapacity ReceiveBufferCapacity { get; set; } =
-        BufferCapacity.ItemsAndBytes(10_000, 64 * 1024 * 1024);
+    public BufferCapacity? ReceiveBufferCapacity { get; set; }
 }
