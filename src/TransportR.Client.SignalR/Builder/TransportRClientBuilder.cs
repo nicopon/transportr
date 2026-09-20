@@ -133,16 +133,6 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Configures the client to use MessagePack serialization.
-    /// </summary>
-    // DEPRECATED/REMOVED in favor of Extensions
-    
-    /// <summary>
-    /// Configures the client to use Client Credentials flow for authentication.
-    /// </summary>
-    // DEPRECATED/REMOVED in favor of Extensions
-
-    /// <summary>
     /// Builds the <see cref="SignalRDataClient{T}"/>.
     /// </summary>
     public SignalRDataClient<T> Build()
