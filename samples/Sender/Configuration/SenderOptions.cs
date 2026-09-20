@@ -3,7 +3,7 @@ namespace Sender.Configuration;
 public class SenderOptions
 {
     public string SourceFilePath { get; set; } = "data/orders.bin";
-    public string HubUrl { get; set; } = "http://localhost:5252/hub/command";
+    public string HubUrl { get; set; } = "http://localhost:5252";
     public int BatchSize { get; set; } = 5000;
     public int BatchTimeoutMs { get; set; } = 500;
 

@@ -111,7 +111,7 @@ public class TransferManager : ITransferManager
         return _transfers.Values;
     }
 
-    public async Task TerminateTransferAsync(string transferId, string reason)
+    public async Task TerminateTransferAsync(string transferId)
     {
         await RemoveTransferAsync(transferId).ConfigureAwait(false);
     }

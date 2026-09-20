@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using TransportR.Protocol;
 using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
@@ -134,7 +135,7 @@ public class SignalRIntegrationTests
 
         // A raw connection: this exercises the hub method, not the client that drives it.
         await using var connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost/hub/command", o => o.HttpMessageHandlerFactory = _ => handler)
+            .WithUrl("http://localhost" + WireRoutes.CommandHub, o => o.HttpMessageHandlerFactory = _ => handler)
             .Build();
         await connection.StartAsync();
 
@@ -205,7 +206,7 @@ public class SignalRIntegrationTests
         // THE TRICK: Use WithUrl(url, options => options.HttpMessageHandlerFactory = _ => handler)
         
         var connectionManager = new HubConnectionManager(
-            $"{url}/hub/command",
+            url + WireRoutes.CommandHub,
             options,
             logger,
             initialAccessToken: null,

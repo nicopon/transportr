@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 
@@ -9,7 +8,7 @@ namespace TransportR.Client.SignalR.Sessions;
 /// Encapsulates logic for handling disconnection, probing connectivity via SignalR,
 /// fetching checkpoints, and performing the reconnection handshake (Ping/Pong).
 /// </summary>
-internal class ReconnectionHandler<T> : IDisposable
+internal class ReconnectionHandler : IDisposable
 {
     private readonly ISessionContext _context;
     private readonly string _transferId;
@@ -20,9 +19,6 @@ internal class ReconnectionHandler<T> : IDisposable
         _transferId = transferId;
     }
 
-    /// <summary>
-    /// Triggers the reconnection flow: debounce, cancel streams, probe SignalR.
-    /// </summary>
     /// <summary>
     /// Probes SignalR connectivity. Returns true if SignalR is back online and Hub responds to Ping.
     /// </summary>
@@ -90,30 +86,23 @@ internal class ReconnectionHandler<T> : IDisposable
 
     public async Task<int> ExecuteHandshakeAsync(Stream outputStream, Guid transferGuid, CancellationToken token)
     {
+        await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, token);
+        await outputStream.FlushAsync(token);
+
+        if (_streamPongReceived == null) return -1;
+
+        // Wait for Handshake Pong
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        cts.CancelAfter(_context.Options.PongTimeout);
+
         try
         {
-             await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, token);
-             await outputStream.FlushAsync(token);
-             
-             if (_streamPongReceived == null) return -1;
-             
-             // Wait for Handshake Pong
-             using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-             cts.CancelAfter(_context.Options.PongTimeout);
-             
-             try
-             {
-                 await _streamPongReceived.Task.WaitAsync(cts.Token);
-                 return _pongNextExpectedBatchId;
-             }
-             catch(OperationCanceledException)
-             {
-                 return -1; // Fail
-             }
+            await _streamPongReceived.Task.WaitAsync(cts.Token);
+            return _pongNextExpectedBatchId;
         }
-        catch
+        catch (OperationCanceledException)
         {
-            throw;
+            return -1; // Fail
         }
     }
 

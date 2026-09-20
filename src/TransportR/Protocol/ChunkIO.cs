@@ -24,7 +24,7 @@ public static class ChunkIO
     }
 
     /// <summary>
-    /// Writes a control chunk (Ack, Nack, Ping, Pong) to the stream.
+    /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.
     /// </summary>
     public static async Task WriteControlAsync(
         Stream stream, 

@@ -1,5 +1,6 @@
 using System.Net;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 using TransportR.Client.SignalR.Services;
 using Microsoft.Extensions.Logging; 
 using Microsoft.Extensions.Logging.Abstractions; // Restore
@@ -186,8 +187,8 @@ public class TransportRClientBuilder<T>
         }
         
         var hubUrl = _url.TrimEnd('/');
-        var controlUrl = $"{hubUrl}/hub/command";
-        var dataUrl = $"{hubUrl}/api/stream";
+        var controlUrl = hubUrl + WireRoutes.CommandHub;
+        var dataUrl = hubUrl + WireRoutes.StreamBase;
 
         // Create Internal Components
         var connectionManager = new HubConnectionManager(

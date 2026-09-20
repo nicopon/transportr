@@ -10,7 +10,8 @@ namespace TransportR.Client.SignalR.Sessions;
 
 /// <summary>
 /// Manages the underlying HTTP streams for a data session.
-/// Handles connection establishment, retries, and backoff logic.
+/// Handles connection establishment and the single token-refresh retry; a stream that fails
+/// for any other reason is handed back to the session, which decides whether to reconnect.
 /// </summary>
 internal class HttpStreamManager : IAsyncDisposable
 {

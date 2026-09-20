@@ -11,7 +11,7 @@ public enum ConnectionType
     Data,
 
     /// <summary>
-    /// Control channel for ACK/NACK/Complete messages.
+    /// Control channel for ACK/Complete messages.
     /// </summary>
     Control
 }

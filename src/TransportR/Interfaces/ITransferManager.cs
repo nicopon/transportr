@@ -54,7 +54,7 @@ public interface ITransferManager
     /// <summary>
     /// Terminates a transfer forcefully (e.g. timeout).
     /// </summary>
-    Task TerminateTransferAsync(string transferId, string reason);
+    Task TerminateTransferAsync(string transferId);
     /// <summary>
     /// Updates the last activity time for a transfer to prevent cleanup.
     /// </summary>

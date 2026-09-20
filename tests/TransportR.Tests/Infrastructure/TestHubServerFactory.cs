@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using TransportR.Protocol;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,7 +11,7 @@ namespace TransportR.Tests.Infrastructure;
 
 public static class TestHubServerFactory
 {
-    public const string HubUrl = "http://localhost/hub/command";
+    public const string HubUrl = "http://localhost" + WireRoutes.CommandHub;
 
     public static IHost CreateHost()
     {

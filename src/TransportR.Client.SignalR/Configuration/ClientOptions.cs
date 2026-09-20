@@ -6,16 +6,6 @@ namespace TransportR.Client.SignalR.Configuration;
 public class ClientOptions
 {
     /// <summary>
-    /// Initial delay before retrying a failed connection. Default: 500ms.
-    /// </summary>
-    public TimeSpan InitialRetryDelay { get; set; } = TimeSpan.FromMilliseconds(500);
-
-    /// <summary>
-    /// Maximum retry delay (backoff ceiling). Default: 5 seconds.
-    /// </summary>
-    public TimeSpan MaxRetryDelay { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>
     /// Timeout for Pong response during reconnection. Default: 10 seconds.
     /// </summary>
     public TimeSpan PongTimeout { get; set; } = TimeSpan.FromSeconds(10);
@@ -50,11 +40,6 @@ public class ClientOptions
     /// </para>
     /// </remarks>
     public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// Debounce duration for reconnection attempts. Default: 2 seconds.
-    /// </summary>
-    public TimeSpan ReconnectDebounce { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// Threshold before token expiry to trigger refresh. Default: 5 minutes.

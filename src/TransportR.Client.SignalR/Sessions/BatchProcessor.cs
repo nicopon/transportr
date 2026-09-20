@@ -18,8 +18,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private readonly ISessionContext<T> _context;
     private readonly string _transferId;
     private readonly int _batchSize;
-    private readonly string _dataUrl;
-    private readonly BatchProtocol<T> _protocol;
     
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
@@ -27,13 +25,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     // Sender State
     private BatchAccumulator<T>? _batchAccumulator;
-    // --- Internal Logic ---
-    
-    /// <summary>
-    /// Thread-safe wrapper for unacked batch payload.
-    /// Uses reference counting to prevent disposal while being resent.
-    /// </summary>
-    // --- Internal Logic ---
 
     private readonly ConcurrentDictionary<int, BatchEntry> _unackedBatches = new();
 
@@ -44,7 +35,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private SemaphoreSlim? _inFlightSlots;
 
     private int _pendingBatches = 0;
-    private int _lastAckedBatchId = -1;
     
     // Receiver State
     private ReceiverState<T>? _receiverState;
@@ -68,13 +58,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public int UnackedCount => _unackedBatches.Count;
     public int NextExpectedBatchId => _receiverState?.NextExpectedBatchId ?? 0;
 
-    public BatchProcessor(ISessionContext<T> context, string transferId, int batchSize, string dataUrl)
+    public BatchProcessor(ISessionContext<T> context, string transferId, int batchSize)
     {
         _context = context;
         _transferId = transferId;
         _batchSize = batchSize;
-        _dataUrl = dataUrl;
-        _protocol = new BatchProtocol<T>(context.Serializer);
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
     }
 
@@ -105,7 +93,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         // rather than away with the instance. The sender resends them from startBatchId.
         _receiverState?.DiscardReordered();
 
-        _receiverState = new ReceiverState<T>(_receiveBuffer, _protocol, startBatchId);
+        _receiverState = new ReceiverState<T>(_receiveBuffer, _context.Serializer, startBatchId);
         return Task.CompletedTask;
     }
 
@@ -158,11 +146,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
         return _completeAckReceived?.Task.WaitAsync(token) ?? Task.CompletedTask;
     }
     
-    public void ResetCompleteAck()
-    {
-        _completeAckReceived = new TaskCompletionSource();
-    }
-
     public async Task ProcessChunkAsync(ChunkData chunk, CancellationToken ct = default)
     {
         switch (chunk.Header.Type)
@@ -205,6 +188,23 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     private int _maxBatchIdSent = -1;
 
+    /// <summary>
+    /// Raises <see cref="_maxBatchIdSent"/> to <paramref name="batchId"/> if it is higher.
+    /// </summary>
+    /// <remarks>
+    /// Read from the completion path on another thread, so the write has to be atomic. It does not
+    /// need a lock to be: a monotonic maximum is what compare-and-exchange is for.
+    /// </remarks>
+    private void UpdateMaxBatchIdSent(int batchId)
+    {
+        int current;
+        do
+        {
+            current = _maxBatchIdSent;
+            if (batchId <= current) return;
+        } while (Interlocked.CompareExchange(ref _maxBatchIdSent, batchId, current) != current);
+    }
+
     private async Task SerializeAndSendBatch(List<T> items, int batchId, CancellationToken ct)
     {
         // The accumulator took a slot for this batch. From the moment it lands in _unackedBatches,
@@ -226,7 +226,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         using var memoryStream = _context.StreamManager.GetStream();
         var countBytes = BitConverter.GetBytes(items.Count);
         await memoryStream.WriteAsync(countBytes.AsMemory(), ct);
-        await _protocol.SerializeBatchAsync(memoryStream, items);
+        await _context.Serializer.SerializeBatchAsync(memoryStream, items);
         
         var totalLen = (int)memoryStream.Length;
         var owner = new PooledMemoryOwner(memoryStream.GetBuffer().AsMemory(0, totalLen));
@@ -246,10 +246,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         Interlocked.Increment(ref _pendingBatches);
         Interlocked.Add(ref _itemsSent, items.Count);
         
-        lock (this)
-        {
-            if (batchId > _maxBatchIdSent) _maxBatchIdSent = batchId;
-        }
+        UpdateMaxBatchIdSent(batchId);
         
         await _sendChannel.Writer.WriteAsync(new BatchControlMessage(batchId, entry), ct);
     }
@@ -277,7 +274,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
         {
             await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.BatchAck, rxResult.BatchIdToAck.Value));
             Interlocked.Increment(ref _acksSent);
-            UpdateLastAckedBatchId(rxResult.BatchIdToAck.Value);
         }
     }
 
@@ -385,16 +381,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }
     
-    private void UpdateLastAckedBatchId(int ackId)
-    {
-        int current;
-        do {
-            current = _lastAckedBatchId;
-            if (ackId <= current) break;
-        } while (Interlocked.CompareExchange(ref _lastAckedBatchId, ackId, current) != current);
-    }
-
-
     /// <summary>
     /// Resends unacked batches directly to the stream (bypass channel).
     /// </summary>
@@ -458,7 +444,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         _sendChannel.Writer.TryComplete();
-        _serializationWorker = null; // Should look into canceling it if running?
+        _serializationWorker = null;
 
         // Dispose the accumulator first: it cancels its own token, which releases a producer
         // parked on the in-flight window before that window is disposed underneath it.

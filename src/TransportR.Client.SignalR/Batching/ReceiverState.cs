@@ -1,5 +1,6 @@
 using System.Buffers;
-using TransportR.Protocol;
+using System.Runtime.InteropServices;
+using TransportR.Interfaces;
 
 namespace TransportR.Client.SignalR.Batching;
 
@@ -20,7 +21,7 @@ internal class ReceiverState<T>
 
     private readonly ReceiveBuffer<T> _buffer;
     private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body)> _reorderBuffer;
-    private readonly BatchProtocol<T> _protocol;
+    private readonly IBatchSerializer<T> _serializer;
 
     public int NextExpectedBatchId { get; private set; } = 0;
 
@@ -32,11 +33,11 @@ internal class ReceiverState<T>
     /// </summary>
     public int ReorderedChunks => _reorderBuffer.Count;
 
-    public ReceiverState(ReceiveBuffer<T> buffer, BatchProtocol<T> protocol, int startBatchId = 0)
+    public ReceiverState(ReceiveBuffer<T> buffer, IBatchSerializer<T> serializer, int startBatchId = 0)
     {
         _buffer = buffer;
         _reorderBuffer = [];
-        _protocol = protocol;
+        _serializer = serializer;
         NextExpectedBatchId = startBatchId;
     }
     
@@ -110,8 +111,39 @@ internal class ReceiverState<T>
     {
         return _buffer.WriteChunkAsync(
             compressedBody.Length,
-            () => _protocol.ReadBatchBodyFromMemoryAsync(compressedBody),
+            () => ReadBatchBodyFromMemoryAsync(_serializer, compressedBody),
             ct);
+    }
+
+    /// <summary>
+    /// Decodes a batch body straight out of the memory it was read into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Internal rather than private because the serializer tests enter through here: how the body
+    /// reaches the serializer is part of what they check — the stream wraps the received memory
+    /// instead of copying it, which is what lets a reader allocate through a pool.
+    /// </para>
+    /// <para>
+    /// Takes no cancellation token, because there is nowhere to honour one:
+    /// <see cref="IBatchSerializer{T}.DeserializeBatchAsync"/> does not accept one, and the source
+    /// is memory already read off the wire. A token accepted here and passed nowhere would tell a
+    /// caller that decoding is interruptible when it is not.
+    /// </para>
+    /// </remarks>
+    internal static async Task<List<T>?> ReadBatchBodyFromMemoryAsync(
+        IBatchSerializer<T> serializer, ReadOnlyMemory<byte> bodyBytes)
+    {
+        // An array-backed body is wrapped rather than copied; only a body that is not can force
+        // the copy in the other branch, which does not happen on the read path.
+        Stream source = MemoryMarshal.TryGetArray(bodyBytes, out var segment)
+            ? new MemoryStream(segment.Array!, segment.Offset, segment.Count, writable: false)
+            : new MemoryStream(bodyBytes.ToArray());
+
+        using (source)
+        {
+            return await serializer.DeserializeBatchAsync(source);
+        }
     }
 
     /// <summary>

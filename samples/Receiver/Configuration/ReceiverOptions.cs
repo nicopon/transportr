@@ -2,7 +2,7 @@ namespace Receiver.Configuration;
 
 public class ReceiverOptions
 {
-    public string HubUrl { get; set; } = "http://localhost:5252/hub/command";
+    public string HubUrl { get; set; } = "http://localhost:5252";
     public string OutputDirectory { get; set; } = "output";
     public bool EnableAuth { get; set; } = false;
     public int BatchSize { get; set; } = 5000;

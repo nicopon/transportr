@@ -1,4 +1,5 @@
 using TransportR.Interfaces;
+using TransportR.Protocol;
 using TransportR.Hub.SignalR.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
@@ -9,7 +10,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 namespace TransportR.Hub.SignalR.Controllers;
 
 [ApiController]
-[Route("api/stream")]
+[Route(WireRoutes.StreamBase)]
 public class StreamController : ControllerBase
 {
     private readonly ITransportRServer _brokerServer;

@@ -36,10 +36,10 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     public event Func<Receive<T>, Task>? OnTransferStarted;
 
-    // Construtor - Now simplified and dependency injected via Builder
-    // NOTE: Made internal so only Builder/Factory instantiates it
-    // Construtor - Now simplified and dependency injected via Builder
-    // NOTE: Made internal so only Builder/Factory instantiates it
+    // The hub declares no default for this: one setting, one place that answers for it.
+    private const int HandshakeTimeoutMs = 20_000;
+
+    // Internal so that only the builder instantiates it.
     internal SignalRDataClient(
         HubConnectionManager connectionManager,
         SessionRegistry<T> sessionRegistry,
@@ -185,7 +185,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
         try
         {
-            var transferId = await _connectionManager.Connection.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), targetClientId, size, 20000);
+            var transferId = await _connectionManager.Connection.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), targetClientId, size, HandshakeTimeoutMs);
             
             if (!_sessionRegistry.TryGetSession(transferId, out var session))
             {
@@ -258,7 +258,6 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     int ISessionConfig.BatchFlushIntervalMs => _options.BatchFlushIntervalMs;
     RecyclableMemoryStreamManager ISessionConfig.StreamManager => _streamManager;
     ClientOptions ISessionConfig.Options => _options;
-    // AffinityCookies removed
 
     void ISignalRInteraction.RemoveSession(string transferId)
     {

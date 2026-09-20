@@ -18,7 +18,7 @@ namespace TransportR.Client.SignalR.Sessions;
 
 /// <summary>
 /// Encapsulates the state and logic for a single data transfer session.
-/// Handles bidirectional HTTP streams, batch serialization, ACK/NACK, and reconnection.
+/// Handles bidirectional HTTP streams, batch serialization, acknowledgements, and reconnection.
 /// </summary>
 internal class DataSession<T> : IDataSession<T>
 {
@@ -28,12 +28,11 @@ internal class DataSession<T> : IDataSession<T>
     
     private readonly ISignalRInteraction _signalR;
     private readonly ISessionConfig _config;
-    private readonly BatchProtocol<T> _protocol;
     
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
     private readonly BatchProcessor<T> _batchProcessor;
-    private readonly ReconnectionHandler<T> _reconnectionHandler;
+    private readonly ReconnectionHandler _reconnectionHandler;
     private readonly DataSessionStateMachine _fsm;
     private bool _isSender;
 
@@ -77,16 +76,15 @@ internal class DataSession<T> : IDataSession<T>
         TransferId = transferId;
         BatchSize = batchSize;
         DataUrl = dataUrl.TrimEnd('/');
-        _protocol = new BatchProtocol<T>(context.Serializer);
         
         _cts = new CancellationTokenSource();
-        _batchProcessor = new BatchProcessor<T>(context, transferId, batchSize, dataUrl);
+        _batchProcessor = new BatchProcessor<T>(context, transferId, batchSize);
         _fsm = new DataSessionStateMachine(transferId, context.Logger);
         
         // Pass segregated interfaces to HttpStreamManager
         _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl); // IStreamTransport, ISessionConfig
         
-        _reconnectionHandler = new ReconnectionHandler<T>(context, transferId);
+        _reconnectionHandler = new ReconnectionHandler(context, transferId);
             
         // Hook up events
         _batchProcessor.OnPongReceived += (id) => {
@@ -156,8 +154,7 @@ internal class DataSession<T> : IDataSession<T>
         
         // Send Complete and wait for CompleteAck (with retry)
         _config.Logger.LogInformation("Sending Complete message (Transfer={TransferId})", TransferId);
-        _batchProcessor.ResetCompleteAck();
-        
+
         const int completeRetryMs = 5000;
         
         // Retry indefinitely until Ack or Shutdown
@@ -341,14 +338,7 @@ internal class DataSession<T> : IDataSession<T>
                                     }
                                     else
                                     {
-                                        if (!IsInCompletingPhase)
-                                        {
-                                            _fsm.TransitionTo(SessionState.Reconnecting);
-                                        }
-                                        else
-                                        {
-                                            _config.Logger.LogInformation("Stream closed cleanly while in completing phase (Retrying handshake).");
-                                        }
+                                        _fsm.TransitionTo(SessionState.Reconnecting);
                                     }
                                 }
                             }
@@ -430,10 +420,6 @@ internal class DataSession<T> : IDataSession<T>
     /// Processes the send channel, writing batches and control messages to the output stream.
     /// Uses robust batching: drains all available messages, then flushes once.
     /// </summary>
-    /// <summary>
-    /// Processes the send channel, writing batches and control messages to the output stream.
-    /// Uses robust batching: drains all available messages, then flushes once.
-    /// </summary>
     private async Task ProcessSendChannelAsync(Stream outputStream, Guid transferGuid, CancellationToken token)
     {
         while (await _batchProcessor.OutgoingMessages.WaitToReadAsync(token))
@@ -495,7 +481,6 @@ internal class DataSession<T> : IDataSession<T>
                 using var chunkData = await ChunkIO.ReadChunkAsync(inputStream, token);
                 if (chunkData == null)
                 {
-                    // If stream ends but we haven't received Complete, it's an error (premature disconnect)
                     // If stream ends but we haven't received Complete, it's an error (premature disconnect)
                     // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).
                     if (_fsm.CurrentState != SessionState.Completed && !IsInCompletingPhase && !token.IsCancellationRequested)
@@ -562,12 +547,7 @@ internal class DataSession<T> : IDataSession<T>
                 {
                     var items = _batchProcessor.ItemsReceived;
                     var acks = _batchProcessor.AcksSent;
-                    // -1 is "not reported", not a batch id: BatchProcessor maintains
-                    // _lastAckedBatchId and does not expose it. The hub uses this heartbeat for
-                    // liveness and progress counters, both of which items and acks carry, so
-                    // nothing reads the field today. Exposing it is on the roadmap rather than
-                    // done here, the value being a wire field nobody consumes.
-                    await _signalR.HubConnection.InvokeAsync(nameof(ICommandHub.ReceiverHeartbeat), TransferId, items, acks, -1);
+                    await _signalR.HubConnection.InvokeAsync(nameof(ICommandHub.ReceiverHeartbeat), TransferId, items, acks);
                 }
             }
         }

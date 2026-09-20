@@ -2,8 +2,8 @@ using System.Buffers;
 using Apache.Arrow;
 using Apache.Arrow.Memory;
 using Apache.Arrow.Types;
+using TransportR.Client.SignalR.Batching;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Serialization.Arrow.Services;
 
 namespace TransportR.Tests;
@@ -12,10 +12,10 @@ namespace TransportR.Tests;
 /// The Arrow serializer, through the protocol's own read path.
 /// </summary>
 /// <remarks>
-/// Tests go through <see cref="BatchProtocol{T}"/> rather than calling the serializer directly,
-/// because how the body reaches it is part of what is under test: the protocol wraps the received
-/// memory in a stream, and it is that stream — not a copy of it — that lets the reader allocate
-/// through a pool.
+/// The read path goes through <see cref="ReceiverState{T}.ReadBatchBodyFromMemoryAsync"/> rather
+/// than calling the serializer directly, because how the body reaches it is part of what is under
+/// test: it wraps the received memory in a stream, and it is that stream — not a copy of it — that
+/// lets the reader allocate through a pool.
 /// </remarks>
 public class ArrowBatchSerializerTests
 {
@@ -41,12 +41,12 @@ public class ArrowBatchSerializerTests
     private static async Task<byte[]> WriteAsync(ArrowBatchSerializer serializer, List<RecordBatch> batches)
     {
         var buffer = new MemoryStream();
-        await new BatchProtocol<RecordBatch>(serializer).SerializeBatchAsync(buffer, batches);
+        await serializer.SerializeBatchAsync(buffer, batches);
         return buffer.ToArray();
     }
 
     private static Task<List<RecordBatch>?> ReadAsync(ArrowBatchSerializer serializer, byte[] bytes)
-        => new BatchProtocol<RecordBatch>(serializer).ReadBatchBodyFromMemoryAsync(bytes);
+        => ReceiverState<RecordBatch>.ReadBatchBodyFromMemoryAsync(serializer, bytes);
 
     [Theory]
     [InlineData(true)]

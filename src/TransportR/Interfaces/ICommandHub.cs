@@ -22,7 +22,9 @@ public interface ICommandHub
     /// Gets a list of receivers that the calling client is authorized to send data to.
     /// </summary>
     /// <remarks>
-    /// Only returns clients with CanReceive=true that belong to groups the caller is authorized to send to.
+    /// Only returns clients belonging to groups the caller is authorized to send to. A registration
+    /// whose control connection is down is still returned, carrying its disconnection marker: a
+    /// caller that finds nobody fails outright, whereas one that tries a dead client retries.
     /// </remarks>
     /// <returns>List of authorized receivers.</returns>
     Task<List<ClientInfo>> GetReceivers();
@@ -31,11 +33,15 @@ public interface ICommandHub
     /// Initiates a transfer between the calling client and the target.
     /// </summary>
     /// <param name="targetClientId">The ID of the receiver client.</param>
-    /// <param name="batchSize">Optional batch size (defaults to 500).</param>
+    /// <param name="batchSize">Items per batch.</param>
     /// <param name="timeoutMs">Timeout for the handshake in milliseconds.</param>
     /// <returns>The unique transfer identifier.</returns>
     /// <exception cref="Exception">Thrown if the target is not found or handshake times out.</exception>
-    Task<string> InitTransfer(Guid targetClientId, int? batchSize = 500, int timeoutMs = 5000);
+    /// <remarks>
+    /// Neither argument has a default. Both are settings the caller already holds one value for,
+    /// and a second default here would be a second answer to the same question.
+    /// </remarks>
+    Task<string> InitTransfer(Guid targetClientId, int batchSize, int timeoutMs);
     
     /// <summary>
     /// Reports that the calling connection is still present, and asks whether the hub still knows
@@ -74,8 +80,7 @@ public interface ICommandHub
     /// <param name="transferId">The transfer identifier.</param>
     /// <param name="itemsReceived">Total items received so far.</param>
     /// <param name="acksSent">Total ACKs sent.</param>
-    /// <param name="lastAckedBatchId">The last batch ID that was acknowledged (for checkpoint).</param>
-    Task ReceiverHeartbeat(string transferId, long itemsReceived, long acksSent, int lastAckedBatchId = -1);
+    Task ReceiverHeartbeat(string transferId, long itemsReceived, long acksSent);
 
     /// <summary>
     /// Probes connectivity to the hub. Used to verify network reachability before reconnecting HTTP streams.

@@ -116,7 +116,7 @@ public readonly struct ChunkHeader
     }
 
     /// <summary>
-    /// Creates a control header (Ack, Nack, Ping, Pong).
+    /// Creates a control header (BatchAck, Complete, CompleteAck, Ping or Pong).
     /// </summary>
     public static ChunkHeader CreateControl(Guid transferId, int batchId, ChunkType type)
     {

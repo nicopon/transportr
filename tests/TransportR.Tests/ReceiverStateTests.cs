@@ -2,7 +2,6 @@ using System.Buffers;
 using TransportR.Client.SignalR.Batching;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using Xunit;
 
 namespace POC_DataProxy.Tests;
@@ -13,15 +12,13 @@ namespace POC_DataProxy.Tests;
 public class ReceiverStateTests
 {
     private readonly ReceiveBuffer<int> _buffer;
-    private readonly BatchProtocol<int> _protocol;
     private readonly ReceiverState<int> _receiverState;
 
     public ReceiverStateTests()
     {
         // Wide enough that nothing here parks on capacity - these tests are about ordering.
         _buffer = new ReceiveBuffer<int>(BufferCapacity.ItemsAndBytes(1000, 1024 * 1024));
-        _protocol = new BatchProtocol<int>(new MockBatchSerializer());
-        _receiverState = new ReceiverState<int>(_buffer, _protocol);
+        _receiverState = new ReceiverState<int>(_buffer, new MockBatchSerializer());
     }
 
     [Fact]

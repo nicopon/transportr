@@ -11,6 +11,7 @@ using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
 using TransportR.Identity;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 using TransportR.Services;
 
 namespace TransportR.Hub.SignalR;
@@ -144,7 +145,7 @@ public static class TransportRHubExtensions
     /// </param>
     public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool requireAuth = false)
     {
-        var hubEndpoint = endpoints.MapHub<CommandHub>("/hub/command");
+        var hubEndpoint = endpoints.MapHub<CommandHub>(WireRoutes.CommandHub);
 
         if (requireAuth)
         {

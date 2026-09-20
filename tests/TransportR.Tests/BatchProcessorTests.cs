@@ -6,7 +6,6 @@ using System.Text;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -28,7 +27,7 @@ public class BatchProcessorTests
 
     private BatchProcessor<string> CreateProcessor(int batchSize = 100)
     {
-        return new BatchProcessor<string>(_stubContext, _transferId.ToString(), batchSize, "http://test");
+        return new BatchProcessor<string>(_stubContext, _transferId.ToString(), batchSize);
     }
 
     [Fact]

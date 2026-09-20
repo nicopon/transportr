@@ -10,7 +10,7 @@ namespace TransportR.Client.SignalR.Sessions;
 /// </summary>
 /// <remarks>
 /// Split from <see cref="ISessionConfig{T}"/> so that the parts of a session which never touch a
-/// payload — <see cref="HttpStreamManager"/>, <see cref="ReconnectionHandler{T}"/> — are not made
+/// payload — <see cref="HttpStreamManager"/>, <see cref="ReconnectionHandler"/> — are not made
 /// generic just to reach a logger.
 /// </remarks>
 public interface ISessionConfig

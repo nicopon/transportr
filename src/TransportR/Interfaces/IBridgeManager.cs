@@ -9,6 +9,16 @@ namespace TransportR.Interfaces;
 public interface IBridgeManager
 {
     /// <summary>
+    /// Builds the key a transfer's bridge for <paramref name="type"/> is held under.
+    /// </summary>
+    /// <remarks>
+    /// The format is the only thing tying together the code that creates a bridge and the code
+    /// that reaps it, and the two live in different assemblies. Composed here so that changing it
+    /// cannot leave one of them behind.
+    /// </remarks>
+    static string KeyFor(string transferId, ConnectionType type) => $"{transferId}:{type}";
+
+    /// <summary>
     /// Gets all active bridges (for monitoring and cleanup).
     /// </summary>
     IReadOnlyDictionary<string, ConnectionBridge> Bridges { get; }

@@ -127,7 +127,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         return authorizedReceivers;
     }
 
-    public async Task<string> InitTransfer(Guid targetClientId, int? batchSize = 500, int timeoutMs = 5000)
+    public async Task<string> InitTransfer(Guid targetClientId, int batchSize, int timeoutMs)
     {
         var targetClient = await _stateStore.GetClientAsync(targetClientId);
         if (targetClient == null)
@@ -147,14 +147,13 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
         // Step 3: Execute handshake
         var transferId = Guid.NewGuid().ToString();
-        int size = batchSize ?? 500;
 
         _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (BatchSize={Size})", 
-            transferId, sourceClient.ClientId, targetClientId, size);
+            transferId, sourceClient.ClientId, targetClientId, batchSize);
 
         await _transferManager.RegisterParticipantsAsync(transferId, sourceClient.ClientId, targetClientId);
 
-        await ExecuteHandshakeAsync(transferId, size, sourceClient, targetClient, timeoutMs);
+        await ExecuteHandshakeAsync(transferId, batchSize, sourceClient, targetClient, timeoutMs);
         
         return transferId;
     }
@@ -279,10 +278,9 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         await _transferManager.UpdateSenderStatsAsync(transferId, itemsSent, acksReceived);
     }
 
-    public async Task ReceiverHeartbeat(string transferId, long itemsReceived, long acksSent, int lastAckedBatchId = -1)
+    public async Task ReceiverHeartbeat(string transferId, long itemsReceived, long acksSent)
     {
         await _transferManager.UpdateReceiverStatsAsync(transferId, itemsReceived, acksSent);
-        await Task.CompletedTask;
     }
 
     public async Task Ping(string transferId)
@@ -321,8 +319,8 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         // Clear checkpoint and remove bridges
         // Note: Clients detect completion via dataplane EOF - no SignalR notification needed
         await _transferManager.RemoveTransferAsync(transferId);
-        _bridgeManager.TryRemove($"{transferId}:Data");
-        _bridgeManager.TryRemove($"{transferId}:Control");
+        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
+        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
     }
 
     // ========== Helpers ==========

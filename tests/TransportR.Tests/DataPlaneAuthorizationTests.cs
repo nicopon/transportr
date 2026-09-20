@@ -1,4 +1,5 @@
 using System.Net;
+using TransportR.Protocol;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -120,7 +121,7 @@ public class DataPlaneAuthorizationTests
         using var host = await CreateHostWithTransferAsync();
         using var client = host.GetTestClient();
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/stream/no-such-transfer/receive");
+        var request = new HttpRequestMessage(HttpMethod.Get, $"http://localhost{WireRoutes.StreamBase}/no-such-transfer/receive");
         request.Headers.Add("X-Connection-Type", nameof(ConnectionType.Data));
         request.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {ReceiverSubject}");
 
@@ -177,7 +178,7 @@ public class DataPlaneAuthorizationTests
         ConnectionType type,
         string? subject)
     {
-        var request = new HttpRequestMessage(method, $"http://localhost/api/stream/{TransferId}/{route}");
+        var request = new HttpRequestMessage(method, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/{route}");
         request.Headers.Add("X-Connection-Type", type.ToString());
 
         if (subject != null)

@@ -43,9 +43,5 @@ public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
         {
             return null;
         }
-        catch (Exception)
-        {
-             throw;
-        }
     }
 }

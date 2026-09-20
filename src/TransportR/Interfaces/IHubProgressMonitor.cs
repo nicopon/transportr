@@ -10,8 +10,9 @@ namespace TransportR.Interfaces;
 /// deserializing the content.
 /// </para>
 /// <para>
-/// Client-side monitoring is handled via <see cref="Metrics.TransportRMetrics"/>
-/// OpenTelemetry counters and the <c>TransferInfo</c> record exposed by the client.
+/// Client-side progress is read from the <c>TransferInfo</c> records the client exposes. The
+/// library emits no metrics of its own — see <c>samples/DataHub</c> for a hub that builds its own
+/// meter on top of this interface.
 /// </para>
 /// </remarks>
 public interface IHubProgressMonitor

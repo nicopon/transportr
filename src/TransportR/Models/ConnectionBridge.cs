@@ -23,11 +23,6 @@ public class ConnectionBridge
     public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
     public bool SenderConnected { get; private set; }
     public bool ReceiverConnected { get; private set; }  // Kept for internal logic check, but state comes from FSM
-    
-    /// <summary>
-    /// Combined token for whole bridge cancellation (manual Cancel).
-    /// </summary>
-    public CancellationToken StreamsCancellationToken => CancellationTokenSource.CreateLinkedTokenSource(_senderCts.Token, _receiverCts.Token).Token;
 
     public CancellationToken SenderToken => _senderCts.Token;
     public CancellationToken ReceiverToken => _receiverCts.Token;

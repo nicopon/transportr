@@ -13,7 +13,6 @@ public class SignalRDataServer : ITransportRServer
 {
     private readonly ILogger<SignalRDataServer> _logger;
     private readonly IHubContext<CommandHub> _hubContext;
-    private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly IBridgeManager _bridgeManager;
@@ -22,14 +21,12 @@ public class SignalRDataServer : ITransportRServer
         ILogger<SignalRDataServer> logger, 
         IHubProgressMonitor progressMonitor,
         IHubContext<CommandHub> hubContext,
-        IStateStore stateStore,
         ITransferManager transferManager,
         IBridgeManager bridgeManager)
     {
         _logger = logger;
         _progressMonitor = progressMonitor;
         _hubContext = hubContext;
-        _stateStore = stateStore;
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
     }
@@ -37,7 +34,7 @@ public class SignalRDataServer : ITransportRServer
     public async Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
     {
         Guid connectionId = Guid.NewGuid();
-        string bridgeKey = $"{transferId}:{type}";
+        string bridgeKey = IBridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Source Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
         
         // HA Validation: Ensure transfer exists in distributed state
@@ -112,7 +109,6 @@ public class SignalRDataServer : ITransportRServer
             // Do NOT remove the bridge here. We leave it active so that:
             // 1. Reconnecting clients can still find it (and see the completion signal).
             // 2. CommandHub.TransferComplete will explicitly clean it up when the lifecycle is fully done.
-            // _bridgeManager.TryRemove(bridgeKey);
 
             _logger.LogInformation("BRIDGE: Completed normally {BridgeKey}", bridgeKey);
         }
@@ -134,7 +130,7 @@ public class SignalRDataServer : ITransportRServer
     public async Task HandleReceiveAsync(string transferId, ConnectionType type, Stream output, CancellationToken cancellationToken = default)
     {
         Guid connectionId = Guid.NewGuid();
-        string bridgeKey = $"{transferId}:{type}";
+        string bridgeKey = IBridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Sink Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
 
         var bridge = _bridgeManager.GetOrCreate(bridgeKey);
