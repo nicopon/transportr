@@ -27,8 +27,10 @@ report() {
     echo ""
 }
 
-# 1. Open questions: a // comment whose last character is a question mark.
-HITS=$(grep -nE '^[[:space:]]*//.*\?[[:space:]]*$' $SOURCES || true)
+# 1. Open questions: a // comment whose last character is a question mark. End-of-line comments
+#    count: the habit this refuses is no smaller for sitting after code, and that is where the
+#    only violation the rule ever had to catch was hiding.
+HITS=$(grep -nE '(^|[[:space:]])//[^/].*\?[[:space:]]*$' $SOURCES || true)
 if [ -n "$HITS" ]; then
     echo "Deliberation left in code — a comment that asks a question:"
     report q "$HITS"
