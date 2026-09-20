@@ -10,6 +10,7 @@ using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension
 using TransportR.Serialization.Json; // Extension
+using TransportR.Configuration;
 
 // Note: BatchTimeoutMs is not used by the Receiver, but required by constructor.
 var batchTimeoutMs = 1000; // Default value, as it's not used by the receiver.
@@ -89,7 +90,29 @@ var clientBuilder = new TransportRClientBuilder<Order>()
     .WithLoggerFactory(loggerFactory)
     .WithBatchTimeout(batchTimeoutMs)
     .WithLoggerFactory(loggerFactory);
-    
+
+// Receive capacity: only override when a scenario asked for one, so the default stays the
+// default in every run that is not about capacity.
+if (receiverOptions.ReceiveMaxItems is { } maxItems || receiverOptions.ReceiveMaxBytes is { } _)
+{
+    var capacity = (receiverOptions.ReceiveMaxItems, receiverOptions.ReceiveMaxBytes) switch
+    {
+        ({ } items, { } bytes) => BufferCapacity.ItemsAndBytes(items, bytes),
+        ({ } items, null) => BufferCapacity.Items(items),
+        (null, { } bytes) => BufferCapacity.Bytes(bytes),
+        _ => default
+    };
+
+    logger.LogInformation("Receive capacity: {Items} items / {Bytes} wire bytes",
+        capacity.MaxItems?.ToString() ?? "unbounded", capacity.MaxBytes?.ToString() ?? "unbounded");
+    clientBuilder.WithReceiveCapacity(capacity);
+}
+
+if (receiverOptions.ConsumeItemsPerSecond > 0)
+{
+    logger.LogInformation("Consumer throttled to {Rate} items/s", receiverOptions.ConsumeItemsPerSecond);
+}
+
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 
@@ -156,7 +179,7 @@ try
             try
             {
                 logger.LogInformation("[Transfer {TransferId}] Starting reception (BatchSize: {BatchSize})", transfer.TransferId, transfer.BatchSize);
-                await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, cts.Token, logger); 
+                await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger); 
                 
                 // CRITICAL: Wait for full completion (Shutdown handshake) to ensure ACKs are flushed
                 logger.LogInformation("[Transfer {TransferId}] Waiting for Shutdown Handshake...", transfer.TransferId);
@@ -195,7 +218,7 @@ finally
     Console.WriteLine("[RECEIVER] !!! TERMINATED !!!");
 }
 
-static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient broker, string outputDirectory, bool showProgress, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
+static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient broker, string outputDirectory, bool showProgress, int consumeItemsPerSecond, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
 {
     var csvFile = Path.Combine(outputDirectory, $"orders_{transfer.TransferId}.csv"); 
     using var writer = new StreamWriter(csvFile, false);
@@ -206,6 +229,7 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
     var startTime = DateTime.UtcNow;
     var lastStatsTime = DateTime.UtcNow;
     var lastItemsReceived = 0;
+    DateTime? pacingOrigin = null;
 
     try
     {
@@ -214,6 +238,22 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
         await foreach (var order in stream.WithCancellation(cancellationToken))
         {
             itemsReceived++;
+
+            // Pace against the elapsed time rather than sleeping per item: a per-item sleep is
+            // floored by the timer's resolution, which throttles far harder than asked and makes
+            // the configured rate a fiction. Sleeping only once the debt is worth a timer tick
+            // keeps the long-run rate on target.
+            //
+            // The clock starts on the first item, not on the handshake: anchoring it earlier
+            // banks the setup time as credit and lets the first seconds run unthrottled.
+            if (consumeItemsPerSecond > 0)
+            {
+                pacingOrigin ??= DateTime.UtcNow;
+                var due = pacingOrigin.Value.AddSeconds((double)itemsReceived / consumeItemsPerSecond);
+                var debt = due - DateTime.UtcNow;
+                if (debt > TimeSpan.FromMilliseconds(15)) await Task.Delay(debt, cancellationToken);
+            }
+
             await writer.WriteLineAsync($"{order.OrderId},{order.OrderDate:O},{order.CustomerName},{order.CustomerEmail},{order.ShippingAddress},{order.BillingAddress},{order.TotalAmount},{order.TaxAmount},{order.DiscountAmount},{order.Currency},{order.PaymentMethod},{order.Status},{order.ShippingPriority},{order.TrackingNumber},{order.Notes}");
             
             if (itemsReceived % 20000 == 0 && !showProgress)

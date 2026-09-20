@@ -10,6 +10,26 @@ public class ReceiverOptions
     public string? AccessToken { get; set; } = null;
     
     /// <summary>
+    /// Overrides the receive buffer's item bound. Null keeps the client default.
+    /// </summary>
+    public int? ReceiveMaxItems { get; set; }
+
+    /// <summary>
+    /// Overrides the receive buffer's wire-byte bound. Null keeps the client default.
+    /// </summary>
+    public long? ReceiveMaxBytes { get; set; }
+
+    /// <summary>
+    /// Caps how fast items are consumed, standing in for a consumer that cannot keep up. Zero
+    /// (the default) consumes as fast as it can.
+    /// </summary>
+    /// <remarks>
+    /// Throttling the consumer rather than the source is the whole point: a slow source proves
+    /// nothing about what the receive buffer holds, because the buffer never fills.
+    /// </remarks>
+    public int ConsumeItemsPerSecond { get; set; } = 0;
+
+    /// <summary>
     /// Auth configuration for automatic token acquisition.
     /// </summary>
     public AuthOptions? Auth { get; set; }
