@@ -3,11 +3,19 @@
 
 name: .NET
 
+# Every branch, not just main: gating only main meant the gates did not run at all for as long as
+# the work stayed on a branch. The linter, the build and the suite are worth nothing on a branch
+# nobody has merged yet.
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "**" ]
   pull_request:
     branches: [ "main" ]
+
+# A pull request branch is otherwise built twice, once per event.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
