@@ -4,6 +4,8 @@
 # Arrays to track PIDs for cleanup
 declare -a MANAGED_PIDS=()
 declare -a RECEIVER_PIDS=()
+SENDER_PID=""
+
 
 # Register a PID for cleanup
 register_pid() {
@@ -60,6 +62,7 @@ start_sender() {
     dotnet samples/Sender/bin/Release/net10.0/Sender.dll &
     local sender_pid=$!
     register_pid $sender_pid
+    SENDER_PID=$sender_pid  # global, so a caller can sample it without capturing stdout
     echo $sender_pid
 }
 

@@ -27,6 +27,7 @@ cd "$PROJECT_ROOT"
 # Load libraries
 source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/process.sh"
+source "$SCRIPT_DIR/lib/memory.sh"
 
 # Parse arguments
 SKIP_BUILD=false
@@ -161,6 +162,18 @@ export Receiver__BatchSize="$BATCH_SIZE"
 export Receiver__OutputDirectory="$OUTPUT_DIR"
 export Receiver__Group="receivers"
 
+# Receive buffer capacity and consumer pacing - only exported when a scenario asked for them, so
+# every other run keeps the client defaults.
+if [ -n "$RECEIVE_MAX_ITEMS" ]; then
+    export Receiver__ReceiveMaxItems="$RECEIVE_MAX_ITEMS"
+fi
+if [ -n "$RECEIVE_MAX_BYTES" ]; then
+    export Receiver__ReceiveMaxBytes="$RECEIVE_MAX_BYTES"
+fi
+if [ -n "$CONSUME_ITEMS_PER_SECOND" ]; then
+    export Receiver__ConsumeItemsPerSecond="$CONSUME_ITEMS_PER_SECOND"
+fi
+
 # Receiver Auth (for automatic token acquisition)
 if [ -n "$RECEIVER_AUTH_CLIENTID" ]; then
     export Receiver__Auth__TokenEndpoint="http://localhost:$HUB_PORT/connect/token"
@@ -235,8 +248,16 @@ start_receivers "$NUM_RECEIVERS"
 # Start Sender
 start_sender
 
+# Memory sampling, when the scenario declares a ceiling to hold the run to
+if [ -n "$MAX_RECEIVER_RSS_MB" ] || [ -n "$MAX_SENDER_RSS_MB" ]; then
+    for rpid in "${RECEIVER_PIDS[@]}"; do sample_rss_for receiver "$rpid"; done
+    if [ -n "$SENDER_PID" ]; then sample_rss_for sender "$SENDER_PID"; fi
+    start_rss_sampler
+fi
+
 # Wait for receivers to complete
 wait_for_receivers
+stop_rss_sampler
 
 # Validation
 echo -e "${GREEN}==================================================${NC}"
@@ -267,5 +288,8 @@ for f in "$OUTPUT_DIR"/orders_*.csv; do
     fi
     TOTAL_LINES=$((TOTAL_LINES + FILE_LINES))
 done
+
+assert_peak_rss receiver "$MAX_RECEIVER_RSS_MB" || exit 1
+assert_peak_rss sender "$MAX_SENDER_RSS_MB" || exit 1
 
 log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."
