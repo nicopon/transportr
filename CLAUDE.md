@@ -137,11 +137,16 @@ notifies clients of a disconnect — see "Disconnection Detection" in `Resilienc
 
 ### Hub-side lifecycle
 
-`BridgeManager` + `BridgeStateMachine` model one active transfer as a bridge between a sender stream
-and a receiver stream; `DataSessionStateMachine` models the per-client session states. Both state
-machines are directly unit-tested (`BridgeStateMachineTests.cs`, `DataSessionStateMachineTests.cs`,
-`DominoStateTransitionTests.cs` for the completion sequence) — a change to transfer lifecycle
-belongs in the state machine, not scattered as ad-hoc flags in `BridgeManager`/`TransferManager`.
+`ConnectionBridge` + `BridgeStateMachine` model one active transfer as a bridge between a sender
+stream and a receiver stream (`BridgeManager` is only the `ConcurrentDictionary` that keys them by
+`transferId:ConnectionType`); `DataSessionStateMachine` models the per-client session states. Both
+state machines take **events**, not target states — `OnSenderRegistered`/`OnSenderLost`/… — and pick
+the resulting state themselves, so a caller cannot drive one into a state its table forbids, and
+`SenderConnected`/`ReceiverConnected` are derived from the state rather than stored beside it. They
+are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.cs`,
+`DataSessionStateMachineTests.cs`, `DominoStateTransitionTests.cs` for the completion sequence) — a
+change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
+`ConnectionBridge`/`TransferManager`.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s) and **skips `Active`
 bridges entirely**; `TransferCleanupService` terminates a transfer with no activity at all for

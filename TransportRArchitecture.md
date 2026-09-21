@@ -116,10 +116,20 @@ See [SecurityArchitecture.md](./SecurityArchitecture.md) for the security model.
 
 TransportR supports horizontal scaling (Active/Active) for Hubs:
 
-1. **Shared State**: Client registrations are stored in Redis (`TransportR.Storage.Redis`) -> Used for initial Connection/Discovery.
+1. **Shared State**: Client registrations and transfer sessions are stored in Redis
+   (`TransportR.Storage.Redis`) -> Used for initial Connection/Discovery and for routing.
 2. **Sticky Sessions**: Required at the Load Balancer level for SignalR connections.
 3. **Affinity Handoff**: Hubs can redirect clients to the correct instance if they land on the wrong node.
 4. **TestProxy**: A YARP-based reference implementation is provided for testing HA locally.
+
+**What is *not* shared, and why sticky sessions are a requirement rather than an optimisation**:
+the per-transfer progress counters (`TransferState`: items sent, acks, last activity) live in a
+dictionary local to the hub instance, never in `IStateStore`. `TransferCleanupService` kills a
+transfer on those counters, so a deployment where the sender's and the receiver's heartbeats reach
+different instances gives each one a half-silent transfer and invites both to reap it. Moving the
+counters into Redis would buy a case the deployment already excludes, at the price of a write per
+heartbeat — so the constraint is written here instead: **HA requires effective affinity, not merely
+preferred affinity.**
 
 ---
 
