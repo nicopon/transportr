@@ -42,6 +42,25 @@ public class ClientOptions
     public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// How long <c>CompleteAsync</c> keeps re-sending its Complete signal while nothing at all is
+    /// advancing, before giving up on the transfer. Default: 60 seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The clock measures a stall, not the completion itself: every acknowledgement that arrives
+    /// resets it. A transfer whose tail is still draining — the receiver refusing Complete because
+    /// batches are still in flight is the normal ending, not the exceptional one — keeps
+    /// acknowledging, so a legitimately long ending is never cut short. A peer that has gone away
+    /// acknowledges nothing, and that is what this bounds.
+    /// </para>
+    /// <para>
+    /// It matches the hub's <c>TransferInactivityTimeoutSeconds</c> on purpose: past that point the
+    /// hub has terminated the transfer anyway, so waiting longer waits on nothing.
+    /// </para>
+    /// </remarks>
+    public TimeSpan CompleteStallTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Threshold before token expiry to trigger refresh. Default: 5 minutes.
     /// </summary>
     public TimeSpan TokenRefreshThreshold { get; set; } = TimeSpan.FromMinutes(5);

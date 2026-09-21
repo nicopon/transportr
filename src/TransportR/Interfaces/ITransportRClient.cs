@@ -44,7 +44,9 @@ public interface IDataReceiver<T> : IDataClient
     /// Event fired when a new transfer is initiated targeting this receiver.
     /// </summary>
     /// <remarks>
-    /// The handler should consume items from the transfer's <see cref="Receive{T}.ReceiveAsync"/> method.
+    /// The handler consumes items from the transfer's <see cref="Receive{T}.ReceiveAsync"/> method
+    /// and owns the handle it is given: nothing else disposes it, and a handle left alive keeps its
+    /// session registered with the client and reporting to the hub for as long as the client lives.
     /// </remarks>
     event Func<Receive<T>, Task> OnTransferStarted;
 }

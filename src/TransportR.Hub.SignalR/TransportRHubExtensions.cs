@@ -145,6 +145,16 @@ public static class TransportRHubExtensions
     /// </param>
     public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool requireAuth = false)
     {
+        // AddDataHub() registers everything except the identity provider, which only Build() knows
+        // how to choose. Skipping Build() therefore yields a hub that starts, accepts connections
+        // and fails on the first one — at the far end of a scenario, in a resolution error naming a
+        // type the host never mentioned. Refusing here names the missing call instead.
+        if (endpoints.ServiceProvider.GetService<IClientIdentityProvider>() is null)
+        {
+            throw new InvalidOperationException(
+                "TransportR is not fully configured: AddDataHub() must be followed by Build().");
+        }
+
         var hubEndpoint = endpoints.MapHub<CommandHub>(WireRoutes.CommandHub);
 
         if (requireAuth)

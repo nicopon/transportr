@@ -36,6 +36,14 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// Signals that all items have been sent and waits for acknowledgment.
     /// </summary>
     /// <param name="cancellationToken">Token to cancel the completion wait.</param>
+    /// <remarks>
+    /// Returning normally is the success signal, and the only one: there is no counter a caller can
+    /// compare after the fact to learn whether the receiver got everything.
+    /// </remarks>
+    /// <exception cref="TransferFailedException">
+    /// The receiver stopped acknowledging for <c>ClientOptions.CompleteStallTimeout</c>, or the
+    /// session failed. The handle is dead; dispose it.
+    /// </exception>
     public abstract Task CompleteAsync(CancellationToken cancellationToken = default);
     
     /// <summary>

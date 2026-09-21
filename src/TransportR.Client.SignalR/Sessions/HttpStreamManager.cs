@@ -41,27 +41,33 @@ internal class HttpStreamManager : IAsyncDisposable
 
     public void StartStreams(bool isSender, Func<Stream, CancellationToken, Task> writeAction, Func<Stream, CancellationToken, Task> readAction, CancellationToken sessionToken)
     {
-        // Cancel any existing streams
+        // The attempt being replaced is cancelled but not disposed: it owns its source now and
+        // still has streams unwinding that will cancel it on their way out.
         _streamCts.Cancel();
-        _streamCts.Dispose();
-        _streamCts = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+        var attempt = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+        _streamCts = attempt;
 
         if (isSender)
         {
              // Sender: Data=Write, Control=Read
-             _senderTask = RunDualStreamAsync(true, writeAction, readAction, _streamCts.Token);
+             _senderTask = RunDualStreamAsync(true, writeAction, readAction, attempt);
              _receiverTask = null;
         }
         else
         {
              // Receiver: Data=Read, Control=Write
-             _receiverTask = RunDualStreamAsync(false, writeAction, readAction, _streamCts.Token);
+             _receiverTask = RunDualStreamAsync(false, writeAction, readAction, attempt);
              _senderTask = null;
         }
     }
     
-    private async Task<StreamResult> RunDualStreamAsync(bool isSender, Func<Stream, CancellationToken, Task> writeAction, Func<Stream, CancellationToken, Task> readAction, CancellationToken token)
+    /// <summary>
+    /// Runs one attempt's pair of streams. The attempt owns <paramref name="attempt"/> for its
+    /// whole life, including after the manager has moved on to the next one.
+    /// </summary>
+    private async Task<StreamResult> RunDualStreamAsync(bool isSender, Func<Stream, CancellationToken, Task> writeAction, Func<Stream, CancellationToken, Task> readAction, CancellationTokenSource attempt)
     {
+         var token = attempt.Token;
          // Trigger: Data Stream
          // Trigger: Control Stream
          
@@ -91,8 +97,11 @@ internal class HttpStreamManager : IAsyncDisposable
              var result = await completedTask;
              if (!result.IsSuccess)
              {
-                 // One stream failed. Cancel the other and return the error.
-                 _streamCts.Cancel();
+                 // Cancels this attempt's other stream, never whatever attempt the manager is on
+                 // now: an attempt that has already been replaced is still unwinding, and reaching
+                 // for the shared field made it cancel the streams that succeeded it — every
+                 // reopened stream then died within a fraction of a millisecond.
+                 attempt.Cancel();
                  return result;
              }
          }
@@ -208,7 +217,11 @@ internal class HttpStreamManager : IAsyncDisposable
         {
             request.Content = new PushStreamContent(async (stream, _, _) =>
             {
-                await using var bufferedStream = new BufferedStream(stream, bufferSize: _config.Options.StreamBufferSize);
+                // Flushed but never disposed, and the stream underneath is never closed: HttpClient
+                // owns the request body and writes its terminating chunk after this returns.
+                // Closing it here made every POST that finished cleanly come back as a failed
+                // request, which is why a receiver could never end its control POST on purpose.
+                var bufferedStream = new BufferedStream(stream, bufferSize: _config.Options.StreamBufferSize);
                 try
                 {
                     await writeAction(bufferedStream, token);
@@ -222,7 +235,6 @@ internal class HttpStreamManager : IAsyncDisposable
                         _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, ex.Message);
                     throw;
                 }
-                finally { stream.Close(); }
             });
         }
         

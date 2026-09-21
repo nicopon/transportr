@@ -7,6 +7,7 @@ using Sender.Services;
 using TransportR;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR.Services;
+using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Client.SignalR;
 using TransportR.Auth.ClientCredentials; // Extension
@@ -190,29 +191,25 @@ try
                     logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
                     
                     var (count, startTime) = await SendOrdersAsync(transfer, service, broker, showProgress, logger, CancellationToken.None);
+
+                    // CompleteAsync returning is the receiver's word that it has everything; the
+                    // counters below are stats, not the verdict. It throws when it is not.
                     await transfer.CompleteAsync();
                     
-                    // Final stats after CompleteAsync to ensure all ACKs are received
                     var totalDuration = (DateTime.UtcNow - startTime).TotalSeconds;
                     var finalThroughput = totalDuration > 0 ? count / totalDuration : 0;
                     var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
                     
-                    string statsMsg;
-                    long acksReceived = finalInfo?.AcksReceived ?? 0;
-                    
-                    if (acksReceived * batchSize < count)
-                    {
-                         statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} FAILED/INCOMPLETE: {count:N0} items sent | {acksReceived} ACKs received | {finalThroughput:N0} items/s";
-                         logger.LogError(statsMsg);
-                    }
-                    else
-                    {
-                         statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {count:N0} items | {acksReceived} ACKs received | {finalThroughput:N0} items/s";
-                         logger.LogInformation(statsMsg);
-                    }
+                    var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {count:N0} items | {finalInfo?.AcksReceived ?? 0} ACKs received | {finalThroughput:N0} items/s";
+                    logger.LogInformation(statsMsg);
 
                     if (showProgress)
                         Console.WriteLine(statsMsg);
+                }
+                catch (TransferFailedException ex)
+                {
+                    logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
+                    Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
                 }
                 catch(Exception ex)
                 {
@@ -226,10 +223,8 @@ try
     }
     
     await Task.WhenAll(tasks);
-    
-    // Wait for everything to flush (Complete envelope, etc.)
-    logger.LogInformation("Waiting for transmissions to complete...");
-    await Task.Delay(5000);
+
+    ReportLiveSessions("SENDER", broker, logger);
 }
 catch (Exception ex)
 {
@@ -244,6 +239,16 @@ finally
 }
 
 logger.LogInformation("=== Sender - Completed ===");
+
+// Every released handle takes its session out of the client's registry, so a non-zero count here
+// is a transfer the client is still holding.
+static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extensions.Logging.ILogger logger)
+{
+    var live = client.GetTransfers().Count;
+    var msg = $"[{role}][SESSIONS] {live} live after completion";
+    logger.LogInformation(msg);
+    Console.WriteLine(msg);
+}
 
 static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
     Send<Order> transfer, 

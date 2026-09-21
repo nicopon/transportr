@@ -169,14 +169,20 @@ try
         {
             try
             {
-                logger.LogInformation("[Transfer {TransferId}] Starting reception (BatchSize: {BatchSize})", transfer.TransferId, transfer.BatchSize);
-                await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger); 
-                
-                // CRITICAL: Wait for full completion (Shutdown handshake) to ensure ACKs are flushed
-                logger.LogInformation("[Transfer {TransferId}] Waiting for Shutdown Handshake...", transfer.TransferId);
-                await transfer.WaitForCompletionAsync(cts.Token);
-                
-                logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
+                // The handler owns the handle: nothing else will release the session behind it,
+                // and the scope has to close before the signal below, or the count the main flow
+                // then reads would race the release it is there to check.
+                await using (transfer)
+                {
+                    logger.LogInformation("[Transfer {TransferId}] Starting reception (BatchSize: {BatchSize})", transfer.TransferId, transfer.BatchSize);
+                    await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger); 
+                    
+                    // CRITICAL: Wait for full completion (Shutdown handshake) to ensure ACKs are flushed
+                    logger.LogInformation("[Transfer {TransferId}] Waiting for Shutdown Handshake...", transfer.TransferId);
+                    await transfer.WaitForCompletionAsync(cts.Token);
+                    
+                    logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
+                }
             }
             catch (Exception ex)
             {
@@ -192,10 +198,8 @@ try
     // Wait for all operations to complete
     await Task.Run(() => completionSignal.Wait(cts.Token));
     logger.LogInformation("All expected transfers completed.");
-    
-    // Wait for ACKs to be flushed
-    logger.LogInformation("Waiting for transmissions to complete (ACKs)...");
-    await Task.Delay(5000, cts.Token);
+
+    ReportLiveSessions("RECEIVER", broker, logger);
 }
 catch (OperationCanceledException) { }
 catch (Exception ex)
@@ -207,6 +211,17 @@ finally
 {
     await broker.DisposeAsync();
     Console.WriteLine("[RECEIVER] !!! TERMINATED !!!");
+}
+
+// Every released handle takes its session out of the client's registry, so a non-zero count here
+// is a transfer the client is still holding — the leak this reports is invisible in RSS, which a
+// buffered transfer's own footprint dwarfs.
+static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extensions.Logging.ILogger logger)
+{
+    var live = client.GetTransfers().Count;
+    var msg = $"[{role}][SESSIONS] {live} live after completion";
+    logger.LogInformation(msg);
+    Console.WriteLine(msg);
 }
 
 static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient broker, string outputDirectory, bool showProgress, int consumeItemsPerSecond, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)

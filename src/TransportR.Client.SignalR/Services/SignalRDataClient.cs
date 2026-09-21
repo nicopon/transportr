@@ -227,9 +227,9 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
                     s.TransferId,
                     s.DataUrl,
                     s.IsSender ? TransferDirection.Sending : TransferDirection.Receiving,
-                    s.IsCompleted ? TransferStatus.Completed : TransferStatus.Active,
+                    ToTransferStatus(s.State),
                     s.ItemsProcessed,
-                    0,
+                    s.BytesTransferred,
                     s.StartedAt,
                     DateTime.UtcNow - s.StartedAt,
                     s.AcksReceived,
@@ -237,6 +237,21 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
                 ))
         ];
     }
+
+    private static TransferStatus ToTransferStatus(SessionState state) => state switch
+    {
+        SessionState.Completed => TransferStatus.Completed,
+        SessionState.Failed => TransferStatus.Failed,
+        SessionState.SenderCompleteSent
+            or SessionState.SenderAckReceived
+            or SessionState.SenderTerminatingDataPost
+            or SessionState.SenderAwaitingControlGetEOF
+            or SessionState.ReceiverCompleteReceived
+            or SessionState.ReceiverAckSent
+            or SessionState.ReceiverAwaitingDataGetEOF
+            or SessionState.ReceiverTerminatingControlPost => TransferStatus.Completing,
+        _ => TransferStatus.Active
+    };
 
     public async ValueTask DisposeAsync()
     {

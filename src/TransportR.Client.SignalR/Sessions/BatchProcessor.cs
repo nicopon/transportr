@@ -47,12 +47,25 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private long _itemsReceived;
     private long _acksReceived;
     private long _acksSent;
+    private long _payloadBytes;
 
     public ChannelReader<IControlMessage> OutgoingMessages => _sendChannel.Reader;
     public long ItemsSent => Interlocked.Read(ref _itemsSent);
     public long ItemsReceived => Interlocked.Read(ref _itemsReceived);
     public long AcksReceived => Interlocked.Read(ref _acksReceived);
     public long AcksSent => Interlocked.Read(ref _acksSent);
+
+    /// <summary>
+    /// Serialized payload bytes that crossed the wire for this session, resends included and chunk
+    /// headers excluded.
+    /// </summary>
+    public long PayloadBytes => Interlocked.Read(ref _payloadBytes);
+
+    /// <summary>
+    /// Counts payload bytes written by the session's own write loop, which owns the outgoing stream
+    /// and so cannot be counted from here.
+    /// </summary>
+    public void CountPayloadBytes(int bytes) => Interlocked.Add(ref _payloadBytes, bytes);
     public int PendingBatches => _pendingBatches;
     public bool HasUnackedBatches => !_unackedBatches.IsEmpty;
     public int UnackedCount => _unackedBatches.Count;
@@ -130,10 +143,14 @@ internal class BatchProcessor<T> : IAsyncDisposable
         }
     }
     
+    /// <summary>
+    /// Ends delivery to the consumer. The outgoing channel is deliberately left open: the
+    /// acknowledgement the receiver still owes its sender may have to be written again on a
+    /// reopened stream, and a completed writer makes that resend throw instead.
+    /// </summary>
     public void CompleteReceiver()
     {
         _receiveBuffer?.Complete();
-        _sendChannel.Writer.TryComplete(); // Allow Control WriteLoop to exit
     }
     
     public void CompleteSenderChannel()
@@ -148,6 +165,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     public async Task ProcessChunkAsync(ChunkData chunk, CancellationToken ct = default)
     {
+        Interlocked.Add(ref _payloadBytes, chunk.Header.PayloadLength);
+
         switch (chunk.Header.Type)
         {
             case ChunkType.Batch:
@@ -424,6 +443,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
                 var body = payloadMem[4..];
                 
                 await ChunkIO.WriteBatchAsync(outputStream, transferGuid, kvp.Key, count, body, token);
+                Interlocked.Add(ref _payloadBytes, payloadMem.Length);
                 await outputStream.FlushAsync(token);
                 _context.Logger.LogInformation("Resent unacked batch {BatchId} on reconnect (Transfer={TransferId})", kvp.Key, _transferId);
             }

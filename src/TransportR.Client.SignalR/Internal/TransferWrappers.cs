@@ -43,4 +43,9 @@ internal class HttpReceive<T>(IDataSession<T> session) : Receive<T>(session.Tran
     {
         return session.WaitForCompletionAsync(cancellationToken);
     }
+
+    protected override async ValueTask DisposeAsyncCore()
+    {
+        await session.DisposeAsync();
+    }
 }

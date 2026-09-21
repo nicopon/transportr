@@ -300,4 +300,20 @@ done
 assert_peak_rss receiver "$MAX_RECEIVER_RSS_MB" || exit 1
 assert_peak_rss sender "$MAX_SENDER_RSS_MB" || exit 1
 
+# A finished transfer whose handle was released leaves the client's registry. A client still
+# holding one has leaked it, and no line count or memory ceiling would say so.
+for role in SENDER RECEIVER; do
+    live_line=$(grep -h "\[$role\]\[SESSIONS\]" "$OUTPUT_DIR"/*.log 2>/dev/null | tail -1)
+    if [ -z "$live_line" ]; then
+        log_error "❌ Error: $role never reported its live session count"
+        exit 1
+    fi
+    live_count=$(echo "$live_line" | sed -E 's/.*\[SESSIONS\] ([0-9]+) live.*/\1/')
+    if [ "$live_count" != "0" ]; then
+        log_error "❌ Error: $role still holds $live_count transfer(s) after completion"
+        exit 1
+    fi
+done
+log_info "Sessions released: sender and receiver both hold 0 transfers."
+
 log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."

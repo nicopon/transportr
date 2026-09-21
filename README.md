@@ -91,9 +91,17 @@ var receiver = new TransportRClientBuilder<Order>()
 
 receiver.OnTransferStarted += async transfer =>
 {
-    await foreach (var order in transfer.ReceiveAsync())
+    // The handler owns the handle and must release it -- but only once the transfer has
+    // closed: the loop below ends at the last item, which is before the sender has been
+    // told so.
+    await using (transfer)
     {
-        Console.WriteLine($"Received: {order.Id}");
+        await foreach (var order in transfer.ReceiveAsync())
+        {
+            Console.WriteLine($"Received: {order.Id}");
+        }
+
+        await transfer.WaitForCompletionAsync();
     }
 };
 

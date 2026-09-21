@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Threading.Channels;
+using TransportR.Abstractions;
 using TransportR.Client.SignalR.Batching;
 using TransportR.Interfaces;
 using TransportR.Protocol;
@@ -22,6 +23,14 @@ namespace TransportR.Client.SignalR.Sessions;
 /// </summary>
 internal class DataSession<T> : IDataSession<T>
 {
+    // Interval between two Complete signals. Short enough that a lost one costs little, long
+    // enough that a draining receiver is not asked again while it is still catching up.
+    private const int CompleteRetryMs = 5000;
+
+    // Reopening a stream in the completing phase can fail as fast as it is attempted; without a
+    // pause between tries the session loop turns a dead hub into a spin.
+    private const int CompletingPhaseRetryMs = 500;
+
     public string TransferId { get; }
     public int BatchSize { get; }
     public string DataUrl { get; }
@@ -43,7 +52,12 @@ internal class DataSession<T> : IDataSession<T>
     
     // Public properties for GetTransfers()
     public bool IsSender => _isSender;
-    public bool IsCompleted => _fsm.CurrentState == SessionState.Completed || _fsm.CurrentState == SessionState.Failed;
+    public SessionState State => _fsm.CurrentState;
+
+    /// <summary>
+    /// True once the session has stopped, whether it succeeded or failed.
+    /// </summary>
+    private bool IsTerminal => _fsm.CurrentState is SessionState.Completed or SessionState.Failed;
     
     /// <summary>
     /// Returns true if the session is in any of the completing/domino states (sender or receiver).
@@ -61,8 +75,9 @@ internal class DataSession<T> : IDataSession<T>
         SessionState.ReceiverTerminatingControlPost => true,
         _ => false
     };
-    
+
     public long ItemsProcessed => IsSender ? _batchProcessor.ItemsSent : _batchProcessor.ItemsReceived;
+    public long BytesTransferred => _batchProcessor.PayloadBytes;
     public long AcksReceived => _batchProcessor.AcksReceived;
     public long AcksSent => _batchProcessor.AcksSent;
     
@@ -155,10 +170,17 @@ internal class DataSession<T> : IDataSession<T>
         // Send Complete and wait for CompleteAck (with retry)
         _config.Logger.LogInformation("Sending Complete message (Transfer={TransferId})", TransferId);
 
-        const int completeRetryMs = 5000;
-        
-        // Retry indefinitely until Ack or Shutdown
-        while (_fsm.CurrentState != SessionState.Completed && _fsm.CurrentState != SessionState.Failed)
+        var stallTimeout = _config.Options.CompleteStallTimeout;
+        var retryInterval = TimeSpan.FromMilliseconds(Math.Min(CompleteRetryMs, stallTimeout.TotalMilliseconds));
+
+        // The receiver refuses Complete while batches are still missing, so re-sending it is how the
+        // tail of a transfer drains and a retry on its own says nothing is wrong. What bounds the
+        // loop is therefore the acknowledgement count, not the number of attempts: a peer still
+        // acknowledging is still working, one that has gone away stops moving it.
+        var lastAcks = _batchProcessor.AcksReceived;
+        var lastProgressUtc = DateTime.UtcNow;
+
+        while (!IsTerminal)
         {
             cancellationToken.ThrowIfCancellationRequested();
             
@@ -166,9 +188,16 @@ internal class DataSession<T> : IDataSession<T>
             
             // Wait for CompleteAck
             var ackTask = _batchProcessor.WaitForCompleteAckAsync(cancellationToken);
-            var delayTask = Task.Delay(completeRetryMs, cancellationToken);
+            var delayTask = Task.Delay(retryInterval, cancellationToken);
             
-            if (await Task.WhenAny(ackTask, delayTask) == ackTask)
+            var finished = await Task.WhenAny(ackTask, delayTask);
+
+            // Both tasks carry the caller's token, so cancelling completes them rather than leaving
+            // them pending: without this, a cancelled wait reads as an acknowledgement and reports
+            // a transfer that never finished as Completed.
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (finished == ackTask && ackTask.IsCompletedSuccessfully)
             {
                 _config.Logger.LogInformation("CompleteAck received - transfer complete (Transfer={TransferId})", TransferId);
                 _fsm.TransitionTo(SessionState.Completed);
@@ -179,9 +208,35 @@ internal class DataSession<T> : IDataSession<T>
                 // No need to call TransferComplete - hub detects completion via dataplane EOF
                 return;
             }
-            
-            _config.Logger.LogWarning("Complete not acknowledged, retrying... (Transfer={TransferId})", TransferId);
+
+            var acks = _batchProcessor.AcksReceived;
+            if (acks != lastAcks)
+            {
+                lastAcks = acks;
+                lastProgressUtc = DateTime.UtcNow;
+                _config.Logger.LogInformation(
+                    "Complete not acknowledged yet, {Unacked} batches still in flight - retrying (Transfer={TransferId})",
+                    _batchProcessor.UnackedCount, TransferId);
+                continue;
+            }
+
+            var stalledFor = DateTime.UtcNow - lastProgressUtc;
+            if (stalledFor >= stallTimeout)
+            {
+                _fsm.TransitionTo(SessionState.Failed);
+                _batchProcessor.CompleteSenderChannel();
+                throw new TransferFailedException(
+                    TransferId,
+                    $"Transfer did not complete: nothing was acknowledged for {stalledFor.TotalSeconds:N0}s.");
+            }
+
+            _config.Logger.LogWarning(
+                "Complete not acknowledged and nothing acknowledged for {Stalled:N0}s (Transfer={TransferId})",
+                stalledFor.TotalSeconds, TransferId);
         }
+
+        // Only reachable when something else failed the session under us.
+        throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
     }
     
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken)
@@ -218,20 +273,35 @@ internal class DataSession<T> : IDataSession<T>
 
     public async Task WaitForCompletionAsync(CancellationToken cancellationToken)
     {
-        if (IsCompleted) return;
-        
-        // For receivers: completing phase means all data received + CompleteAck sent
-        // We don't need to wait for the full domino sequence
-        // For senders: we wait for actual Completed state (got CompleteAck)
-        while (!IsCompleted)
+        // Both roles wait for the domino to close the session. Having accepted Complete is not
+        // enough for a receiver: its acknowledgement is queued at that point, and a queued chunk is
+        // not a delivered one — the stream carrying it can fail, and the resend that follows needs
+        // the session the caller is about to release. What says the acknowledgement arrived is the
+        // hub ending this session's streams, which is the terminal state itself.
+        DateTime? completingSince = null;
+
+        while (!IsTerminal)
         {
-            // Receiver can exit when in completing phase (all data received)
-            if (!_isSender && IsInCompletingPhase)
+            if (IsInCompletingPhase)
             {
-                _config.Logger.LogInformation("Receiver in completing phase with all data received. Exiting wait.");
-                break;
+                completingSince ??= DateTime.UtcNow;
+
+                // Only the ending is bounded, never the transfer: before the completing phase the
+                // peer is still working and the caller's token is the only clock that applies.
+                if (DateTime.UtcNow - completingSince >= _config.Options.CompleteStallTimeout)
+                {
+                    throw new TransferFailedException(
+                        TransferId,
+                        "All data was received, but the transfer never finished closing; the sender cannot know it completed.");
+                }
             }
+
             await Task.Delay(100, cancellationToken);
+        }
+
+        if (_fsm.CurrentState == SessionState.Failed)
+        {
+            throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
         }
     }
 
@@ -264,85 +334,8 @@ internal class DataSession<T> : IDataSession<T>
                 {
                     case SessionState.Starting:
                     case SessionState.Streaming:
-                        // Execute Streams (Active Mode)
                         _fsm.TransitionTo(SessionState.Streaming);
-                        _httpStreamManager.StartStreams(IsSender, WriteLoop, ReadLoop, token);
-                        
-                        // Wait for ANY stream to finish (returns on failure or completion)
-                        // If one fails, HttpStreamManager returns result of failing task.
-                        var senderTask = _httpStreamManager.SenderTask;
-                        var receiverTask = _httpStreamManager.ReceiverTask;
-                        
-                        var activeTasks = new List<Task<HttpStreamManager.StreamResult>>();
-                        if(senderTask != null) activeTasks.Add(senderTask);
-                        if(receiverTask != null) activeTasks.Add(receiverTask);
-                        
-                        if (activeTasks.Count > 0)
-                        {
-                            var finished = await Task.WhenAny(activeTasks);
-                            var result = await finished;
-                            
-                            if (!result.IsSuccess)
-                            {
-                                if (result.IsRetryable)
-                                {
-                                    _config.Logger.LogWarning("Stream failed (Retryable): {Error}. Transitioning to Reconnecting.", result.ErrorMessage);
-                                    if (!IsInCompletingPhase)
-                                    {
-                                        _fsm.TransitionTo(SessionState.Reconnecting);
-                                    }
-                                    else
-                                    {
-                                        _config.Logger.LogInformation("Retrying stream connection while in completing phase.");
-                                    }
-                                }
-                                else
-                                {
-                                    _config.Logger.LogError("Stream failed (Fatal): {Error}. Sessions FAILED.", result.ErrorMessage);
-                                    // If we are in completing phase and the server says "Transfer Gone" (404),
-                                    // it means the transfer finished successfully and was cleaned up before we could reconnect.
-                                    // This is a valid "Success" signal in the completing phase.
-                                    if (IsInCompletingPhase && 
-                                        result.ErrorMessage != null && 
-                                        result.ErrorMessage.Contains("Transfer Gone"))
-                                    {
-                                        _config.Logger.LogInformation("Transfer Gone (404) received while in completing phase. Transfer confirmed Completed.");
-                                        _fsm.TransitionTo(SessionState.Completed);
-                                    }
-                                    else
-                                    {
-                                        _fsm.TransitionTo(SessionState.Failed);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // A graceful close means only that the stream ended, not that
-                                // the transfer did: HttpStreamManager reports success whenever a
-                                // read or write loop finishes without throwing, and a dropped
-                                // connection can end one that way. What the two cases are told
-                                // apart by is the phase, below — in the completing phase the
-                                // close is the expected end, outside it the peer went away and
-                                // we reconnect. A 404 does not arrive here at all; it is fatal
-                                // and handled in the branch above.
-                                _config.Logger.LogInformation("Stream finished successfully. Re-evaluating state.");
-                                
-                                // Already Completed means the domino sequence finished before
-                                // this stream unwound; there is nothing left to decide.
-                                if (_fsm.CurrentState != SessionState.Completed)
-                                {
-                                    if (IsInCompletingPhase)
-                                    {
-                                        _config.Logger.LogInformation("Stream finished while in completing phase (Domino effect). Transfer confirmed Completed.");
-                                        _fsm.TransitionTo(SessionState.Completed);
-                                    }
-                                    else
-                                    {
-                                        _fsm.TransitionTo(SessionState.Reconnecting);
-                                    }
-                                }
-                            }
-                        }
+                        await RunStreamsUntilOneEndsAsync(token);
                         break;
 
                     case SessionState.Reconnecting:
@@ -362,9 +355,21 @@ internal class DataSession<T> : IDataSession<T>
                              await Task.Delay(2000, token);
                          }
                          break;
-                         
+
                     default:
-                         await Task.Delay(100, token);
+                         // The domino states are not a resting place: what ends a transfer is the
+                         // hub closing these streams, so they have to stay open until it does.
+                         // Sleeping here instead left a receiver whose control stream failed just
+                         // after it accepted Complete sitting on an acknowledgement it would never
+                         // re-send, and a sender retrying a transfer that was in fact delivered.
+                         if (IsInCompletingPhase)
+                         {
+                             await RunStreamsUntilOneEndsAsync(token);
+                         }
+                         else
+                         {
+                             await Task.Delay(100, token);
+                         }
                          break;
                 }
             }
@@ -376,6 +381,93 @@ internal class DataSession<T> : IDataSession<T>
         }
         
         _config.Logger.LogInformation("Session Loop ENDED. FinalState={State}", _fsm.CurrentState);
+    }
+
+    /// <summary>
+    /// Opens the session's streams and waits for the first of them to end, translating that
+    /// outcome into the next state. Returns as soon as one stream is done; the caller's loop
+    /// decides whether to open them again.
+    /// </summary>
+    private async Task RunStreamsUntilOneEndsAsync(CancellationToken token)
+    {
+        _httpStreamManager.StartStreams(IsSender, WriteLoop, ReadLoop, token);
+        
+        // Wait for ANY stream to finish (returns on failure or completion)
+        // If one fails, HttpStreamManager returns result of failing task.
+        var senderTask = _httpStreamManager.SenderTask;
+        var receiverTask = _httpStreamManager.ReceiverTask;
+        
+        var activeTasks = new List<Task<HttpStreamManager.StreamResult>>();
+        if(senderTask != null) activeTasks.Add(senderTask);
+        if(receiverTask != null) activeTasks.Add(receiverTask);
+        
+        if (activeTasks.Count > 0)
+        {
+            var finished = await Task.WhenAny(activeTasks);
+            var result = await finished;
+            
+            if (!result.IsSuccess)
+            {
+                if (result.IsRetryable)
+                {
+                    _config.Logger.LogWarning("Stream failed (Retryable): {Error}. Transitioning to Reconnecting.", result.ErrorMessage);
+                    if (!IsInCompletingPhase)
+                    {
+                        _fsm.TransitionTo(SessionState.Reconnecting);
+                    }
+                    else
+                    {
+                        _config.Logger.LogInformation("Retrying stream connection while in completing phase.");
+                        await Task.Delay(CompletingPhaseRetryMs, token);
+                    }
+                }
+                else
+                {
+                    _config.Logger.LogError("Stream failed (Fatal): {Error}. Sessions FAILED.", result.ErrorMessage);
+                    // If we are in completing phase and the server says "Transfer Gone" (404),
+                    // it means the transfer finished successfully and was cleaned up before we could reconnect.
+                    // This is a valid "Success" signal in the completing phase.
+                    if (IsInCompletingPhase && 
+                        result.ErrorMessage != null && 
+                        result.ErrorMessage.Contains("Transfer Gone"))
+                    {
+                        _config.Logger.LogInformation("Transfer Gone (404) received while in completing phase. Transfer confirmed Completed.");
+                        _fsm.TransitionTo(SessionState.Completed);
+                    }
+                    else
+                    {
+                        _fsm.TransitionTo(SessionState.Failed);
+                    }
+                }
+            }
+            else
+            {
+                // A graceful close means only that the stream ended, not that
+                // the transfer did: HttpStreamManager reports success whenever a
+                // read or write loop finishes without throwing, and a dropped
+                // connection can end one that way. What the two cases are told
+                // apart by is the phase, below — in the completing phase the
+                // close is the expected end, outside it the peer went away and
+                // we reconnect. A 404 does not arrive here at all; it is fatal
+                // and handled in the branch above.
+                _config.Logger.LogInformation("Stream finished successfully. Re-evaluating state.");
+                
+                // Already Completed means the domino sequence finished before
+                // this stream unwound; there is nothing left to decide.
+                if (_fsm.CurrentState != SessionState.Completed)
+                {
+                    if (IsInCompletingPhase)
+                    {
+                        _config.Logger.LogInformation("Stream finished while in completing phase (Domino effect). Transfer confirmed Completed.");
+                        _fsm.TransitionTo(SessionState.Completed);
+                    }
+                    else
+                    {
+                        _fsm.TransitionTo(SessionState.Reconnecting);
+                    }
+                }
+            }
+        }
     }
 
 
@@ -441,6 +533,7 @@ internal class DataSession<T> : IDataSession<T>
                              var count = BinaryPrimitives.ReadInt32LittleEndian(payloadMem.Span[..4]);
                              var body = payloadMem[4..];
                              await ChunkIO.WriteBatchAsync(outputStream, transferGuid, batchMsg.BatchId, count, body, token);
+                             _batchProcessor.CountPayloadBytes(payloadMem.Length);
                         }
                     }
                     finally
@@ -458,6 +551,17 @@ internal class DataSession<T> : IDataSession<T>
                 else if (message is ControlChunkMessage ctrlMsg)
                 {
                     await ChunkIO.WriteControlAsync(outputStream, transferGuid, ctrlMsg.BatchId, ctrlMsg.Type, token);
+
+                    // Ending the control POST is the receiver's step in the domino, and it belongs
+                    // here rather than at the moment Complete was accepted: EOF after the
+                    // acknowledgement means the hub read it, EOF before it was ever written means
+                    // the sender waits forever. A stream that fails instead is reopened, and the
+                    // acknowledgement goes out again on the new one.
+                    if (!IsSender && ctrlMsg.Type == ChunkType.CompleteAck)
+                    {
+                        await outputStream.FlushAsync(token);
+                        return;
+                    }
                 }
             }
             
@@ -493,7 +597,7 @@ internal class DataSession<T> : IDataSession<T>
                 await _batchProcessor.ProcessChunkAsync(chunkData.Value, token);
                 
                 // Exit when entering completing phase (receiver got Complete chunk) or fully completed
-                if (IsInCompletingPhase || IsCompleted)
+                if (IsInCompletingPhase || IsTerminal)
                 {
                     _config.Logger.LogInformation("Entering completing phase - exiting ReadLoop for Transfer={TransferId}", TransferId);
                     break;
@@ -510,7 +614,7 @@ internal class DataSession<T> : IDataSession<T>
         }
         finally
         {
-            if (IsInCompletingPhase || IsCompleted || _cts.IsCancellationRequested)
+            if (IsInCompletingPhase || IsTerminal || _cts.IsCancellationRequested)
             {
                 _batchProcessor.CompleteReceiver();
             }
@@ -528,6 +632,16 @@ internal class DataSession<T> : IDataSession<T>
     private async void HeartbeatLoop(object? state)
     {
         if (_cts.IsCancellationRequested) return;
+
+        // A per-transfer heartbeat recreates the hub-side TransferState it reports against, so one
+        // that outlives its transfer resurrects a finished transfer every tick — and, behind a
+        // shared state store, renews its expiry forever. Once this session has nothing left to say
+        // about the transfer, it says nothing.
+        if (IsTerminal || IsInCompletingPhase)
+        {
+            _heartbeatTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            return;
+        }
 
         try 
         {

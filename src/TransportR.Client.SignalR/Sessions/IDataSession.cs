@@ -1,3 +1,5 @@
+using TransportR.Models;
+
 namespace TransportR.Client.SignalR.Sessions;
 
 /// <summary>
@@ -28,14 +30,21 @@ public interface IDataSession<T> : IAsyncDisposable
     bool IsSender { get; }
     
     /// <summary>
-    /// True if the transfer has completed.
+    /// Where the session currently stands. Terminal states are
+    /// <see cref="SessionState.Completed"/> and <see cref="SessionState.Failed"/>; anything else
+    /// means the transfer is still under way.
     /// </summary>
-    bool IsCompleted { get; }
+    SessionState State { get; }
     
     /// <summary>
     /// Number of items processed (sent or received).
     /// </summary>
     long ItemsProcessed { get; }
+    
+    /// <summary>
+    /// Serialized payload bytes that crossed the wire, resends included.
+    /// </summary>
+    long BytesTransferred { get; }
     
     /// <summary>
     /// Number of ACKs received (sender) or sent (receiver).
