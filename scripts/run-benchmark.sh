@@ -316,4 +316,20 @@ for role in SENDER RECEIVER; do
 done
 log_info "Sessions released: sender and receiver both hold 0 transfers."
 
+# The receiver writes every row before the sender learns whether its Complete was acknowledged, so
+# a transfer that failed still leaves a full CSV and an empty session registry behind. Neither the
+# line count nor the two checks above can tell that apart from a success - only the sender's own
+# verdict can, and it is logged once per sender on the path where CompleteAsync returned.
+# Counted by distinct transfer id because OUTPUT_DIR holds both the console capture and the
+# structured log, and every line appears in both.
+completed_senders=$(grep -h "\[SENDER\]\[STATS\] Transfer .* complete:" "$OUTPUT_DIR"/*.log 2>/dev/null \
+    | sed -E 's/.*\[SENDER\]\[STATS\] Transfer ([0-9a-zA-Z]+) complete:.*/\1/' | sort -u | wc -l | tr -d ' ')
+
+if [ "$completed_senders" -ne "$NUM_SENDERS" ]; then
+    log_error "❌ Error: $completed_senders of $NUM_SENDERS sender(s) reported a completed transfer"
+    grep -h "TRANSFER FAILED" "$OUTPUT_DIR"/*.log 2>/dev/null | sort -u | head -n 5
+    exit 1
+fi
+log_info "Senders acknowledged: $completed_senders of $NUM_SENDERS reported a completed transfer."
+
 log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."

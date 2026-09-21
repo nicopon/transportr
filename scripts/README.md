@@ -115,6 +115,21 @@ receiver under 300 MB where its control, which differs only by the byte bound, r
 
 ---
 
+## Asserting the transfer actually succeeded
+
+The row count is not the verdict. The receiver writes every row before the sender learns whether
+its `Complete` was acknowledged, so a transfer that ends in `TransferFailedException` still leaves
+a full CSV, a clean session registry and a flat memory profile behind — and the sample catches the
+exception and exits 0. A run can therefore be wrong in every way that matters and still satisfy
+every other check on this page.
+
+So the runner also requires each sender to have logged `[SENDER][STATS] Transfer <id> complete:`,
+which only happens on the path where `CompleteAsync` returned. That line is the sender's own word
+that the receiver acknowledged everything, and it is the only check here that distinguishes a
+delivered transfer from a delivered file.
+
+---
+
 ## Architecture
 
 ```
