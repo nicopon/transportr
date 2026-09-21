@@ -117,6 +117,40 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.True(Math.Abs((updated.TokenExpiry!.Value - newExpiry).TotalSeconds) < 1);
     }
 
+    [DockerAvailableFact]
+    public async Task MarkDisconnected_MarksTheRegistrationOfThatConnection()
+    {
+        var clientId = Guid.NewGuid();
+        var connectionId = $"conn-mark-{Guid.NewGuid()}";
+        await _store.SaveClientAsync(CreateClient(clientId, connectionId));
+
+        await _store.MarkDisconnectedAsync(connectionId, DateTime.UtcNow);
+
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.NotNull(stored.DisconnectedAtUtc);
+    }
+
+    [DockerAvailableFact]
+    public async Task MarkDisconnected_AfterTheClientReconnected_LeavesTheLiveRegistrationAlone()
+    {
+        // Same race as in memory, and the one this store used to lose outright: it keeps the
+        // stale conn: index, so a resurrected ConnectionId still answers Heartbeat with true and
+        // the client never learns it has to register again.
+        var clientId = Guid.NewGuid();
+        var oldConnection = $"conn-old-{Guid.NewGuid()}";
+        var newConnection = $"conn-new-{Guid.NewGuid()}";
+        await _store.SaveClientAsync(CreateClient(clientId, oldConnection));
+        await _store.SaveClientAsync(CreateClient(clientId, newConnection));
+
+        await _store.MarkDisconnectedAsync(oldConnection, DateTime.UtcNow);
+
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.Equal(newConnection, stored.ConnectionId);
+        Assert.Null(stored.DisconnectedAtUtc);
+    }
+
     // ========== Session Tests (HA) ==========
 
     [DockerAvailableFact]

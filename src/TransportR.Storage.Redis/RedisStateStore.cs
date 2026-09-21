@@ -129,6 +129,31 @@ public class RedisStateStore : IStateStore
         return JsonSerializer.Deserialize<ClientRegistration>(json.ToString()!);
     }
 
+    public async Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
+    {
+        var connKey = $"{KeyPrefix}conn:{connectionId}";
+        var clientIdStr = await _db.StringGetAsync(connKey);
+
+        if (clientIdStr.IsNullOrEmpty) return;
+        if (!Guid.TryParse(clientIdStr.ToString(), out var clientId)) return;
+
+        var key = $"{KeyPrefix}clients:{clientId}";
+        var json = await _db.StringGetAsync(key);
+        if (json.IsNullOrEmpty) return;
+
+        var client = JsonSerializer.Deserialize<ClientRegistration>(json.ToString()!);
+        if (client == null || client.ConnectionId != connectionId) return;
+
+        var updated = client with { DisconnectedAtUtc = whenUtc };
+
+        // Conditional write on the exact payload read above. A Connect that landed in between
+        // stored a different one, the condition fails, and the live registration stands.
+        var tx = _db.CreateTransaction();
+        tx.AddCondition(Condition.StringEqual(key, json));
+        _ = tx.StringSetAsync(key, JsonSerializer.Serialize(updated), TtlFor(updated));
+        await tx.ExecuteAsync();
+    }
+
     public async Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)
     {
         // 1. Lookup clientId from connectionId index

@@ -42,6 +42,21 @@ public class InMemoryStateStore : IStateStore
         return Task.CompletedTask;
     }
 
+    public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
+    {
+        if (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
+            _clients.TryGetValue(clientId, out var current) &&
+            current.ConnectionId == connectionId)
+        {
+            // Compare-and-swap on the registration read above: a Connect that landed in between
+            // stored a different one, and this write is abandoned rather than reinstating the
+            // ConnectionId that just died.
+            _clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current);
+        }
+
+        return Task.CompletedTask;
+    }
+
     /// <summary>
     /// Evicts a registration whose connection dropped more than the grace period ago, the way
     /// sessions are expired lazily below. Without this a registration lives for the lifetime of

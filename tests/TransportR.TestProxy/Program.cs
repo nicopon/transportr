@@ -80,6 +80,12 @@ stateApi.MapGet("/clients/{clientId:guid}", async (Guid clientId, ProxyStateStor
     return client != null ? Results.Ok(client) : Results.NotFound();
 });
 
+stateApi.MapPost("/connections/{connectionId}/disconnected", async (string connectionId, DateTime whenUtc, ProxyStateStore store) =>
+{
+    await store.MarkDisconnectedAsync(connectionId, whenUtc);
+    return Results.NoContent();
+});
+
 stateApi.MapDelete("/clients/{clientId:guid}", async (Guid clientId, ProxyStateStore store) =>
 {
     await store.DeleteClientAsync(clientId);
@@ -144,6 +150,18 @@ public class ProxyStateStore : IStateStore
     public Task<ClientRegistration?> GetClientAsync(Guid clientId)
     {
         return Task.FromResult(_clients.TryGetValue(clientId, out var client) ? client : null);
+    }
+
+    public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
+    {
+        if (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
+            _clients.TryGetValue(clientId, out var current) &&
+            current.ConnectionId == connectionId)
+        {
+            _clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current);
+        }
+
+        return Task.CompletedTask;
     }
 
     public Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)

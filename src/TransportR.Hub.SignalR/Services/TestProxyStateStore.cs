@@ -47,6 +47,11 @@ public class TestProxyStateStore : IStateStore
         return clients ?? [];
     }
 
+    public async Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
+    {
+        await _httpClient.PostAsJsonAsync($"/api/state/connections/{connectionId}/disconnected", whenUtc);
+    }
+
     public async Task DeleteClientAsync(Guid clientId)
     {
         await _httpClient.DeleteAsync($"/api/state/clients/{clientId}");

@@ -237,6 +237,46 @@ public class InMemoryStateStoreTests
     }
 
     [Fact]
+    public async Task MarkDisconnected_MarksTheRegistrationOfThatConnection()
+    {
+        var clientId = Guid.NewGuid();
+        await _store.SaveClientAsync(Registration(clientId, "conn-1"));
+
+        await _store.MarkDisconnectedAsync("conn-1", DateTime.UtcNow);
+
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.NotNull(stored.DisconnectedAtUtc);
+    }
+
+    [Fact]
+    public async Task MarkDisconnected_OnAnUnknownConnection_DoesNothing()
+    {
+        await _store.MarkDisconnectedAsync("never-seen", DateTime.UtcNow);
+
+        Assert.Empty(await _store.GetAllClientsAsync());
+    }
+
+    [Fact]
+    public async Task MarkDisconnected_AfterTheClientReconnected_LeavesTheLiveRegistrationAlone()
+    {
+        // The disconnect callback for the old connection can run after the new Connect has
+        // landed. Writing back the registration it read would reinstate the dead ConnectionId,
+        // and the hub would then hold a connection nobody is listening on.
+        var clientId = Guid.NewGuid();
+        await _store.SaveClientAsync(Registration(clientId, "conn-old"));
+        await _store.SaveClientAsync(Registration(clientId, "conn-new"));
+
+        await _store.MarkDisconnectedAsync("conn-old", DateTime.UtcNow);
+
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.Equal("conn-new", stored.ConnectionId);
+        Assert.Null(stored.DisconnectedAtUtc);
+        Assert.NotNull(await _store.GetClientByConnectionIdAsync("conn-new"));
+    }
+
+    [Fact]
     public async Task GetAllClients_NeverEvictsAConnectedClient()
     {
         // Arrange: connected, registered long ago, idle ever since. Nothing should remove it -

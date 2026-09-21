@@ -44,20 +44,20 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var client = await GetClientByConnectionAsync(Context.ConnectionId);
-        if (client != null)
-        {
-            // Do NOT delete the client on disconnect. In chaos/unstable networks, the client
-            // usually reconnects within seconds under the same ClientId, and deleting the
-            // registration would break a transfer that was about to resume.
-            //
-            // But do not throw the signal away either: this is the only moment the hub knows for
-            // certain that a connection is gone, and discovery has nothing else to go on. Record
-            // it so GetReceivers can expose it; a fresh Connect writes a new registration with no
-            // marker, which clears it.
-            await _stateStore.SaveClientAsync(client with { DisconnectedAtUtc = DateTime.UtcNow });
-        }
-        
+        // Do NOT delete the client on disconnect. In chaos/unstable networks, the client
+        // usually reconnects within seconds under the same ClientId, and deleting the
+        // registration would break a transfer that was about to resume.
+        //
+        // But do not throw the signal away either: this is the only moment the hub knows for
+        // certain that a connection is gone, and discovery has nothing else to go on. Record
+        // it so GetReceivers can expose it; a fresh Connect writes a new registration with no
+        // marker, which clears it.
+        //
+        // The store decides whether the mark still applies: a reconnect can overtake this
+        // callback, and writing back a registration read before it would resurrect the dead
+        // ConnectionId over the live one.
+        await _stateStore.MarkDisconnectedAsync(Context.ConnectionId, DateTime.UtcNow);
+
         _logger.LogInformation("Client disconnected: {ConnectionId}", Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
     }

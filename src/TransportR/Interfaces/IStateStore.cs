@@ -32,6 +32,19 @@ public interface IStateStore
     Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync();
     
     /// <summary>
+    /// Records that the connection identified by <paramref name="connectionId"/> is gone, and does
+    /// nothing if the registration has since moved to another connection.
+    /// </summary>
+    /// <remarks>
+    /// A disconnect and the reconnect that replaces it race by nature. Read-modify-write through
+    /// <see cref="SaveClientAsync"/> loses that race: the departing connection writes back the
+    /// registration it read, reinstating its own dead ConnectionId over the live one. Marking is
+    /// therefore the store's job, not the caller's — only the store can make the check and the
+    /// write one step.
+    /// </remarks>
+    Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc);
+
+    /// <summary>
     /// Removes a client from the store.
     /// </summary>
     Task DeleteClientAsync(Guid clientId);
