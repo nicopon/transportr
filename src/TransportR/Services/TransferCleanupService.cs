@@ -107,7 +107,7 @@ public class TransferCleanupService : BackgroundService
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
             // 2. Clear state in TransferManager (Checkpoints, InMemory State)
-            await _transferManager.TerminateTransferAsync(transferId);
+            await _transferManager.RemoveTransferAsync(transferId);
 
             // 3. Remove bridges
             _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));

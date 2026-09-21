@@ -91,6 +91,9 @@ public class TransferManager : ITransferManager
         return _transfers.TryGetValue(transferId, out var state) ? state : null;
     }
 
+    // Completion is cleanup, and that is the design rather than a shortcut: the hub keeps no
+    // transfer history to move a finished transfer into, so a success and a timeout leave by the
+    // same door.
     public async Task RemoveTransferAsync(string transferId)
     {
         _transfers.TryRemove(transferId, out _);
@@ -99,21 +102,9 @@ public class TransferManager : ITransferManager
         await _stateStore.DeleteSessionAsync(transferId).ConfigureAwait(false);
     }
 
-    public async Task CompleteTransferAsync(string transferId)
-    {
-        // Completion is cleanup, and that is the design rather than a shortcut: the hub keeps
-        // no transfer history to move a finished transfer into.
-        await RemoveTransferAsync(transferId).ConfigureAwait(false);
-    }
-    
     public IEnumerable<TransferState> GetAllTransfers()
     {
         return _transfers.Values;
-    }
-
-    public async Task TerminateTransferAsync(string transferId)
-    {
-        await RemoveTransferAsync(transferId).ConfigureAwait(false);
     }
 
     public async Task KeepAliveAsync(string transferId)

@@ -36,25 +36,18 @@ public interface ITransferManager
     TransferState? GetTransfer(string transferId);
 
     /// <summary>
-    /// Removes the transfer state and participants (cleanup).
+    /// Drops the transfer state and its participants. This is the only way a transfer leaves the
+    /// hub, whether it succeeded or timed out: the hub keeps no transfer history to move a
+    /// finished one into, so there is no outcome for the caller to name here.
     /// </summary>
     /// <param name="transferId">The transfer identifier.</param>
     Task RemoveTransferAsync(string transferId);
 
     /// <summary>
-    /// Marks the transfer as successfully completed.
-    /// </summary>
-    /// <param name="transferId">The transfer identifier.</param>
-    Task CompleteTransferAsync(string transferId);
-    /// <summary>
     /// Gets all active transfers.
     /// </summary>
     IEnumerable<TransferState> GetAllTransfers();
 
-    /// <summary>
-    /// Terminates a transfer forcefully (e.g. timeout).
-    /// </summary>
-    Task TerminateTransferAsync(string transferId);
     /// <summary>
     /// Updates the last activity time for a transfer to prevent cleanup.
     /// </summary>
