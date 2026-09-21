@@ -59,22 +59,7 @@ internal class DataSession<T> : IDataSession<T>
     /// </summary>
     private bool IsTerminal => _fsm.CurrentState is SessionState.Completed or SessionState.Failed;
     
-    /// <summary>
-    /// Returns true if the session is in any of the completing/domino states (sender or receiver).
-    /// Used for logic that should apply during the completion sequence.
-    /// </summary>
-    private bool IsInCompletingPhase => _fsm.CurrentState switch
-    {
-        SessionState.SenderCompleteSent => true,
-        SessionState.SenderAckReceived => true,
-        SessionState.SenderTerminatingDataPost => true,
-        SessionState.SenderAwaitingControlGetEOF => true,
-        SessionState.ReceiverCompleteReceived => true,
-        SessionState.ReceiverAckSent => true,
-        SessionState.ReceiverAwaitingDataGetEOF => true,
-        SessionState.ReceiverTerminatingControlPost => true,
-        _ => false
-    };
+    private bool IsInCompletingPhase => _fsm.IsCompleting;
 
     public long ItemsProcessed => IsSender ? _batchProcessor.ItemsSent : _batchProcessor.ItemsReceived;
     public long BytesTransferred => _batchProcessor.PayloadBytes;

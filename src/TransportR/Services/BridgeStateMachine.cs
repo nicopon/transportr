@@ -4,8 +4,13 @@ using TransportR.Models;
 namespace TransportR.Services;
 
 /// <summary>
-/// Manages state transitions for ConnectionBridge with validation and thread safety.
+/// Owns the bridge lifecycle. Callers report what happened to a participant and the machine picks
+/// the resulting state; there is no way to ask it for a state directly, so no caller can drive it
+/// into one the table does not allow.
 /// </summary>
+/// <remarks>
+/// Every member takes the machine's own lock and may be called from any thread.
+/// </remarks>
 public class BridgeStateMachine
 {
     private volatile BridgeState _currentState = BridgeState.Idle;
@@ -15,58 +20,119 @@ public class BridgeStateMachine
 
     public BridgeState CurrentState => _currentState;
 
+    /// <summary>True while a sender stream is registered on this bridge.</summary>
+    public bool SenderConnected =>
+        _currentState is BridgeState.WaitingForReceiver or BridgeState.Active;
+
+    /// <summary>True while a receiver stream is registered on this bridge.</summary>
+    public bool ReceiverConnected =>
+        _currentState is BridgeState.WaitingForSender or BridgeState.Active;
+
     public BridgeStateMachine(string bridgeKey, ILogger logger)
     {
         _bridgeKey = bridgeKey;
         _logger = logger;
     }
 
-    /// <summary>
-    /// Attempts to transition to a new state.
-    /// </summary>
-    /// <returns>True if transition valid and executed, False if same state.</returns>
-    /// <exception cref="InvalidOperationException">If transition is invalid.</exception>
-    public bool TransitionTo(BridgeState newState)
+    /// <returns>True if the state changed.</returns>
+    public bool OnSenderRegistered()
     {
         lock (_lock)
         {
-            if (_currentState == newState) return false;
-            
-            // Terminal state check
-            if (_currentState == BridgeState.Cancelled)
+            switch (_currentState)
             {
-                _logger.LogWarning("Ignored transition from Cancelled to {New} for {BridgeKey}", newState, _bridgeKey);
-                return false;
+                case BridgeState.Idle:
+                    return MoveTo(BridgeState.WaitingForReceiver);
+                case BridgeState.WaitingForSender:
+                    return MoveTo(BridgeState.Active);
+                case BridgeState.Cancelled:
+                    return false;
+                default:
+                    // The caller is expected to drop the previous sender first, so arriving with one
+                    // already registered means a reset was skipped and the old stream is orphaned.
+                    _logger.LogError(
+                        "Sender registered on {BridgeKey} while state is {State}; previous sender was not released",
+                        _bridgeKey, _currentState);
+                    return false;
             }
-
-            // Validation logic
-            if (!IsValidTransition(_currentState, newState))
-            {
-                 _logger.LogError("Invalid transition from {Current} to {New} for {BridgeKey}", _currentState, newState, _bridgeKey);
-                 throw new InvalidOperationException($"Invalid state transition: {_currentState} -> {newState}");
-            }
-
-            _logger.LogInformation("Bridge State: {Old} -> {New} ({BridgeKey})", _currentState, newState, _bridgeKey);
-            _currentState = newState;
-            return true;
         }
     }
 
-    private static bool IsValidTransition(BridgeState from, BridgeState to)
+    /// <returns>True if the state changed.</returns>
+    public bool OnReceiverRegistered()
     {
-        if (to == BridgeState.Cancelled) return true; // Always allow cancellation
-
-        return from switch
+        lock (_lock)
         {
-            BridgeState.Idle => to == BridgeState.WaitingForReceiver || to == BridgeState.WaitingForSender,
-            
-            BridgeState.WaitingForReceiver => to == BridgeState.Active || to == BridgeState.Idle,
-            
-            BridgeState.WaitingForSender => to == BridgeState.Active || to == BridgeState.Idle,
-            
-            BridgeState.Active => to == BridgeState.WaitingForReceiver || to == BridgeState.WaitingForSender || to == BridgeState.Idle,
-            
-            _ => false
-        };
+            switch (_currentState)
+            {
+                case BridgeState.Idle:
+                    return MoveTo(BridgeState.WaitingForSender);
+                case BridgeState.WaitingForReceiver:
+                    return MoveTo(BridgeState.Active);
+                case BridgeState.Cancelled:
+                    return false;
+                default:
+                    _logger.LogError(
+                        "Receiver registered on {BridgeKey} while state is {State}; previous receiver was not released",
+                        _bridgeKey, _currentState);
+                    return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reports that the sender is gone. A sender that was already gone is not an anomaly: a reset
+    /// runs on every disconnect, including ones that arrive twice.
+    /// </summary>
+    /// <returns>True if the state changed.</returns>
+    public bool OnSenderLost()
+    {
+        lock (_lock)
+        {
+            return _currentState switch
+            {
+                BridgeState.WaitingForReceiver => MoveTo(BridgeState.Idle),
+                BridgeState.Active => MoveTo(BridgeState.WaitingForSender),
+                _ => false
+            };
+        }
+    }
+
+    /// <summary>
+    /// Reports that the receiver is gone. See <see cref="OnSenderLost"/> for why a repeat is silent.
+    /// </summary>
+    /// <returns>True if the state changed.</returns>
+    public bool OnReceiverLost()
+    {
+        lock (_lock)
+        {
+            return _currentState switch
+            {
+                BridgeState.WaitingForSender => MoveTo(BridgeState.Idle),
+                BridgeState.Active => MoveTo(BridgeState.WaitingForReceiver),
+                _ => false
+            };
+        }
+    }
+
+    /// <summary>
+    /// Moves the bridge to its terminal state. Every later event is ignored.
+    /// </summary>
+    /// <returns>True if the state changed.</returns>
+    public bool OnCancelled()
+    {
+        lock (_lock)
+        {
+            return MoveTo(BridgeState.Cancelled);
+        }
+    }
+
+    private bool MoveTo(BridgeState newState)
+    {
+        if (_currentState == newState) return false;
+
+        _logger.LogInformation("Bridge State: {Old} -> {New} ({BridgeKey})", _currentState, newState, _bridgeKey);
+        _currentState = newState;
+        return true;
     }
 }

@@ -7,8 +7,8 @@ namespace TransportR.Tests;
 
 /// <summary>
 /// Tests for BridgeStateMachine - hub-side connection bridge lifecycle.
-/// Note: Domino completion states (SenderPostCompleted, etc.) are defined in the enum
-/// but not yet wired into the state machine transitions.
+/// The machine takes events, not states, so there is no illegal-transition case to assert: the
+/// question these ask is whether each event lands on the right state from every state.
 /// </summary>
 public class BridgeStateMachineTests
 {
@@ -32,6 +32,8 @@ public class BridgeStateMachineTests
     public void InitialState_IsIdle()
     {
         Assert.Equal(BridgeState.Idle, _fsm.CurrentState);
+        Assert.False(_fsm.SenderConnected);
+        Assert.False(_fsm.ReceiverConnected);
     }
 
     #endregion
@@ -41,7 +43,7 @@ public class BridgeStateMachineTests
     [Fact]
     public void ReceiverFirst_TransitionsToWaitingForSender()
     {
-        var result = _fsm.TransitionTo(BridgeState.WaitingForSender);
+        var result = _fsm.OnReceiverRegistered();
 
         Assert.True(result);
         Assert.Equal(BridgeState.WaitingForSender, _fsm.CurrentState);
@@ -50,7 +52,7 @@ public class BridgeStateMachineTests
     [Fact]
     public void SenderFirst_TransitionsToWaitingForReceiver()
     {
-        var result = _fsm.TransitionTo(BridgeState.WaitingForReceiver);
+        var result = _fsm.OnSenderRegistered();
 
         Assert.True(result);
         Assert.Equal(BridgeState.WaitingForReceiver, _fsm.CurrentState);
@@ -59,8 +61,18 @@ public class BridgeStateMachineTests
     [Fact]
     public void BothConnected_TransitionsToActive()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        var result = _fsm.TransitionTo(BridgeState.Active);
+        _fsm.OnReceiverRegistered();
+        var result = _fsm.OnSenderRegistered();
+
+        Assert.True(result);
+        Assert.Equal(BridgeState.Active, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void BothConnected_SenderFirst_TransitionsToActive()
+    {
+        _fsm.OnSenderRegistered();
+        var result = _fsm.OnReceiverRegistered();
 
         Assert.True(result);
         Assert.Equal(BridgeState.Active, _fsm.CurrentState);
@@ -71,33 +83,34 @@ public class BridgeStateMachineTests
     #region Cancellation Tests
 
     [Fact]
-    public void CanTransitionToCancelled_FromActive()
+    public void CanCancel_FromActive()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        _fsm.TransitionTo(BridgeState.Active);
-        var result = _fsm.TransitionTo(BridgeState.Cancelled);
+        _fsm.OnReceiverRegistered();
+        _fsm.OnSenderRegistered();
+        var result = _fsm.OnCancelled();
 
         Assert.True(result);
         Assert.Equal(BridgeState.Cancelled, _fsm.CurrentState);
     }
 
     [Fact]
-    public void CanTransitionToCancelled_FromIdle()
+    public void CanCancel_FromIdle()
     {
-        var result = _fsm.TransitionTo(BridgeState.Cancelled);
+        var result = _fsm.OnCancelled();
 
         Assert.True(result);
         Assert.Equal(BridgeState.Cancelled, _fsm.CurrentState);
     }
 
     [Fact]
-    public void Cancelled_IsTerminal_NoTransitions()
+    public void Cancelled_IsTerminal_IgnoresEveryEvent()
     {
-        _fsm.TransitionTo(BridgeState.Cancelled);
+        _fsm.OnCancelled();
 
-        var result = _fsm.TransitionTo(BridgeState.WaitingForSender);
-
-        Assert.False(result);
+        Assert.False(_fsm.OnSenderRegistered());
+        Assert.False(_fsm.OnReceiverRegistered());
+        Assert.False(_fsm.OnSenderLost());
+        Assert.False(_fsm.OnReceiverLost());
         Assert.Equal(BridgeState.Cancelled, _fsm.CurrentState);
     }
 
@@ -106,24 +119,24 @@ public class BridgeStateMachineTests
     #region Reconnection Tests
 
     [Fact]
-    public void Active_ToWaitingForSender_OnSenderDisconnect()
+    public void Active_ToWaitingForSender_OnSenderLost()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        _fsm.TransitionTo(BridgeState.Active);
+        _fsm.OnReceiverRegistered();
+        _fsm.OnSenderRegistered();
 
-        var result = _fsm.TransitionTo(BridgeState.WaitingForSender);
+        var result = _fsm.OnSenderLost();
 
         Assert.True(result);
         Assert.Equal(BridgeState.WaitingForSender, _fsm.CurrentState);
     }
 
     [Fact]
-    public void Active_ToWaitingForReceiver_OnReceiverDisconnect()
+    public void Active_ToWaitingForReceiver_OnReceiverLost()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        _fsm.TransitionTo(BridgeState.Active);
+        _fsm.OnReceiverRegistered();
+        _fsm.OnSenderRegistered();
 
-        var result = _fsm.TransitionTo(BridgeState.WaitingForReceiver);
+        var result = _fsm.OnReceiverLost();
 
         Assert.True(result);
         Assert.Equal(BridgeState.WaitingForReceiver, _fsm.CurrentState);
@@ -132,23 +145,24 @@ public class BridgeStateMachineTests
     [Fact]
     public void WaitingForSender_BackToActive_OnSenderReconnect()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        _fsm.TransitionTo(BridgeState.Active);
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
+        _fsm.OnReceiverRegistered();
+        _fsm.OnSenderRegistered();
+        _fsm.OnSenderLost();
 
-        var result = _fsm.TransitionTo(BridgeState.Active);
+        var result = _fsm.OnSenderRegistered();
 
         Assert.True(result);
         Assert.Equal(BridgeState.Active, _fsm.CurrentState);
     }
 
     [Fact]
-    public void Active_CanReset_ToIdle()
+    public void BothLost_ReturnsToIdle()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
-        _fsm.TransitionTo(BridgeState.Active);
+        _fsm.OnReceiverRegistered();
+        _fsm.OnSenderRegistered();
 
-        var result = _fsm.TransitionTo(BridgeState.Idle);
+        _fsm.OnSenderLost();
+        var result = _fsm.OnReceiverLost();
 
         Assert.True(result);
         Assert.Equal(BridgeState.Idle, _fsm.CurrentState);
@@ -156,22 +170,82 @@ public class BridgeStateMachineTests
 
     #endregion
 
-    #region Invalid Transition Tests
+    #region Idempotence Tests
 
     [Fact]
-    public void Idle_ToActive_IsInvalid()
+    public void LosingAnAbsentSender_IsIgnored()
     {
-        Assert.Throws<InvalidOperationException>(() => 
-            _fsm.TransitionTo(BridgeState.Active));
+        _fsm.OnReceiverRegistered();
+
+        var result = _fsm.OnSenderLost();
+
+        Assert.False(result);
+        Assert.Equal(BridgeState.WaitingForSender, _fsm.CurrentState);
     }
 
     [Fact]
-    public void WaitingForSender_ToWaitingForReceiver_IsInvalid()
+    public void LosingAnAbsentReceiver_IsIgnored()
     {
-        _fsm.TransitionTo(BridgeState.WaitingForSender);
+        _fsm.OnSenderRegistered();
 
-        Assert.Throws<InvalidOperationException>(() => 
-            _fsm.TransitionTo(BridgeState.WaitingForReceiver));
+        var result = _fsm.OnReceiverLost();
+
+        Assert.False(result);
+        Assert.Equal(BridgeState.WaitingForReceiver, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void RegisteringTwice_LeavesTheStateCorrect()
+    {
+        _fsm.OnSenderRegistered();
+
+        var result = _fsm.OnSenderRegistered();
+
+        Assert.False(result);
+        Assert.Equal(BridgeState.WaitingForReceiver, _fsm.CurrentState);
+    }
+
+    #endregion
+
+    #region Invariant Tests
+
+    /// <summary>
+    /// The booleans ConnectionBridge used to carry alongside the state are now derived from it.
+    /// This walks every event from every reachable state and checks the pair never contradicts the
+    /// state it came from — the property nothing guarded while the two were stored separately.
+    /// </summary>
+    [Fact]
+    public void FlagsAgreeWithState_AfterEveryEventSequence()
+    {
+        var events = new (string Name, Func<BridgeStateMachine, bool> Apply)[]
+        {
+            ("SenderRegistered", m => m.OnSenderRegistered()),
+            ("ReceiverRegistered", m => m.OnReceiverRegistered()),
+            ("SenderLost", m => m.OnSenderLost()),
+            ("ReceiverLost", m => m.OnReceiverLost())
+        };
+
+        // Four events deep covers every reachable state and every event out of it.
+        foreach (var a in events)
+        foreach (var b in events)
+        foreach (var c in events)
+        foreach (var d in events)
+        {
+            var fsm = new BridgeStateMachine("invariant", new StubLogger());
+            foreach (var step in new[] { a, b, c, d })
+            {
+                step.Apply(fsm);
+
+                var expectedSender = fsm.CurrentState is BridgeState.WaitingForReceiver or BridgeState.Active;
+                var expectedReceiver = fsm.CurrentState is BridgeState.WaitingForSender or BridgeState.Active;
+
+                Assert.Equal(expectedSender, fsm.SenderConnected);
+                Assert.Equal(expectedReceiver, fsm.ReceiverConnected);
+                Assert.True(
+                    Enum.IsDefined(fsm.CurrentState),
+                    $"{a.Name},{b.Name},{c.Name},{d.Name} reached an undefined state");
+            }
+        }
     }
 
     #endregion

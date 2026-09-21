@@ -16,6 +16,13 @@ public class DataSessionStateMachine
 
     public SessionState CurrentState => _currentState;
 
+    /// <summary>
+    /// True while the session is in one of the domino states, sender or receiver side: the data is
+    /// through and what is left is the closing exchange. The streams have to stay open here, so
+    /// callers use this to tell the closing sequence apart from a session that lost its peer.
+    /// </summary>
+    public bool IsCompleting => IsCompletingPhase(_currentState);
+
     public DataSessionStateMachine(string transferId, ILogger logger)
     {
         _transferId = transferId;
@@ -32,14 +39,11 @@ public class DataSessionStateMachine
         {
             if (_currentState == newState) return false;
 
-            // Simple validation logic (can be expanded)
-            if (IsTerminal(_currentState))
+            if (IsFinal(_currentState))
             {
                 _logger.LogWarning("Invalid transition from Terminal state {Current} to {New} for {TransferId}", _currentState, newState, _transferId);
                 return false;
             }
-
-            if (_currentState == SessionState.Disposed) return false;
 
             _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, newState, _transferId);
             _currentState = newState;
@@ -47,8 +51,23 @@ public class DataSessionStateMachine
         }
     }
 
-    private static bool IsTerminal(SessionState state) => 
-        state == SessionState.Completed || 
-        state == SessionState.Failed || 
+    // "No transition may leave this state", which is not the same question as "did the transfer
+    // stop": a disposed session never succeeded, so callers reporting an outcome ask their own.
+    private static bool IsFinal(SessionState state) =>
+        state == SessionState.Completed ||
+        state == SessionState.Failed ||
         state == SessionState.Disposed;
+
+    private static bool IsCompletingPhase(SessionState state) => state switch
+    {
+        SessionState.SenderCompleteSent => true,
+        SessionState.SenderAckReceived => true,
+        SessionState.SenderTerminatingDataPost => true,
+        SessionState.SenderAwaitingControlGetEOF => true,
+        SessionState.ReceiverCompleteReceived => true,
+        SessionState.ReceiverAckSent => true,
+        SessionState.ReceiverAwaitingDataGetEOF => true,
+        SessionState.ReceiverTerminatingControlPost => true,
+        _ => false
+    };
 }

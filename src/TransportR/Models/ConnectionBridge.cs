@@ -10,24 +10,38 @@ namespace TransportR.Models;
 public class ConnectionBridge
 {
     private readonly object _lock = new();
-    private TaskCompletionSource<Stream> _receiverStreamTcs = new();
-    private TaskCompletionSource<Stream> _senderStreamTcs = new();
+    private TaskCompletionSource<Stream> _receiverStreamTcs = NewStreamTcs();
+    private TaskCompletionSource<Stream> _senderStreamTcs = NewStreamTcs();
     private CancellationTokenSource _senderCts = new();
     private CancellationTokenSource _receiverCts = new();
-    private TaskCompletionSource _completionTcs = new();
-    
+    private readonly TaskCompletionSource _completionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private readonly BridgeStateMachine _fsm;
 
     public string BridgeKey { get; }
     public BridgeState State => _fsm.CurrentState;
     public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
-    public bool SenderConnected { get; private set; }
-    public bool ReceiverConnected { get; private set; }  // Kept for internal logic check, but state comes from FSM
 
-    public CancellationToken SenderToken => _senderCts.Token;
-    public CancellationToken ReceiverToken => _receiverCts.Token;
+    /// <summary>
+    /// The token of the sender's current stream generation. Taken under the bridge lock: a reset
+    /// cancels and disposes the running source before installing its replacement, and reading
+    /// <c>.Token</c> off a disposed source throws.
+    /// </summary>
+    public CancellationToken SenderToken
+    {
+        get { lock (_lock) return _senderCts.Token; }
+    }
+
+    /// <summary>
+    /// The token of the receiver's current stream generation. See <see cref="SenderToken"/>.
+    /// </summary>
+    public CancellationToken ReceiverToken
+    {
+        get { lock (_lock) return _receiverCts.Token; }
+    }
+
     public Task CompletionTask => _completionTcs.Task;
-    
+
     public ConnectionBridge(string bridgeKey, ILogger logger)
     {
         BridgeKey = bridgeKey;
@@ -46,26 +60,18 @@ public class ConnectionBridge
         lock (_lock)
         {
             if (State == BridgeState.Cancelled) return false;
-            
-            if (ReceiverConnected)
+
+            if (_fsm.ReceiverConnected)
             {
-                // Reset ONLY Receiver-side state
-                // This will transition FSM: Active -> WaitingForReceiver OR WaitingForSender -> Idle
-                ResetReceiver(); 
+                ResetReceiver();
             }
-            
-            ReceiverConnected = true;
+
+            _fsm.OnReceiverRegistered();
             _currentReceiverId = connectionId;
             LastActivity = DateTime.UtcNow;
             _receiverStreamTcs.TrySetResult(receiverOutput);
-            
-            // FSM Transition
-            if (_fsm.CurrentState == BridgeState.Idle)
-                _fsm.TransitionTo(BridgeState.WaitingForSender);
-            else if (_fsm.CurrentState == BridgeState.WaitingForReceiver)
-                _fsm.TransitionTo(BridgeState.Active);
         }
-        
+
         // Wait for sender input to arrive (or cancellation)
         try
         {
@@ -87,26 +93,18 @@ public class ConnectionBridge
         lock (_lock)
         {
             if (State == BridgeState.Cancelled) return false;
-            
-            if (SenderConnected)
+
+            if (_fsm.SenderConnected)
             {
-               // Reset ONLY Sender-side state
-               // FSM: Active -> WaitingForSender OR WaitingForReceiver -> Idle
-               ResetSender();
+                ResetSender();
             }
-            
-            SenderConnected = true;
+
+            _fsm.OnSenderRegistered();
             _currentSenderId = connectionId;
             LastActivity = DateTime.UtcNow;
             _senderStreamTcs.TrySetResult(senderInput);
-            
-            // FSM Transition
-            if (_fsm.CurrentState == BridgeState.Idle)
-                _fsm.TransitionTo(BridgeState.WaitingForReceiver);
-            else if (_fsm.CurrentState == BridgeState.WaitingForSender)
-                _fsm.TransitionTo(BridgeState.Active);
         }
-        
+
         // Wait for receiver output to arrive (or cancellation)
         try
         {
@@ -129,7 +127,7 @@ public class ConnectionBridge
         lock (_lock)
         {
             if (State == BridgeState.Cancelled) return;
-            
+
             if (_currentSenderId == connectionId)
             {
                 ResetSender();
@@ -143,52 +141,38 @@ public class ConnectionBridge
 
     private void ResetSender()
     {
-        if (SenderConnected)
+        if (_fsm.OnSenderLost())
         {
-            SenderConnected = false;
             LastActivity = DateTime.UtcNow;
-            
-            // FSM Update
-            if (_fsm.CurrentState == BridgeState.Active)
-                _fsm.TransitionTo(BridgeState.WaitingForSender);
-            else if (_fsm.CurrentState == BridgeState.WaitingForReceiver)
-                _fsm.TransitionTo(BridgeState.Idle);
         }
-        
+
         if (!_senderCts.IsCancellationRequested)
         {
             _senderCts.Cancel();
             _senderCts.Dispose();
         }
         _senderCts = new CancellationTokenSource();
-        
+
         _senderStreamTcs.TrySetCanceled();
-        _senderStreamTcs = new TaskCompletionSource<Stream>();
+        _senderStreamTcs = NewStreamTcs();
     }
 
     private void ResetReceiver()
     {
-        if (ReceiverConnected)
+        if (_fsm.OnReceiverLost())
         {
-            ReceiverConnected = false;
             LastActivity = DateTime.UtcNow;
-            
-            // FSM Update
-            if (_fsm.CurrentState == BridgeState.Active)
-                _fsm.TransitionTo(BridgeState.WaitingForReceiver);
-            else if (_fsm.CurrentState == BridgeState.WaitingForSender)
-                _fsm.TransitionTo(BridgeState.Idle);
         }
-        
+
         if (!_receiverCts.IsCancellationRequested)
         {
             _receiverCts.Cancel();
             _receiverCts.Dispose();
         }
         _receiverCts = new CancellationTokenSource();
-        
+
         _receiverStreamTcs.TrySetCanceled();
-        _receiverStreamTcs = new TaskCompletionSource<Stream>();
+        _receiverStreamTcs = NewStreamTcs();
     }
 
     /// <summary>
@@ -198,7 +182,7 @@ public class ConnectionBridge
     {
         lock (_lock)
         {
-            _fsm.TransitionTo(BridgeState.Cancelled);
+            _fsm.OnCancelled();
             _senderCts.Cancel();
             _receiverCts.Cancel();
             _senderStreamTcs.TrySetCanceled();
@@ -220,4 +204,10 @@ public class ConnectionBridge
 
     public Task<Stream> WaitForSenderStream() => _senderStreamTcs.Task;
     public Task<Stream> WaitForReceiverStream() => _receiverStreamTcs.Task;
+
+    // Every completion below is signalled with the bridge lock held. Without this flag the waiter's
+    // continuation runs inline on the signalling thread, inside that lock, and whatever it does next
+    // to the bridge executes in the middle of a registration or a reset.
+    private static TaskCompletionSource<Stream> NewStreamTcs() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
