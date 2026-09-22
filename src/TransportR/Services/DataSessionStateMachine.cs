@@ -51,6 +51,23 @@ public class DataSessionStateMachine
         }
     }
 
+    /// <summary>
+    /// Records that the session was released. A session that already reached an outcome keeps it:
+    /// releasing a finished transfer is how its handle ends, not a state change.
+    /// </summary>
+    /// <returns>True when the release stopped a session that had not, which abandons its transfer.</returns>
+    public bool OnReleased()
+    {
+        lock (_lock)
+        {
+            if (IsFinal(_currentState)) return false;
+
+            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Disposed, _transferId);
+            _currentState = SessionState.Disposed;
+            return true;
+        }
+    }
+
     // "No transition may leave this state", which is not the same question as "did the transfer
     // stop": a disposed session never succeeded, so callers reporting an outcome ask their own.
     private static bool IsFinal(SessionState state) =>

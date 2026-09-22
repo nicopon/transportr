@@ -31,6 +31,9 @@ internal class DataSession<T> : IDataSession<T>
     // pause between tries the session loop turns a dead hub into a spin.
     private const int CompletingPhaseRetryMs = 500;
 
+    private const string ReleasedBeforeCompletion =
+        "The transfer handle was released before the transfer completed; the transfer was abandoned.";
+
     public string TransferId { get; }
     public int BatchSize { get; }
     public string DataUrl { get; }
@@ -46,7 +49,8 @@ internal class DataSession<T> : IDataSession<T>
     private bool _isSender;
 
     private readonly Timer _heartbeatTimer;
-    
+    private int _disposed;
+
     // Session Statistics
     public DateTime StartedAt { get; } = DateTime.UtcNow;
     
@@ -58,7 +62,14 @@ internal class DataSession<T> : IDataSession<T>
     /// True once the session has stopped, whether it succeeded or failed.
     /// </summary>
     private bool IsTerminal => _fsm.CurrentState is SessionState.Completed or SessionState.Failed;
-    
+
+    /// <summary>
+    /// True once nothing more will happen here, which includes a session released before it could
+    /// reach an outcome. Wider than <see cref="IsTerminal"/>, which answers what became of the
+    /// transfer: whoever waits on an outcome waits on this and reports on that.
+    /// </summary>
+    private bool IsStopped => IsTerminal || _fsm.CurrentState == SessionState.Disposed;
+
     private bool IsInCompletingPhase => _fsm.IsCompleting;
 
     public long ItemsProcessed => IsSender ? _batchProcessor.ItemsSent : _batchProcessor.ItemsReceived;
@@ -139,6 +150,13 @@ internal class DataSession<T> : IDataSession<T>
 
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
     {
+        // A released session has nothing left to complete, and draining an accumulator that is
+        // already gone raises a disposal error the caller can do nothing with.
+        if (_fsm.CurrentState == SessionState.Disposed)
+        {
+            throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
+        }
+
         await _batchProcessor.CompleteSenderAsync(cancellationToken);
         
         // We used to wait for PendingBatches > 0 here, but that causes deadlocks if ACKs are buffered.
@@ -165,7 +183,7 @@ internal class DataSession<T> : IDataSession<T>
         var lastAcks = _batchProcessor.AcksReceived;
         var lastProgressUtc = DateTime.UtcNow;
 
-        while (!IsTerminal)
+        while (!IsStopped)
         {
             cancellationToken.ThrowIfCancellationRequested();
             
@@ -220,8 +238,12 @@ internal class DataSession<T> : IDataSession<T>
                 stalledFor.TotalSeconds, TransferId);
         }
 
-        // Only reachable when something else failed the session under us.
-        throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
+        // Only reachable when something else stopped the session under us.
+        throw new TransferFailedException(
+            TransferId,
+            _fsm.CurrentState == SessionState.Disposed
+                ? ReleasedBeforeCompletion
+                : "Transfer failed before it could complete.");
     }
     
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken)
@@ -265,7 +287,7 @@ internal class DataSession<T> : IDataSession<T>
         // hub ending this session's streams, which is the terminal state itself.
         DateTime? completingSince = null;
 
-        while (!IsTerminal)
+        while (!IsStopped)
         {
             if (IsInCompletingPhase)
             {
@@ -284,6 +306,11 @@ internal class DataSession<T> : IDataSession<T>
             await Task.Delay(100, cancellationToken);
         }
 
+        if (_fsm.CurrentState == SessionState.Disposed)
+        {
+            throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
+        }
+
         if (_fsm.CurrentState == SessionState.Failed)
         {
             throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
@@ -292,6 +319,20 @@ internal class DataSession<T> : IDataSession<T>
 
     public async ValueTask DisposeAsync()
     {
+        // Releasing twice is the documented pattern meeting a defensive call, not a caller error,
+        // and the second Cancel() on a disposed source would throw.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        // Releasing a session that has not stopped abandons its transfer. CompleteAsync and
+        // WaitForCompletionAsync say so to whoever waits; nobody has to be waiting, so it is said
+        // here too.
+        if (_fsm.OnReleased())
+        {
+            _config.Logger.LogWarning(
+                "Session released before the transfer ended - transfer abandoned (Transfer={TransferId})",
+                TransferId);
+        }
+
         _reconnectionHandler.Dispose();
         await _batchProcessor.DisposeAsync();
         await _httpStreamManager.DisposeAsync();
@@ -622,7 +663,7 @@ internal class DataSession<T> : IDataSession<T>
         // that outlives its transfer resurrects a finished transfer every tick — and, behind a
         // shared state store, renews its expiry forever. Once this session has nothing left to say
         // about the transfer, it says nothing.
-        if (IsTerminal || IsInCompletingPhase)
+        if (IsStopped || IsInCompletingPhase)
         {
             _heartbeatTimer.Change(Timeout.Infinite, Timeout.Infinite);
             return;

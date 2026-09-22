@@ -6,8 +6,11 @@ namespace TransportR.Abstractions;
 /// <typeparam name="T">The type of items to receive.</typeparam>
 /// <remarks>
 /// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it: until it does,
-/// the session stays registered with its client and keeps reporting to the hub. Disposing before
-/// <see cref="WaitForCompletionAsync"/> has returned abandons the transfer.
+/// the session stays registered with its client, which is what keeps its outcome reportable.
+/// Dispose it once <see cref="WaitForCompletionAsync"/> has returned, not before — disposing a
+/// transfer that has not ended abandons it, and every wait on that handle, pending or later, then
+/// throws <see cref="TransferFailedException"/> rather than reporting a completion that never
+/// happened. Disposing twice does nothing.
 /// </remarks>
 public abstract class Receive<T> : Transfer, IAsyncDisposable
 {

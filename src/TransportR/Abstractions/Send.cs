@@ -47,7 +47,11 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     public abstract Task CompleteAsync(CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Disposes the send handle and releases resources.
+    /// Releases the transfer and everything the client holds on its behalf. Dispose once
+    /// <see cref="CompleteAsync"/> has returned, not before — disposing a transfer that has not
+    /// ended abandons it, and <see cref="CompleteAsync"/> then throws
+    /// <see cref="TransferFailedException"/> instead of waiting on a session that is gone.
+    /// Disposing twice does nothing.
     /// </summary>
     public ValueTask DisposeAsync() 
     {
