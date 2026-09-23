@@ -3,18 +3,15 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using TransportR.Interfaces;
-using TransportR.Models;
 
 namespace TransportR.Services;
 
 public class TransferCleanupService : BackgroundService
 {
     private readonly ITransferManager _transferManager;
-    private readonly ITransferNotifier _notifier;
-    private readonly IBridgeManager _bridgeManager;
-    private readonly IStateStore _stateStore;
+    private readonly ITransferTerminator _terminator;
     private readonly ILogger<TransferCleanupService> _logger;
-    
+
     // No activity at all (not even a heartbeat): the peer is gone.
     private readonly TimeSpan _inactivityTimeout;
 
@@ -25,9 +22,7 @@ public class TransferCleanupService : BackgroundService
 
     public TransferCleanupService(
         ITransferManager transferManager,
-        ITransferNotifier notifier,
-        IBridgeManager bridgeManager,
-        IStateStore stateStore,
+        ITransferTerminator terminator,
         IOptions<DataPlaneConfiguration> config,
         ILogger<TransferCleanupService> logger)
     {
@@ -36,9 +31,7 @@ public class TransferCleanupService : BackgroundService
             ? TimeSpan.FromSeconds(stalled)
             : null;
         _transferManager = transferManager;
-        _notifier = notifier;
-        _bridgeManager = bridgeManager;
-        _stateStore = stateStore;
+        _terminator = terminator;
         _logger = logger;
     }
 
@@ -79,7 +72,7 @@ public class TransferCleanupService : BackgroundService
                 _logger.LogWarning("Transfer {TransferId} INACTIVE (LastActivity: {LastActivity}). Terminating...",
                     transfer.TransferId, transfer.LastActivityUtc);
 
-                await TerminateTransferAsync(transfer.TransferId, ct);
+                await _terminator.TerminateAsync(transfer.TransferId, ct);
                 continue;
             }
 
@@ -94,52 +87,8 @@ public class TransferCleanupService : BackgroundService
                     transfer.TransferId, transfer.LastProgressUtc,
                     transfer.ItemsSent, transfer.AcksReceived, transfer.ItemsReceived, transfer.AcksSent);
 
-                await TerminateTransferAsync(transfer.TransferId, ct);
+                await _terminator.TerminateAsync(transfer.TransferId, ct);
             }
-        }
-    }
-
-    private async Task TerminateTransferAsync(string transferId, CancellationToken ct)
-    {
-        try
-        {
-            // 1. Get participants
-            var participants = await _transferManager.GetParticipantsAsync(transferId);
-
-            // 2. Clear state in TransferManager (Checkpoints, InMemory State)
-            await _transferManager.RemoveTransferAsync(transferId);
-
-            // 3. Remove bridges
-            _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
-            _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
-
-            // 4. Notify Participants via Notifier
-            if (participants != null)
-            {
-                await NotifyClientAsync(participants.SenderId, transferId, ct);
-                await NotifyClientAsync(participants.ReceiverId, transferId, ct);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to terminate transfer {TransferId}", transferId);
-        }
-    }
-
-    private async Task NotifyClientAsync(Guid clientId, string transferId, CancellationToken ct)
-    {
-        try
-        {
-            var client = await _stateStore.GetClientAsync(clientId);
-            if (client != null)
-            {
-                // Use CancelTransfer for timeout - dataplane handles graceful shutdown
-                await _notifier.NotifyCancelTransferAsync(client.ConnectionId, transferId, ct);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Could not notify client {ClientId} of termination: {Message}", clientId, ex.Message);
         }
     }
 }

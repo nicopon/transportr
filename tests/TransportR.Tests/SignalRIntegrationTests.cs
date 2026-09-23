@@ -234,6 +234,58 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task HostTermination_MakesBothEndsFailFast_SendAsyncIncluded()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        // A window of one batch, so a SendAsync call after termination has nowhere to go and must
+        // be unblocked rather than merely queued.
+        await using var sender = CreateClient(handler, "http://localhost", "sender", o => o.MaxInFlightBatches = 1);
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        var receive = await receiveHandle.Task;
+
+        var receiveTask = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            await receive.WaitForCompletionAsync();
+            return items;
+        });
+
+        // Acknowledged normally: the receiver is alive and consuming. The window then has to be
+        // refilled by a second call, which is the one the host termination has to unblock.
+        await send.SendAsync("item-1");
+
+        var terminator = host.Services.GetRequiredService<ITransferTerminator>();
+        await terminator.TerminateAsync(send.TransferId);
+
+        var sendStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<TransferFailedException>(
+            () => send.SendAsync("item-2").WaitAsync(TimeSpan.FromSeconds(5)));
+        sendStopwatch.Stop();
+        Assert.True(sendStopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Expected termination to fail SendAsync in under a second; took {sendStopwatch.Elapsed}.");
+
+        var receiveStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<TransferFailedException>(() => receiveTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        receiveStopwatch.Stop();
+        Assert.True(receiveStopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Expected termination to fail the receive in under a second; took {receiveStopwatch.Elapsed}.");
+    }
+
+    [Fact]
     public async Task NormalCompletion_NeverReleasesTheSessionBeforeItsOutcome()
     {
         using var host = TestHubServerFactory.CreateHost();

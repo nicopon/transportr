@@ -98,6 +98,11 @@ public static class TransportRHubExtensions
         // Bridge cleanup service
         services.AddHostedService<BridgeCleanupService>();
 
+        // Terminates a transfer unilaterally (state, bridges, both participants notified) - the
+        // one implementation, used by the cleanup service below and available to a host that wants
+        // to terminate a run it owns.
+        services.AddSingleton<ITransferTerminator, TransferTerminator>();
+
         // Transfer cleanup service (Timeouts)
         services.AddHostedService<TransferCleanupService>();
         
