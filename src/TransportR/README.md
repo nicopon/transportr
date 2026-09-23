@@ -57,6 +57,7 @@ public interface IDataSender<T> : IDataClient
 {
     Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
     Task<List<ClientInfo>> GetReceiversAsync(CancellationToken ct = default);
+    event Func<Send<T>, Task> OnSendRequested;   // a transfer the hub's host opened
 }
 
 public interface IDataReceiver<T> : IDataClient

@@ -21,6 +21,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private readonly IFlowControlService? _flowControlService;
     private readonly IClientIdentityProvider _identityProvider;
     private readonly IBridgeManager _bridgeManager;
+    private readonly SignalRTransferInitiator _initiator;
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<CommandHub> _logger;
 
@@ -29,6 +30,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         ITransferManager transferManager, 
         IClientIdentityProvider identityProvider,
         IBridgeManager bridgeManager,
+        SignalRTransferInitiator initiator,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
         IFlowControlService? flowControlService = null)
@@ -37,6 +39,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         _transferManager = transferManager;
         _identityProvider = identityProvider;
         _bridgeManager = bridgeManager;
+        _initiator = initiator;
         _affinityOptions = affinityOptions.Value;
         _flowControlService = flowControlService;
         _logger = logger;
@@ -153,56 +156,15 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         if (sourceClient == null) throw new HubException("Source client not found.");
 
         // Step 1: Validate tokens and flow control
-        ValidateTransferRequest(sourceClient, targetClient);
-        
+        _initiator.ValidateTransferRequest(sourceClient, targetClient);
+
         // Step 2: Check affinity for HA deployment
         CheckAffinityRedirect(targetClient);
 
         // Step 3: Execute handshake
-        var transferId = Guid.NewGuid().ToString();
-
-        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (BatchSize={Size})", 
-            transferId, sourceClient.ClientId, targetClientId, batchSize);
-
-        await _transferManager.RegisterParticipantsAsync(transferId, sourceClient.ClientId, targetClientId);
-
-        await ExecuteHandshakeAsync(transferId, batchSize, sourceClient, targetClient, timeoutMs);
-        
-        return transferId;
-    }
-
-    private void ValidateTransferRequest(ClientRegistration sourceClient, ClientRegistration targetClient)
-    {
-        if (IsTokenExpired(sourceClient))
-        {
-            _logger.LogWarning("InitTransfer denied: Source client {SourceClientId} token has expired", sourceClient.ClientId);
-            throw new HubException("Source client token has expired. Please reconnect with a fresh token.");
-        }
-        
-        if (IsTokenExpired(targetClient))
-        {
-            _logger.LogWarning("InitTransfer denied: Target client {TargetClientId} token has expired", targetClient.ClientId);
-            throw new HubException("Target client token has expired.");
-        }
-
-        if (_flowControlService == null) return;
-        
-        if (sourceClient.Groups.Count == 0 || targetClient.Groups.Count == 0)
-        {
-            _logger.LogWarning("InitTransfer failed: Client groups not found. Source={SourceGroups}, Target={TargetGroups}", 
-                string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
-            throw new HubException("Client groups not found.");
-        }
-        
-        if (!_flowControlService.CanSendTo(sourceClient.Groups, targetClient.Groups))
-        {
-            _logger.LogWarning("InitTransfer denied: Groups [{SourceGroups}] are not authorized to send to groups [{TargetGroups}]", 
-                string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
-            throw new HubException("Transfer not authorized.");
-        }
-        
-        _logger.LogInformation("Flow control authorized: [{SourceGroups}] -> [{TargetGroups}]", 
-            string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
+        return await _initiator.HandshakeAsync(
+            sourceClient, Context.ConnectionId, targetClient, batchSize, timeoutMs,
+            nameof(ICommandClient.GetReadyToSend));
     }
 
     private void CheckAffinityRedirect(ClientRegistration targetClient)
@@ -224,51 +186,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         throw new AffinityRedirectException(targetClient.AffinityToken, cookieName);
     }
 
-    private async Task ExecuteHandshakeAsync(string transferId, int batchSize, ClientRegistration sourceClient, ClientRegistration targetClient, int timeoutMs)
-    {
-        using var cts = new CancellationTokenSource(timeoutMs);
-        try
-        {
-            try
-            {
-                await Clients.Client(targetClient.ConnectionId)
-                    .InvokeAsync<bool>(nameof(ICommandClient.GetReadyToReceive), transferId, sourceClient.ClientId, cts.Token);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // The usual cause is a registration that outlived its process: the client is still
-                // in the state store, but SignalR has no such connection any more. Left untranslated
-                // this escapes as a non-HubException and reaches the caller as "An unexpected error
-                // occurred invoking 'InitTransfer'", which says nothing and costs an hour to chase.
-                // Detail stays in the hub log; the client gets something it can act on.
-                _logger.LogWarning(ex, "Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}. Registration is likely stale.",
-                    targetClient.ClientId, targetClient.ConnectionId, transferId);
-                await _transferManager.UnregisterParticipantsAsync(transferId);
-                throw new HubException($"Target client {targetClient.ClientId} is not reachable.");
-            }
-
-            try
-            {
-                await Clients.Client(Context.ConnectionId)
-                    .InvokeAsync<bool>(nameof(ICommandClient.GetReadyToSend), transferId, batchSize, targetClient.ClientId, cts.Token);
-            }
-            catch(Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(ex, "Sender failed to ready for {TransferId}. Cancelling Receiver.", transferId);
-                await _transferManager.UnregisterParticipantsAsync(transferId);
-                await Clients.Client(targetClient.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
-                throw new HubException("Source client failed to prepare for the transfer.");
-            }
-        }
-        catch(OperationCanceledException)
-        {
-            _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
-            await _transferManager.UnregisterParticipantsAsync(transferId);
-            await Clients.Client(targetClient.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
-            throw new HubException($"Handshake timed out after {timeoutMs}ms");
-        }
-    }
-    
     public async Task<bool> Heartbeat()
     {
         // Resolving the client by its live connection is itself the keep-alive: a store with
@@ -352,11 +269,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private async Task<ClientRegistration?> GetClientByConnectionAsync(string connectionId)
     {
         return await _stateStore.GetClientByConnectionIdAsync(connectionId);
-    }
-
-    private static bool IsTokenExpired(ClientRegistration client)
-    {
-        return client.TokenExpiry.HasValue && DateTime.UtcNow > client.TokenExpiry.Value;
     }
 
     private string? ExtractAffinityToken()

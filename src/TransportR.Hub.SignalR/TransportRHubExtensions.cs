@@ -104,6 +104,11 @@ public static class TransportRHubExtensions
         // Register Transfer Notifier (SignalR implementation)
         services.AddSingleton<ITransferNotifier, SignalRTransferNotifier>();
 
+        // Registered as itself too: the hub drives the same handshake through members the host
+        // interface does not expose.
+        services.AddSingleton<SignalRTransferInitiator>();
+        services.AddSingleton<ITransferInitiator>(sp => sp.GetRequiredService<SignalRTransferInitiator>());
+
         // Register Broker Server
         services.AddSingleton<ITransportRServer, SignalRDataServer>();
         

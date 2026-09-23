@@ -36,6 +36,8 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     public event Func<Receive<T>, Task>? OnTransferStarted;
 
+    public event Func<Send<T>, Task>? OnSendRequested;
+
     // The hub declares no default for this: one setting, one place that answers for it.
     private const int HandshakeTimeoutMs = 20_000;
 
@@ -72,6 +74,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             defaultBatchSize,
             dataUrl,
             (t) => OnTransferStarted?.Invoke(t) ?? Task.CompletedTask,
+            () => OnSendRequested,
             async _ =>
             {
                 // A reconnection gives this client a new connection id while the hub's registration

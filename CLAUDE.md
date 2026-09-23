@@ -80,6 +80,11 @@ data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid
 race conditions — don't reintroduce a control-plane message for something the data plane already
 decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`).
 
+The handshake itself lives in `SignalRTransferInitiator`, not in the hub: `CommandHub.InitTransfer`
+drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
+which opens a transfer between two registered clients without either asking. One implementation,
+so authorization and the cleanup of a half-done handshake cannot drift between the two.
+
 ### Wire protocol
 
 Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHeader.cs`:
@@ -127,7 +132,8 @@ they only exist while a transfer does and they feed `TransferState`, not the reg
 `SignalRDataClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`
 (`src/TransportR/Interfaces/ITransportRClient.cs`). A sender calls `InitTransferAsync` to get a
 `Send<T>` handle (`src/TransportR/Abstractions/Send.cs`); a receiver registers `OnTransferStarted`
-and consumes a `Receive<T>` handle via `IAsyncEnumerable`. `BatchAccumulator` buffers items
+and consumes a `Receive<T>` handle via `IAsyncEnumerable`. A transfer the host opens reaches the
+sender through `OnSendRequested` instead; a client with no handler refuses it. `BatchAccumulator` buffers items
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
 loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands decoded items to
 `ReceiveBuffer`. `HubConnectionManager` owns the

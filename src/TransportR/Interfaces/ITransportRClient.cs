@@ -64,7 +64,19 @@ public interface IDataSender<T> : IDataClient
     /// <param name="batchSize">Optional batch size override. Uses default if not specified.</param>
     /// <returns>A Send handle to transmit items through.</returns>
     Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
-    
+
+    /// <summary>
+    /// Event fired when the application hosting the hub opens a transfer from this client, rather
+    /// than this client calling <see cref="InitTransferAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The handler owns the handle it is given, as with <c>OnTransferStarted</c>: it sends through
+    /// it, completes it and disposes it. It runs inside the handshake, which is bounded by a
+    /// timeout, so it hands the handle off and returns rather than sending from within. With no
+    /// handler attached the client refuses such transfers, and the host's request fails.
+    /// </remarks>
+    event Func<Send<T>, Task> OnSendRequested;
+
     /// <summary>
     /// Gets a list of receivers that this client is authorized to send data to.
     /// </summary>

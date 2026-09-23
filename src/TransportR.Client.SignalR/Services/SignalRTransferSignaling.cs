@@ -20,8 +20,14 @@ internal class SignalRTransferSignaling<T>
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
     private readonly Func<Receive<T>, Task>? _onTransferStarted;
+    private readonly Func<Func<Send<T>, Task>?> _sendRequestedHandler;
     private readonly Func<string, Task>? _onReconnected;
 
+    /// <param name="sendRequestedHandler">
+    /// Returns the handler currently attached for transfers the host opens, or null when there is
+    /// none. Asked on every request, because the answer decides whether the transfer is refused
+    /// before a session exists.
+    /// </param>
     public SignalRTransferSignaling(
         HubConnectionManager connectionManager,
         SessionRegistry<T> sessionRegistry,
@@ -30,8 +36,10 @@ internal class SignalRTransferSignaling<T>
         int defaultBatchSize,
         string dataUrl,
         Func<Receive<T>, Task>? onTransferStarted,
+        Func<Func<Send<T>, Task>?> sendRequestedHandler,
         Func<string, Task>? onReconnected = null)
     {
+        _sendRequestedHandler = sendRequestedHandler;
         _onReconnected = onReconnected;
         _connectionManager = connectionManager;
         _sessionRegistry = sessionRegistry;
@@ -61,6 +69,12 @@ internal class SignalRTransferSignaling<T>
         {
             _logger.LogInformation("Client: Received GetReadyToSend request for Transfer={TransferId} to ReceiverId={ReceiverId}", transferId, receiverId);
             return await HandleGetReadyToSend(transferId, size, receiverId);
+        });
+
+        connection.On<string, int, Guid, bool>(nameof(ICommandClient.RequestSend), async (transferId, size, receiverId) =>
+        {
+            _logger.LogInformation("Client: Received RequestSend request for Transfer={TransferId} to ReceiverId={ReceiverId}", transferId, receiverId);
+            return await HandleRequestSend(transferId, size, receiverId);
         });
 
         connection.On<string>(nameof(ICommandClient.CancelTransfer), async (transferId) =>
@@ -137,6 +151,42 @@ internal class SignalRTransferSignaling<T>
 
         var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, size, _dataUrl));
         await session.StartSenderAsync();
+        return true;
+    }
+
+    private async Task<bool> HandleRequestSend(string transferId, int size, Guid receiverId)
+    {
+        var handler = _sendRequestedHandler();
+        if (handler == null)
+        {
+            _logger.LogWarning("Refusing Transfer {TransferId}: it was opened by the host, and no OnSendRequested handler is attached.", transferId);
+            return false;
+        }
+
+        if (_sessionRegistry.ContainsKey(transferId))
+        {
+            throw new InvalidOperationException($"Session {transferId} already exists. Cannot overwrite.");
+        }
+
+        _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
+
+        var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, size, _dataUrl));
+        await session.StartSenderAsync();
+
+        var transfer = new HttpSend<T>(session);
+        try
+        {
+            await handler(transfer);
+        }
+        catch
+        {
+            // The hub abandons the transfer on this failure and cancels the receiver. The handle's
+            // owner is the handler that just failed, so nothing else would release this side;
+            // should the handler dispose it later, a second dispose does nothing.
+            await transfer.DisposeAsync();
+            throw;
+        }
+
         return true;
     }
 

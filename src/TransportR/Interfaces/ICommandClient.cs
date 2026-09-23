@@ -28,6 +28,19 @@ public interface ICommandClient
     Task<bool> GetReadyToSend(string transferId, int batchSize, Guid receiverId);
 
     /// <summary>
+    /// Called by the hub when the application hosting it opens a transfer from this client, which
+    /// did not ask for it. Otherwise the same as <see cref="GetReadyToSend"/>.
+    /// </summary>
+    /// <param name="transferId">The unique transfer identifier.</param>
+    /// <param name="batchSize">The negotiated batch size for this transfer.</param>
+    /// <param name="receiverId">The ID of the receiving client.</param>
+    /// <returns>
+    /// True once the transfer has been handed to the client's code; false when nothing in the
+    /// client takes such transfers, which fails the transfer before any data moves.
+    /// </returns>
+    Task<bool> RequestSend(string transferId, int batchSize, Guid receiverId);
+
+    /// <summary>
     /// Called by the hub to cancel an in-progress or pending transfer.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier to cancel.</param>

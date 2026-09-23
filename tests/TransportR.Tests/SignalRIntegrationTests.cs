@@ -66,6 +66,55 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task HostInitiatedTransfer_DeliversEveryItem()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        // Neither client asks for anything: the host names both ends.
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+
+        // Both handles are handed out inside the handshake, before the host has the id to match
+        // them against - a host that routes by transfer id has to hold them until it does.
+        Assert.True(sendHandle.Task.IsCompleted, "the sender's handle must be handed out before InitTransferAsync returns");
+        Assert.True(receiveHandle.Task.IsCompleted, "the receiver's handle must be handed out before InitTransferAsync returns");
+
+        await using var send = await sendHandle.Task;
+        await using var receive = await receiveHandle.Task;
+        Assert.Equal(transferId, send.TransferId);
+        Assert.Equal(transferId, receive.TransferId);
+
+        var expected = Enumerable.Range(0, 250).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            await receive.WaitForCompletionAsync();
+            return items;
+        });
+
+        await send.SendAsync(expected);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
     public async Task SenderInitiatedTransfer_DeliversEveryItem()
     {
         using var host = TestHubServerFactory.CreateHost();
@@ -99,6 +148,65 @@ public class SignalRIntegrationTests
         await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task HostInitiatedTransfer_IsRefused_ByASenderWithNoHandler()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        receiver.OnTransferStarted += _ => Task.CompletedTask;
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        var ex = await Assert.ThrowsAsync<HubException>(
+            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
+
+        Assert.Contains("refused", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+        // The sender refused before creating anything; the receiver was readied first and is told
+        // to cancel, which releases its session.
+        Assert.Empty(sender.GetTransfers());
+        await AssertEventuallyEmptyAsync(receiver);
+    }
+
+    [Fact]
+    public async Task HostInitiatedTransfer_ReleasesTheSendersSession_WhenItsHandlerFails()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        sender.OnSendRequested += _ => throw new InvalidOperationException("no room for another transfer");
+        receiver.OnTransferStarted += _ => Task.CompletedTask;
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await Assert.ThrowsAsync<HubException>(
+            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
+
+        Assert.Empty(sender.GetTransfers());
+        await AssertEventuallyEmptyAsync(receiver);
+    }
+
+    private static async Task AssertEventuallyEmptyAsync(SignalRDataClient<string> client)
+    {
+        // CancelTransfer is sent without waiting for the client to act on it.
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (client.GetTransfers().Count > 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.Empty(client.GetTransfers());
     }
 
     [Fact]
