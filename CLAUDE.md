@@ -41,9 +41,12 @@ gap.
 
 ### End-to-end / benchmark scenarios
 
-There is no in-process integration test for a full sender→hub→receiver transfer; that's covered by
-running real processes via the scripts, which double as both benchmark and non-regression check
-(they assert exact line counts in the output CSVs):
+`SignalRIntegrationTests` carries a transfer to completion in process, over `TestServer`, which
+needs an `IHubProgressMonitor` registered by the test host: `AddDataHub()` registers none, and
+without one every stream request fails with a 500 while the client reconnects in a loop. Anything
+beyond one small transfer — faults, volume, HA, auth modes — is covered by running real processes
+via the scripts, which double as both benchmark and non-regression check (they assert exact line
+counts in the output CSVs):
 
 ```bash
 ./scripts/init.sh                    # one-time: downloads Toxiproxy/Redis, generates data/orders.bin (2M orders)
