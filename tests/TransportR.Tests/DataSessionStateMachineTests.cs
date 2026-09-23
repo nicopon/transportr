@@ -53,7 +53,53 @@ public class DataSessionStateMachineTests
         Assert.Equal(SessionState.Completed, _fsm.CurrentState);
 
         var result = _fsm.TransitionTo(SessionState.Reconnecting);
-        
+
+        Assert.False(result);
+        Assert.Equal(SessionState.Completed, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void OnReleased_FromNonFinalState_ReturnsTrueAndMovesToDisposed()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+
+        var result = _fsm.OnReleased();
+
+        Assert.True(result);
+        Assert.Equal(SessionState.Disposed, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void OnReleased_FromCompleted_ReturnsFalseAndKeepsState()
+    {
+        // A transfer that ended normally emits no Abort: OnReleased finds nothing left to abandon.
+        _fsm.TransitionTo(SessionState.Completed);
+
+        var result = _fsm.OnReleased();
+
+        Assert.False(result);
+        Assert.Equal(SessionState.Completed, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void OnAborted_FromNonFinalState_ReturnsTrueAndMovesToFailed()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+
+        var result = _fsm.OnAborted();
+
+        Assert.True(result);
+        Assert.Equal(SessionState.Failed, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void OnAborted_FromCompleted_ReturnsFalseAndKeepsState()
+    {
+        // A stray Abort arriving after Completed changes nothing.
+        _fsm.TransitionTo(SessionState.Completed);
+
+        var result = _fsm.OnAborted();
+
         Assert.False(result);
         Assert.Equal(SessionState.Completed, _fsm.CurrentState);
     }

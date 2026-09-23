@@ -31,6 +31,10 @@ internal class DataSession<T> : IDataSession<T>
     // pause between tries the session loop turns a dead hub into a spin.
     private const int CompletingPhaseRetryMs = 500;
 
+    // Bounds how long DisposeAsync waits for Abort to reach the wire before tearing the streams
+    // down anyway. A stream stuck on backpressure must not hang disposal.
+    private static readonly TimeSpan AbortWriteTimeout = TimeSpan.FromSeconds(2);
+
     private const string ReleasedBeforeCompletion =
         "The transfer handle was released before the transfer completed; the transfer was abandoned.";
 
@@ -47,6 +51,12 @@ internal class DataSession<T> : IDataSession<T>
     private readonly ReconnectionHandler _reconnectionHandler;
     private readonly DataSessionStateMachine _fsm;
     private bool _isSender;
+
+    /// <summary>
+    /// Set when an Abort chunk arrives, read from another thread by whatever call the peer's abort
+    /// unblocks (SendAsync, CompleteAsync, WaitForCompletionAsync).
+    /// </summary>
+    private volatile string? _abortReason;
 
     private readonly Timer _heartbeatTimer;
     private int _disposed;
@@ -108,6 +118,14 @@ internal class DataSession<T> : IDataSession<T>
             // This ensures we stay alive long enough to flush the CompleteAck and for Sender to receive it.
             return Task.CompletedTask;
         };
+        _batchProcessor.OnAbortReceived += (reason) => {
+            _abortReason = reason.Describe();
+            if (_fsm.OnAborted())
+            {
+                _config.Logger.LogWarning(
+                    "Received Abort ({Reason}) - transfer failed (Transfer={TransferId})", reason, TransferId);
+            }
+        };
         
         _heartbeatTimer = new Timer(HeartbeatLoop, null, (int)_config.Options.HeartbeatInterval.TotalMilliseconds, (int)_config.Options.HeartbeatInterval.TotalMilliseconds);
     }
@@ -141,13 +159,16 @@ internal class DataSession<T> : IDataSession<T>
     public Task SendAsync(T item, CancellationToken cancellationToken)
     {
         var send = _batchProcessor.SendAsync(item, cancellationToken);
-        return send.IsCompleted ? send : WhileAcknowledgingAsync(send, cancellationToken);
+        // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
+        // dispose can fault before this is even checked, and that path must still go through
+        // WhileAcknowledgingAsync to be translated into TransferFailedException.
+        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
     public Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
     {
         var send = _batchProcessor.SendRangeAsync(items, cancellationToken);
-        return send.IsCompleted ? send : WhileAcknowledgingAsync(send, cancellationToken);
+        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
     /// <summary>
@@ -195,7 +216,25 @@ internal class DataSession<T> : IDataSession<T>
                 $"The send window stayed full: nothing was acknowledged for {stalledFor.TotalSeconds:N0}s.");
         }
 
-        await send;
+        await AwaitOrTranslateAsync(send, cancellationToken);
+    }
+
+    /// <summary>
+    /// Awaits a producer task, translating a cancellation neither this call nor its caller
+    /// requested - an Abort abandoning the accumulator, or DisposeAsync doing the same - into
+    /// <see cref="TransferFailedException"/>. A cancellation the caller's own token carries is left
+    /// alone: that one was asked for.
+    /// </summary>
+    private async Task AwaitOrTranslateAsync(Task task, CancellationToken callerToken)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        {
+            throw new TransferFailedException(TransferId, _abortReason ?? "Transfer failed before it could complete.");
+        }
     }
 
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
@@ -381,6 +420,25 @@ internal class DataSession<T> : IDataSession<T>
             _config.Logger.LogWarning(
                 "Session released before the transfer ended - transfer abandoned (Transfer={TransferId})",
                 TransferId);
+
+            // Best-effort: give the peer a reason to fail on instead of a silence it can only read
+            // as a stall. Bounded because a stream stuck on backpressure must not hang disposal,
+            // and DisposeAsync never throws. Waits on the write direction's own HTTP request, not
+            // on the local flush: the server does not see clean EOF until it has read the request
+            // to completion, and cancelling the streams before that turns the clean close into a
+            // rupture the peer never receives Abort from.
+            try
+            {
+                _batchProcessor.EnqueueAbort(AbortReason.ReleasedBeforeCompletion);
+                if (_httpStreamManager.WriteTask is { } writeTask)
+                {
+                    await writeTask.WaitAsync(AbortWriteTimeout);
+                }
+            }
+            catch (Exception ex)
+            {
+                _config.Logger.LogDebug(ex, "Could not confirm Abort was written for Transfer={TransferId}", TransferId);
+            }
         }
 
         _reconnectionHandler.Dispose();
@@ -627,6 +685,15 @@ internal class DataSession<T> : IDataSession<T>
                 else if (message is ControlChunkMessage ctrlMsg)
                 {
                     await ChunkIO.WriteControlAsync(outputStream, transferGuid, ctrlMsg.BatchId, ctrlMsg.Type, token);
+
+                    if (ctrlMsg.Type == ChunkType.Abort)
+                    {
+                        // Ends this side's outgoing stream cleanly, the same way CompleteAck does
+                        // below: the hub sees a normal EOF and releases the bridge through its
+                        // ordinary path instead of waiting on a reconnection that will never come.
+                        await outputStream.FlushAsync(token);
+                        return;
+                    }
 
                     // Ending the control POST is the receiver's step in the domino, and it belongs
                     // here rather than at the moment Complete was accepted: EOF after the

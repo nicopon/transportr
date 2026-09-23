@@ -68,6 +68,23 @@ public class DataSessionStateMachine
         }
     }
 
+    /// <summary>
+    /// Records that the peer sent Abort, failing the transfer. A session that already reached an
+    /// outcome keeps it: a stray Abort arriving after Completed changes nothing.
+    /// </summary>
+    /// <returns>True when the abort stopped a session that had not yet reached an outcome.</returns>
+    public bool OnAborted()
+    {
+        lock (_lock)
+        {
+            if (IsFinal(_currentState)) return false;
+
+            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Failed, _transferId);
+            _currentState = SessionState.Failed;
+            return true;
+        }
+    }
+
     // "No transition may leave this state", which is not the same question as "did the transfer
     // stop": a disposed session never succeeded, so callers reporting an outcome ask their own.
     private static bool IsFinal(SessionState state) =>

@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using TransportR.Abstractions;
 using TransportR.Client.SignalR.Batching;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Protocol;
@@ -193,6 +194,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
             case ChunkType.CompleteAck:
                 HandleCompleteAck();
                 break;
+            case ChunkType.Abort:
+                HandleAbort((AbortReason)chunk.Header.BatchId);
+                break;
             default:
                 throw new WireProtocolViolationException($"Unknown chunk type: {(byte)chunk.Header.Type}");
         }
@@ -359,6 +363,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public event Action<int>? OnPongReceived;
     public event Action? OnCompleteAckReceived;
     public event Func<Task>? OnCompleteReceived;
+    public event Action<AbortReason>? OnAbortReceived;
 
     private void HandlePong(int nextExpectedBatchId)
     {
@@ -401,7 +406,29 @@ internal class BatchProcessor<T> : IAsyncDisposable
         _completeAckReceived?.TrySetResult();
         OnCompleteAckReceived?.Invoke();
     }
-    
+
+    /// <summary>
+    /// The peer gave up before the transfer completed. Releases whatever this side has parked -
+    /// a producer on the in-flight window, a consumer on the receive buffer - with the reason
+    /// carried on the wire, then tells <see cref="DataSession{T}"/> so it can fail the state
+    /// machine and pass the same reason to callers waiting elsewhere (CompleteAsync,
+    /// WaitForCompletionAsync).
+    /// </summary>
+    private void HandleAbort(AbortReason reason)
+    {
+        _receiveBuffer?.Complete(new TransferFailedException(_transferId, reason.Describe()));
+        AbandonSender();
+        OnAbortReceived?.Invoke(reason);
+    }
+
+    /// <summary>
+    /// Enqueues Abort on the outgoing channel. Enqueuing is not reaching the wire: the caller
+    /// confirms that by waiting on <see cref="HttpStreamManager.WriteTask"/> for the direction this
+    /// side writes on, not on this call returning.
+    /// </summary>
+    public void EnqueueAbort(AbortReason reason) =>
+        _sendChannel.Writer.TryWrite(new ControlChunkMessage(ChunkType.Abort, (int)reason));
+
     public async Task ResendCompleteAckAsync()
     {
         _context.Logger.LogInformation("Resending CompleteAck for Transfer={TransferId}", _transferId);

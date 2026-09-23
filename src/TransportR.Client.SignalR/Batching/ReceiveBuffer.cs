@@ -177,7 +177,12 @@ internal sealed class ReceiveBuffer<T>
     /// <summary>
     /// Signals that no more chunks will arrive, and releases a writer parked on the credit gate.
     /// </summary>
-    public void Complete()
+    /// <param name="error">
+    /// When set, <see cref="ReadAllAsync"/> throws it instead of ending quietly once every already
+    /// buffered item has been consumed - how a consumer parked on the next item learns the transfer
+    /// failed rather than simply ran out of input.
+    /// </param>
+    public void Complete(Exception? error = null)
     {
         lock (_gate)
         {
@@ -186,7 +191,7 @@ internal sealed class ReceiveBuffer<T>
             _spaceAvailable = null;
         }
 
-        _channel.Writer.TryComplete();
+        _channel.Writer.TryComplete(error);
     }
 
     /// <remarks>

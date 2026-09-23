@@ -30,6 +30,15 @@ internal class HttpStreamManager : IAsyncDisposable
     public Task<StreamResult>? SenderTask => _senderTask;
     public Task<StreamResult>? ReceiverTask => _receiverTask;
 
+    /// <summary>
+    /// The current attempt's task for whichever direction this side writes on (Data for a sender,
+    /// Control for a receiver). Unlike <see cref="SenderTask"/>/<see cref="ReceiverTask"/>, which
+    /// only resolve once <b>both</b> directions finish (or one fails), this resolves as soon as the
+    /// write side's own HTTP request completes - which a caller waiting to know a specific message
+    /// actually reached the server needs, since the read side has no reason to end on its own.
+    /// </summary>
+    public Task<StreamResult>? WriteTask { get; private set; }
+
     public HttpStreamManager(IStreamTransport transport, ISessionConfig config, string transferId, string dataUrl)
     {
         _transport = transport;
@@ -79,14 +88,16 @@ internal class HttpStreamManager : IAsyncDisposable
              // Sender writes Data, reads Control
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, isRead: false, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, isRead: true, writeAction, readAction, token);
+             WriteTask = tData;
          }
          else
          {
              // Receiver reads Data, writes Control
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, isRead: true, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, isRead: false, writeAction, readAction, token);
+             WriteTask = tControl;
          }
-         
+
          var tasks = new List<Task<StreamResult>> { tData, tControl };
 
          while (tasks.Count > 0)

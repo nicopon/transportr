@@ -151,6 +151,127 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task Abort_WhenReceiverReleasesEarly_MakesTheSenderFailFast()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        // A window of one batch: SendAsync has nowhere to go once the first batch goes
+        // unacknowledged, which is what "parked on the window" means here.
+        await using var sender = CreateClient(handler, "http://localhost", "sender", o => o.MaxInFlightBatches = 1);
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        var receive = await receiveHandle.Task;
+
+        // Fills the window's only slot. Never acknowledged: the receiver gives up next, without
+        // ever reading it.
+        await send.SendAsync("item-1");
+        await receive.DisposeAsync();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<TransferFailedException>(
+            () => send.SendAsync("item-2").WaitAsync(TimeSpan.FromSeconds(5)));
+        stopwatch.Stop();
+
+        // Measured 60s on the code before Abort (CompleteStallTimeout). The 5s bound above only
+        // keeps a regression from hanging the test; this is the actual claim.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Expected the Abort to fail the send in under a second; took {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task Abort_WhenSenderReleasesMidFlight_MakesTheReceiverFailFast()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        var receive = await receiveHandle.Task;
+
+        var receiveTask = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            return items;
+        });
+
+        // A couple of items make it through, then the sender walks away mid-stream without ever
+        // calling CompleteAsync.
+        await send.SendAsync("item-1");
+        await send.SendAsync("item-2");
+        await send.DisposeAsync();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAsync<TransferFailedException>(() => receiveTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        stopwatch.Stop();
+
+        // Measured over 150s on the code before Abort (the sender kept heartbeating, so the hub's
+        // cleanup never judged the transfer inactive). The 10s bound above only keeps a regression
+        // from hanging the test; this is the actual claim.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Expected the Abort to fail the receive in under a second; took {stopwatch.Elapsed}.");
+
+        await receive.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task NormalCompletion_NeverReleasesTheSessionBeforeItsOutcome()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task;
+
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            await receive.WaitForCompletionAsync();
+            return items;
+        });
+
+        var expected = Enumerable.Range(0, 20).Select(i => $"item-{i}").ToList();
+        await send.SendAsync(expected);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        // A transfer that ends normally reaches Completed before either handle is disposed, so
+        // DisposeAsync's OnReleased() finds nothing left to abandon - no Abort is ever queued.
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
     public async Task HostInitiatedTransfer_IsRefused_ByASenderWithNoHandler()
     {
         using var host = TestHubServerFactory.CreateHost();
