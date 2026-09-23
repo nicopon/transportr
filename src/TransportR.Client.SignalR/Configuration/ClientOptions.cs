@@ -57,6 +57,10 @@ public class ClientOptions
     /// It matches the hub's <c>TransferInactivityTimeoutSeconds</c> on purpose: past that point the
     /// hub has terminated the transfer anyway, so waiting longer waits on nothing.
     /// </para>
+    /// <para>
+    /// The same clock bounds a producer parked on a full <see cref="MaxInFlightBatches"/> window:
+    /// both waits are released only by an acknowledgement.
+    /// </para>
     /// </remarks>
     public TimeSpan CompleteStallTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -79,7 +83,13 @@ public class ClientOptions
     /// When set, the producer blocks in <c>SendAsync</c> once the window is full and resumes as
     /// acknowledgements come back. This is the only backpressure path from the receiver to the
     /// producer: TCP throttles the HTTP write, but nothing upstream of it. Left unbounded, a slow
-    /// receiver makes the sender hold the entire source in memory.
+    /// receiver makes the sender hold the entire source in memory — bounding the receiver alone
+    /// does not prevent it.
+    /// </para>
+    /// <para>
+    /// A receiver that stops acknowledging — one that stopped early, or went away — never reopens
+    /// the window, so the blocked <c>SendAsync</c> fails with <c>TransferFailedException</c> once
+    /// nothing has been acknowledged for <see cref="CompleteStallTimeout"/>.
     /// </para>
     /// <para>
     /// <b>Sizing.</b> The window counts <i>batches</i>, so the memory it bounds is roughly

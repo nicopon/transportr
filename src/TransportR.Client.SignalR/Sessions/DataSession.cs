@@ -138,14 +138,64 @@ internal class DataSession<T> : IDataSession<T>
         _ = RunSessionLoop(_cts.Token);
     }
 
-    public async Task SendAsync(T item, CancellationToken cancellationToken)
+    public Task SendAsync(T item, CancellationToken cancellationToken)
     {
-        await _batchProcessor.SendAsync(item, cancellationToken);
+        var send = _batchProcessor.SendAsync(item, cancellationToken);
+        return send.IsCompleted ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
-    public async Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
+    public Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
     {
-        await _batchProcessor.SendRangeAsync(items, cancellationToken);
+        var send = _batchProcessor.SendRangeAsync(items, cancellationToken);
+        return send.IsCompleted ? send : WhileAcknowledgingAsync(send, cancellationToken);
+    }
+
+    /// <summary>
+    /// Waits out a producer parked on a full send window, for as long as the receiver keeps
+    /// acknowledging.
+    /// </summary>
+    /// <remarks>
+    /// Only an acknowledgement reopens the window, and a receiver that has gone away sends none: a
+    /// consumer that stopped early leaves its producer parked forever. The bound is the one
+    /// <see cref="CompleteAsync"/> applies — a peer still acknowledging is still working, however
+    /// slowly; one that acknowledged nothing for <c>CompleteStallTimeout</c> is gone.
+    /// </remarks>
+    private async Task WhileAcknowledgingAsync(Task send, CancellationToken cancellationToken)
+    {
+        var stallTimeout = _config.Options.CompleteStallTimeout;
+        var pollInterval = TimeSpan.FromMilliseconds(Math.Min(CompleteRetryMs, stallTimeout.TotalMilliseconds));
+
+        var lastAcks = _batchProcessor.AcksReceived;
+        var lastProgressUtc = DateTime.UtcNow;
+
+        while (await Task.WhenAny(send, Task.Delay(pollInterval, cancellationToken)) != send)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var acks = _batchProcessor.AcksReceived;
+            if (acks != lastAcks)
+            {
+                lastAcks = acks;
+                lastProgressUtc = DateTime.UtcNow;
+                continue;
+            }
+
+            var stalledFor = DateTime.UtcNow - lastProgressUtc;
+            if (stalledFor < stallTimeout) continue;
+
+            _fsm.TransitionTo(SessionState.Failed);
+            _batchProcessor.CompleteSenderChannel();
+            _batchProcessor.AbandonSender();
+
+            // The parked producer unwinds with a cancellation; the failure is reported below.
+            try { await send; } catch (OperationCanceledException) { }
+
+            throw new TransferFailedException(
+                TransferId,
+                $"The send window stayed full: nothing was acknowledged for {stalledFor.TotalSeconds:N0}s.");
+        }
+
+        await send;
     }
 
     public async Task CompleteAsync(CancellationToken cancellationToken = default)

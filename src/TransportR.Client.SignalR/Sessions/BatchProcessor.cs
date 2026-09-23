@@ -157,6 +157,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
     {
         _sendChannel.Writer.TryComplete();
     }
+
+    /// <summary>
+    /// Releases a producer parked on the send window of a transfer that has failed. Items the
+    /// accumulator still holds are dropped with it.
+    /// </summary>
+    public void AbandonSender() => _batchAccumulator?.Abandon();
     
     public Task WaitForCompleteAckAsync(CancellationToken token)
     {

@@ -184,6 +184,24 @@ internal class BatchAccumulator<T> : IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases a producer parked on the in-flight window and accepts no further flush, without
+    /// disposing anything: <see cref="Dispose"/> still runs when the session is released, and
+    /// cancelling twice is harmless where disposing twice is not.
+    /// </summary>
+    public void Abandon()
+    {
+        try
+        {
+            _disposeCts.Cancel();
+            _batchChannel.Writer.TryComplete();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed, which released the producer already.
+        }
+    }
+
     public void Dispose()
     {
         // Cancel first: a producer parked on the in-flight window unwinds through the finally that

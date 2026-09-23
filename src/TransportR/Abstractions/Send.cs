@@ -17,6 +17,10 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// </summary>
     /// <param name="item">The item to send.</param>
     /// <param name="cancellationToken">Token to cancel the send operation.</param>
+    /// <exception cref="TransferFailedException">
+    /// The send window was full and the receiver acknowledged nothing for
+    /// <c>ClientOptions.CompleteStallTimeout</c>. The handle is dead; dispose it.
+    /// </exception>
     public abstract Task SendAsync(T item, CancellationToken cancellationToken = default);
     
     /// <summary>
