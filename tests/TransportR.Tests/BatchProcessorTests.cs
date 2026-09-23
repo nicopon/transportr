@@ -138,6 +138,21 @@ public class BatchProcessorTests
         Assert.True(completeTask.IsCompletedSuccessfully);
     }
 
+    [Fact]
+    public async Task ProcessChunk_UnknownChunkType_ThrowsWireProtocolViolation()
+    {
+        // Arrange
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        var unknownHeader = ChunkHeader.CreateControl(_transferId, 0, (ChunkType)0xFF);
+        var unknownChunk = new ChunkData(unknownHeader, null, 0);
+
+        // Act & Assert: an unrecognized type is fatal, silently ignoring it would leave the peer
+        // waiting on a reply this side never sends.
+        await Assert.ThrowsAsync<WireProtocolViolationException>(() => processor.ProcessChunkAsync(unknownChunk));
+    }
+
     // ---- Receive capacity (ClientOptions.ReceiveBufferCapacity) ----
 
     /// <summary>

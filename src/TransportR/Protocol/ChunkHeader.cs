@@ -12,7 +12,7 @@ public readonly struct ChunkHeader
     public const int Size = 30;
     
     /// <summary>Current protocol version.</summary>
-    public const byte CurrentVersion = 1;
+    public const byte CurrentVersion = 2;
 
     /// <summary>Protocol version (1 byte).</summary>
     public byte Version { get; init; }
@@ -93,7 +93,7 @@ public readonly struct ChunkHeader
         // Version validation
         if (header.Version != CurrentVersion)
         {
-            throw new InvalidOperationException($"Unsupported protocol version: {header.Version} (expected {CurrentVersion})");
+            throw new WireProtocolViolationException($"Unsupported protocol version: {header.Version} (expected {CurrentVersion})");
         }
         
         return header;

@@ -226,10 +226,23 @@ public class ChunkIOTests
     }
 
     [Fact]
-    public void ChunkHeader_CurrentVersion_Is1()
+    public void ChunkHeader_CurrentVersion_Is2()
     {
-        // Verify current version is 1
-        Assert.Equal(1, ChunkHeader.CurrentVersion);
+        // Verify current version is 2
+        Assert.Equal(2, ChunkHeader.CurrentVersion);
+    }
+
+    [Fact]
+    public async Task ReadFromStreamAsync_UnsupportedVersion_ThrowsWireProtocolViolation()
+    {
+        // Arrange: a header written with a version this build no longer speaks.
+        var header = ChunkHeader.CreateBatch(Guid.NewGuid(), 0, 1, 0) with { Version = 1 };
+        byte[] buffer = new byte[ChunkHeader.Size];
+        header.WriteTo(buffer);
+        using var ms = new MemoryStream(buffer);
+
+        // Act & Assert: fatal, not the generic exception a network hiccup would raise.
+        await Assert.ThrowsAsync<WireProtocolViolationException>(() => ChunkHeader.ReadFromStreamAsync(ms));
     }
 
     [Fact]

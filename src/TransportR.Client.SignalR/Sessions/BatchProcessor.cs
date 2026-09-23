@@ -193,6 +193,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
             case ChunkType.CompleteAck:
                 HandleCompleteAck();
                 break;
+            default:
+                throw new WireProtocolViolationException($"Unknown chunk type: {(byte)chunk.Header.Type}");
         }
     }
     private async Task SerializationWorkerAsync(CancellationToken ct)

@@ -187,6 +187,13 @@ internal class HttpStreamManager : IAsyncDisposable
             {
                  return new StreamResult(true, false, "Canceled");
             }
+            catch (WireProtocolViolationException ex)
+            {
+                 // The peer sent something this version cannot interpret; reconnecting would only
+                 // repeat the violation, so this is fatal rather than retryable.
+                 _config.Logger.LogError("Protocol violation: {Message}. Session failed.", ex.Message);
+                 return new StreamResult(false, false, ex.Message);
+            }
             catch (Exception ex)
             {
                  // Network errors allow retry

@@ -4,6 +4,7 @@ using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 using Xunit;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -87,6 +88,27 @@ public class HttpStreamManagerTests
         // Assert
         Assert.False(result.IsSuccess);
         Assert.True(result.IsRetryable); // Retryable
+    }
+
+    [Fact]
+    public async Task StartStreams_ProtocolViolation_ReturnsFatalFailure()
+    {
+        // Arrange
+        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data");
+        _httpHandler.SetResponse(HttpStatusCode.OK);
+
+        // Act
+        manager.StartStreams(
+            isSender: true,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => throw new WireProtocolViolationException("Unsupported protocol version: 1 (expected 2)"),
+            sessionToken: CancellationToken.None);
+
+        var result = await manager.SenderTask!;
+
+        // Assert: a protocol violation is never worth retrying - reconnecting repeats it.
+        Assert.False(result.IsSuccess);
+        Assert.False(result.IsRetryable);
     }
 
     // ========== STUBS ==========
