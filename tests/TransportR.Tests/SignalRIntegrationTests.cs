@@ -5,6 +5,7 @@ using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
@@ -62,6 +63,42 @@ public class SignalRIntegrationTests
         // Assert
         Assert.NotNull(sendSession);
         Assert.True(getReadyCalled, "Receiver OnTransferStarted should have been triggered");
+    }
+
+    [Fact]
+    public async Task SenderInitiatedTransfer_DeliversEveryItem()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task;
+
+        var expected = Enumerable.Range(0, 250).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            await receive.WaitForCompletionAsync();
+            return items;
+        });
+
+        await send.SendAsync(expected);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
     }
 
     [Fact]
@@ -229,7 +266,7 @@ public class SignalRIntegrationTests
             logger,
             defaultBatchSize: 100,
             options,
-            url,
+            url + WireRoutes.StreamBase,
             httpClient,
             streamManager
         );

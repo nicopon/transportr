@@ -54,15 +54,6 @@ public static class AuthenticatedHubServerFactory
             .Start();
     }
 
-    private sealed class SilentProgressMonitor : IHubProgressMonitor
-    {
-        public void InitializeTransfer(string transferId) { }
-
-        public void OnBytesTransferred(long bytes) { }
-
-        public void CompleteTransfer(string transferId) { }
-    }
-
     private sealed class StubAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public StubAuthHandler(

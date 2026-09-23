@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub.SignalR;
+using TransportR.Interfaces;
 
 namespace TransportR.Tests.Infrastructure;
 
@@ -23,7 +24,8 @@ public static class TestHubServerFactory
                     .ConfigureServices(services =>
                     {
                         services.AddLogging(logging => logging.AddConsole().SetMinimumLevel(LogLevel.Debug));
-                        
+                        services.AddSingleton<IHubProgressMonitor, SilentProgressMonitor>();
+
                         // Add TransportR Hub services (InMemory by default)
                         services.AddDataHub()
                                 .UseDevMode(options => 
