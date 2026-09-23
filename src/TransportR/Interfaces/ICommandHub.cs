@@ -16,6 +16,11 @@ public interface ICommandHub
     /// </summary>
     /// <param name="clientId">Optional client identifier. When authenticated, derived from JWT 'sub' claim if null.</param>
     /// <param name="groups">Optional groups. When authenticated, derived from JWT scopes if null.</param>
+    /// <remarks>
+    /// Refused when the resolved client id is already registered under a different attested
+    /// subject, including a registration whose connection dropped but is still within its grace
+    /// period. Registering again under the same subject replaces the registration.
+    /// </remarks>
     Task Connect(Guid? clientId = null, IEnumerable<string>? groups = null);
 
     /// <summary>

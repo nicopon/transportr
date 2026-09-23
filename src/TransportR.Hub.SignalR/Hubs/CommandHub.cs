@@ -71,7 +71,20 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             _logger.LogWarning("Connect failed: Unable to resolve client identity");
             throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
         }
-        
+
+        // The store overwrites on save, so without this a caller who learned another client's id
+        // from GetReceivers takes over its registration: transfers aimed at it land here, and the
+        // data plane checks streams against the subject just written. A registration still within
+        // its disconnection grace is protected too, since its owner is expected to reclaim it.
+        // Dev mode attests no subject, so both sides are null and nothing is refused there.
+        var existing = await _stateStore.GetClientAsync(identity.ClientId);
+        if (existing != null && !string.Equals(existing.Subject, identity.Subject, StringComparison.Ordinal))
+        {
+            _logger.LogWarning("Connect refused: ClientId {ClientId} is registered under subject {ExistingSubject}, caller attests {Subject}",
+                identity.ClientId, existing.Subject, identity.Subject);
+            throw new HubException("Client identifier is already in use.");
+        }
+
         // Extract affinity token from request cookies
         string? affinityToken = null;
         if (_affinityOptions.Enabled)
