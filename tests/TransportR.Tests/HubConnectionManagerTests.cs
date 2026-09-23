@@ -1,12 +1,57 @@
 using Xunit;
+using Microsoft.AspNetCore.TestHost;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Configuration;
+using TransportR.Tests.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TransportR.Tests;
 
 public class HubConnectionManagerTests
 {
+    [Fact]
+    public async Task AddRegistrationCallback_ComposesWithInitialize_RatherThanReplacingIt()
+    {
+        var options = new ClientOptions();
+        await using var manager = new HubConnectionManager("http://unused", options, NullLogger.Instance);
+
+        var calls = new List<string>();
+        manager.AddRegistrationCallback(_ => calls.Add("app"));
+        manager.Initialize(_ => calls.Add("transportr"));
+
+        // A single field, overwritten by whichever call came last, is exactly the bug this
+        // guards: the application's own hook onto UseHub<THub>() and TransportR's handshake
+        // registration (SignalRTransferSignaling) both have to end up on the connection.
+        Assert.Equal(["app", "transportr"], calls);
+    }
+
+    [Fact]
+    public async Task HandleAffinityRedirectAsync_ReappliesEveryRegisteredCallback()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        var options = new ClientOptions();
+        await using var manager = new HubConnectionManager(
+            TestHubServerFactory.HubUrl,
+            options,
+            NullLogger.Instance,
+            configureHttpConnection: o => o.HttpMessageHandlerFactory = _ => handler);
+
+        var appCalls = 0;
+        var transportRCalls = 0;
+        manager.AddRegistrationCallback(_ => appCalls++);
+        manager.Initialize(_ => transportRCalls++);
+
+        Assert.Equal(1, appCalls);
+        Assert.Equal(1, transportRCalls);
+
+        await manager.HandleAffinityRedirectAsync("test-cookie", "token-1", () => Task.CompletedTask);
+
+        Assert.Equal(2, appCalls);
+        Assert.Equal(2, transportRCalls);
+    }
+
     [Fact]
     public async Task GetAccessTokenAsync_ShouldCacheToken()
     {

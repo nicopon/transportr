@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using TransportR.Configuration;
 using TransportR.Hub.SignalR.Controllers;
 using TransportR.Hub.SignalR.Configuration;
@@ -66,6 +67,46 @@ public class DataHubBuilder
         Services.AddSingleton<IStateStore>(new TestProxyStateStore(proxyUrl));
         return this;
     }
+
+    /// <summary>
+    /// Registers <typeparamref name="THub"/> in place of <see cref="CommandHub"/> as the single hub
+    /// this connection carries. <see cref="MapDataHub"/> maps whichever hub was registered here -
+    /// last call wins, the same as any other singleton registration - so a host cannot register one
+    /// hub and map another.
+    /// </summary>
+    /// <remarks>
+    /// TransportR's own services resolve <see cref="IHubContext{CommandHub}"/>
+    /// (<c>SignalRTransferInitiator</c>, <c>SignalRTransferNotifier</c>); redirecting that
+    /// resolution to <typeparamref name="THub"/>'s own context - valid because
+    /// <see cref="IHubContext{THub}"/> is covariant in <c>THub</c> - is what puts the host's own
+    /// hub methods and TransportR's handshake on the one connection a client has, instead of a
+    /// second hub the client would have to connect to as well.
+    /// </remarks>
+    public DataHubBuilder UseHub<THub>() where THub : CommandHub
+    {
+        Services.AddSingleton(new DataHubTypeMarker(typeof(THub), (endpoints, pattern) => endpoints.MapHub<THub>(pattern)));
+        Services.AddSingleton<IHubContext<CommandHub>>(sp => sp.GetRequiredService<IHubContext<THub>>());
+        return this;
+    }
+}
+
+/// <summary>
+/// Carries the hub type <see cref="DataHubBuilder.UseHub{THub}"/> registered from the builder to
+/// <see cref="TransportRHubExtensions.MapDataHub"/>, which runs later against an
+/// <see cref="IEndpointRouteBuilder"/> that has no reference to that builder instance. The mapping
+/// call itself is captured as a delegate rather than reflected, since <c>THub</c> is only known as
+/// a compile-time type parameter inside <see cref="DataHubBuilder.UseHub{THub}"/>.
+/// </summary>
+internal sealed class DataHubTypeMarker
+{
+    public Type HubType { get; }
+    public Func<IEndpointRouteBuilder, string, HubEndpointConventionBuilder> MapHub { get; }
+
+    public DataHubTypeMarker(Type hubType, Func<IEndpointRouteBuilder, string, HubEndpointConventionBuilder> mapHub)
+    {
+        HubType = hubType;
+        MapHub = mapHub;
+    }
 }
 
 public static class TransportRHubExtensions
@@ -119,11 +160,14 @@ public static class TransportRHubExtensions
         
         // Add SignalR
         services.AddSignalR();
-        
+
         // Add Controllers (for StreamController)
         services.AddControllers()
                 .AddApplicationPart(typeof(TransportRHubExtensions).Assembly);
-        
+
+        // Default hub for MapDataHub to map; UseHub<THub>() overrides this registration.
+        services.AddSingleton(new DataHubTypeMarker(typeof(CommandHub), (endpoints, pattern) => endpoints.MapHub<CommandHub>(pattern)));
+
         return new DataHubBuilder(services);
     }
 
@@ -165,7 +209,8 @@ public static class TransportRHubExtensions
                 "TransportR is not fully configured: AddDataHub() must be followed by Build().");
         }
 
-        var hubEndpoint = endpoints.MapHub<CommandHub>(WireRoutes.CommandHub);
+        var marker = endpoints.ServiceProvider.GetRequiredService<DataHubTypeMarker>();
+        var hubEndpoint = marker.MapHub(endpoints, WireRoutes.CommandHub);
 
         if (requireAuth)
         {

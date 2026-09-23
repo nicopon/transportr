@@ -19,6 +19,14 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 {
     public Guid ClientId { get; }
 
+    /// <summary>
+    /// The single connection this client carries, current across reconnects and affinity
+    /// redirects. For a host extending the hub (<c>DataHubBuilder.UseHub&lt;THub&gt;</c>) and
+    /// hooking its own handlers on via <c>TransportRClientBuilder.WithControlConnection</c>, this
+    /// is what its own invocations go through.
+    /// </summary>
+    public HubConnection ControlConnection => _connectionManager.Connection;
+
     // Dependencies
     private readonly HubConnectionManager _connectionManager;
     private readonly SessionRegistry<T> _sessionRegistry;
