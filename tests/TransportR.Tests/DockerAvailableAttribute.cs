@@ -1,10 +1,10 @@
-using global::Docker.DotNet;
+using System.Diagnostics;
 
 namespace TransportR.Tests;
 
 /// <summary>
 /// xUnit Fact attribute that skips the test if Docker is not available.
-/// Uses Docker.DotNet to check Docker daemon connectivity.
+/// Checks Docker daemon connectivity via CLI.
 /// </summary>
 public class DockerAvailableFactAttribute : FactAttribute
 {
@@ -22,9 +22,18 @@ public class DockerAvailableFactAttribute : FactAttribute
     {
         try
         {
-            using var client = new DockerClientConfiguration().CreateClient();
-            client.System.PingAsync().GetAwaiter().GetResult();
-            return true;
+            var psi = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = "info",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi);
+            process?.WaitForExit(2000);
+            return process?.ExitCode == 0;
         }
         catch
         {
@@ -52,9 +61,18 @@ public class DockerAvailableTheoryAttribute : TheoryAttribute
     {
         try
         {
-            using var client = new DockerClientConfiguration().CreateClient();
-            client.System.PingAsync().GetAwaiter().GetResult();
-            return true;
+            var psi = new ProcessStartInfo
+            {
+                FileName = "docker",
+                Arguments = "info",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(psi);
+            process?.WaitForExit(2000);
+            return process?.ExitCode == 0;
         }
         catch
         {
