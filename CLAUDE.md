@@ -38,10 +38,10 @@ gap.
 
 ### End-to-end / benchmark scenarios
 
-`SignalRIntegrationTests` carries a transfer to completion in process, over `TestServer`, which
-needs an `IHubProgressMonitor` registered by the test host: `AddDataHub()` registers none, and
-without one every stream request fails with a 500 while the client reconnects in a loop. Anything
-beyond one small transfer — faults, volume, HA, auth modes — is covered by running real processes
+`SignalRIntegrationTests` carries a transfer to completion in process, over `TestServer`; `AddDataHub()`
+registers a no-op `IHubProgressMonitor` when the host registers none of its own, so no test host needs
+one just to avoid a 500 on the first stream request. Anything beyond one small transfer — faults,
+volume, HA, auth modes — is covered by running real processes
 via the scripts, which double as both benchmark and non-regression check (they assert exact line
 counts in the output CSVs):
 

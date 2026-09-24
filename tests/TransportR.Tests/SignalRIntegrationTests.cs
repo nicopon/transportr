@@ -1,15 +1,20 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.SignalR;
 using TransportR.Protocol;
 using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
 using TransportR.Client.SignalR.Sessions;
+using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 using Xunit;
@@ -148,6 +153,75 @@ public class SignalRIntegrationTests
         await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
+    public async Task Transfer_DeliversEveryItem_WhenTheHostRegisteredNoProgressMonitor()
+    {
+        using var host = CreateHostWithoutProgressMonitor();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await receiver.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10).WaitAsync(TimeSpan.FromSeconds(10));
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var expected = Enumerable.Range(0, 50).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            await receive.WaitForCompletionAsync();
+            return items;
+        });
+
+        await send.SendAsync(expected).WaitAsync(TimeSpan.FromSeconds(10));
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    private static IHost CreateHostWithoutProgressMonitor()
+    {
+        // Deliberately omits the IHubProgressMonitor registration every other factory in this
+        // project adds, to exercise AddDataHub()'s own default.
+        return new HostBuilder()
+            .ConfigureWebHost(webBuilder =>
+            {
+                webBuilder
+                    .UseTestServer()
+                    .ConfigureServices(services =>
+                    {
+                        services.AddLogging(logging => logging.AddConsole().SetMinimumLevel(LogLevel.Debug));
+
+                        services.AddDataHub()
+                                .UseDevMode(options =>
+                                {
+                                    options.AllowAnonymous = true;
+                                    options.DefaultGroups = ["test"];
+                                })
+                                .Build();
+                    })
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(endpoints =>
+                        {
+                            endpoints.MapDataHub(requireAuth: false);
+                        });
+                    });
+            })
+            .Start();
     }
 
     [Fact]

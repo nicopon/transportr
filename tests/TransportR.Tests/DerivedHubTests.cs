@@ -69,7 +69,6 @@ public class DerivedHubTests
                     .ConfigureServices(services =>
                     {
                         services.AddLogging(logging => logging.SetMinimumLevel(LogLevel.Warning));
-                        services.AddSingleton<IHubProgressMonitor, SilentProgressMonitor>();
                         services.AddDataHub()
                                 .UseHub<ProbeHub>()
                                 .UseDevMode(options =>

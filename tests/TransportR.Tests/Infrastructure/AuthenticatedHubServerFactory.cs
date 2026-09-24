@@ -9,7 +9,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.SignalR;
-using TransportR.Interfaces;
 
 namespace TransportR.Tests.Infrastructure;
 
@@ -40,7 +39,6 @@ public static class AuthenticatedHubServerFactory
                                 .AddScheme<AuthenticationSchemeOptions, StubAuthHandler>(Scheme, _ => { });
                         services.AddAuthorization();
 
-                        services.AddSingleton<IHubProgressMonitor, SilentProgressMonitor>();
                         services.AddDataHub().Build();
                     })
                     .Configure(app =>

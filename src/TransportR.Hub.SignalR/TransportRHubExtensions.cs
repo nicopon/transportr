@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -157,6 +158,10 @@ public static class TransportRHubExtensions
 
         // Register Broker Server
         services.AddSingleton<ITransportRServer, SignalRDataServer>();
+
+        // SignalRDataServer requires an IHubProgressMonitor; TryAdd so a host that registers its
+        // own before Build() keeps seeing it used, whichever order that registration happens in.
+        services.TryAddSingleton<IHubProgressMonitor, NoopHubProgressMonitor>();
         
         // Add SignalR
         services.AddSignalR();
