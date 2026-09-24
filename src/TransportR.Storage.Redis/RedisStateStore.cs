@@ -148,8 +148,10 @@ public class RedisStateStore : IStateStore
 
         // Conditional write on the exact payload read above. A Connect that landed in between
         // stored a different one, the condition fails, and the live registration stands.
-        await _db.StringSetAsync(key, JsonSerializer.Serialize(updated), TtlFor(updated),
-            when: ValueCondition.Equal(json));
+        var tx = _db.CreateTransaction();
+        tx.AddCondition(Condition.StringEqual(key, json));
+        _ = tx.StringSetAsync(key, JsonSerializer.Serialize(updated), TtlFor(updated));
+        _ = await tx.ExecuteAsync();
     }
 
     public async Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)

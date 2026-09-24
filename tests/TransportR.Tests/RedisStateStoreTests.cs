@@ -16,8 +16,7 @@ namespace TransportR.Tests;
 [Trait("Category", "Integration")]
 public class RedisStateStoreTests : IAsyncLifetime
 {
-    private readonly RedisContainer _redis = new RedisBuilder()
-        .WithImage("redis:7.0")
+    private readonly RedisContainer _redis = new RedisBuilder("redis:7.0")
         .Build();
 
     private RedisStateStore _store = null!;
