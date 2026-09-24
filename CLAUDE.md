@@ -17,10 +17,7 @@ the pitch/comparison-to-Kafka-and-gRPC, and the three docs below for the design.
 
 ## Build & Test
 
-Target frameworks: `net8.0;net10.0` for `TransportR`, `TransportR.Client.SignalR`,
-`TransportR.Hub.SignalR`, `TransportR.FlowControl` and `TransportR.Auth.SimpleIdp`; the other six
-libraries under `src/` target `net10.0` only, as do samples and tests. Whether that split is
-intended is an open packaging question, not a statement of intent. CI (`.github/workflows/dotnet.yml`) builds against the .NET 8 SDK.
+Target framework: `net10.0` for all libraries under `src/`, samples and tests. CI (`.github/workflows/dotnet.yml`) builds against the .NET 10 SDK.
 
 ```bash
 dotnet restore
