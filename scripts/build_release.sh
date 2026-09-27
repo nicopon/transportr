@@ -7,6 +7,8 @@ echo "Building solution in Release mode..."
 dotnet build src/TransportR/TransportR.csproj -c Release
 dotnet build src/TransportR.Serialization.MessagePack/TransportR.Serialization.MessagePack.csproj -c Release
 dotnet build src/TransportR.Serialization.Protobuf/TransportR.Serialization.Protobuf.csproj -c Release
+dotnet build src/TransportR.Serialization.Json/TransportR.Serialization.Json.csproj -c Release
+dotnet build src/TransportR.Serialization.Arrow/TransportR.Serialization.Arrow.csproj -c Release
 dotnet build src/TransportR.Hub.SignalR/TransportR.Hub.SignalR.csproj -c Release
 dotnet build src/TransportR.Client.SignalR/TransportR.Client.SignalR.csproj -c Release
 dotnet build src/TransportR.Storage.Redis/TransportR.Storage.Redis.csproj -c Release

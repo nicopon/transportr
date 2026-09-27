@@ -195,17 +195,15 @@ Firewall rules: N × M                  Firewall rules: N + M
 
 ```
 TransportR/
-├── src/                                # NuGet packages
+├── src/                                # Libraries / NuGet packages
 │   ├── TransportR/                     # Core interfaces & protocols
-│   ├── TransportR.Client.SignalR/      # Client implementation
-│   ├── TransportR.Hub.SignalR/         # Hub server
+│   ├── TransportR.Client.SignalR/      # Client implementation & OAuth2 client credentials
+│   ├── TransportR.Hub.SignalR/         # Hub server & group flow control
 │   ├── TransportR.Serialization.MessagePack/
 │   ├── TransportR.Serialization.Protobuf/
 │   ├── TransportR.Serialization.Json/
 │   ├── TransportR.Serialization.Arrow/
-│   ├── TransportR.FlowControl/         # Group-based access control
-│   ├── TransportR.Auth.ClientCredentials/ # OAuth2 client credentials
-│   ├── TransportR.Auth.SimpleIdp/      # Embedded dev Identity Provider
+│   ├── TransportR.Auth.SimpleIdp/      # Embedded dev Identity Provider (non-packable)
 │   └── TransportR.Storage.Redis/       # Redis state store
 │
 ├── samples/                            # Working examples

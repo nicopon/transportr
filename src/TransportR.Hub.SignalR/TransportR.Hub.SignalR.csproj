@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\TransportR\TransportR.csproj" />
@@ -14,19 +14,10 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR.Hub.SignalR</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Nicolas Ponsart</Authors>
-    <Description>SignalR hub implementation for TransportR - High-performance data transport server</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageTags>signalr;transport;streaming;hub</PackageTags>
+    <Description>SignalR hub and HTTP streaming server implementation for TransportR</Description>
+    <PackageTags>signalr;transport;streaming;hub;server;bulk-data;flowcontrol;authorization</PackageTags>
   </PropertyGroup>
 
 </Project>

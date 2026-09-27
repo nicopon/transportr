@@ -1,11 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Description>Embedded OpenIddict IDP for TransportR - simplifies development and single-server deployments</Description>
-    <Authors>Nicolas Ponsart</Authors>
+    <IsPackable>false</IsPackable>
+    <Description>Embedded OpenIddict identity provider for TransportR development and testing</Description>
   </PropertyGroup>
 
   <ItemGroup>

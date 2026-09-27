@@ -12,15 +12,13 @@
 
 ```
 TransportR/                              # Interfaces, protocols, abstractions
-TransportR.Client.SignalR/               # SignalR + HTTP streaming client
-TransportR.Hub.SignalR/                  # SignalR Hub + HTTP API server
+TransportR.Client.SignalR/               # SignalR + HTTP streaming client & OAuth2 auth
+TransportR.Hub.SignalR/                  # SignalR Hub + HTTP API server & group flow control
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
 TransportR.Serialization.Protobuf/       # Protobuf + Zstd serializer
 TransportR.Serialization.Json/           # System.Text.Json serializer (debug)
 TransportR.Serialization.Arrow/          # Apache Arrow RecordBatch serializer
-TransportR.FlowControl/                  # Group-based access control
-TransportR.Auth.ClientCredentials/       # OAuth2 Client Credentials
-TransportR.Auth.SimpleIdp/               # Lightweight Identity Provider
+TransportR.Auth.SimpleIdp/               # Lightweight Identity Provider (dev/test)
 TransportR.Storage.Redis/                # Redis State Store implementation
 ```
 

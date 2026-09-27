@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\TransportR\TransportR.csproj" />
@@ -7,23 +7,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="10.0.12" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR.Client.SignalR</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Nicolas Ponsart</Authors>
     <Description>SignalR client implementation for TransportR - High-performance data transport</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageTags>signalr;transport;streaming</PackageTags>
+    <PackageTags>signalr;transport;streaming;client;bulk-data;auth;oauth2</PackageTags>
   </PropertyGroup>
 
 </Project>

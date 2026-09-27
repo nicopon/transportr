@@ -102,12 +102,10 @@ but `RecordBatch`) is a compile error rather than a throw on the first batch —
 
 ```
 src/TransportR                          # Protocol, interfaces, models — no SignalR/hub deps
-src/TransportR.Client.SignalR           # Client: SignalRDataClient<T>, HubConnectionManager, DataSession, batching
-src/TransportR.Hub.SignalR              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager
+src/TransportR.Client.SignalR           # Client: SignalRDataClient<T>, HubConnectionManager, batching, OAuth2 client credentials
+src/TransportR.Hub.SignalR              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
 src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
-src/TransportR.FlowControl                # Group-based authorization (IFlowControlService)
-src/TransportR.Auth.ClientCredentials      # OAuth2 client-credentials token acquisition (client side)
-src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in)
+src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
 src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
 ```
 

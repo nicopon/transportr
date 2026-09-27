@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-
 using TransportR.Client.SignalR.Internal;
 
 namespace TransportR.Auth.ClientCredentials;
@@ -118,8 +117,6 @@ public class ClientCredentialsTokenProvider : IDisposable
         return tokenElement.GetString() 
             ?? throw new InvalidOperationException("access_token was null");
     }
-
-
 
     public void Dispose()
     {

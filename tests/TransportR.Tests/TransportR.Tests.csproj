@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -36,9 +36,6 @@
     <ProjectReference Include="..\..\src\TransportR.Storage.Redis\TransportR.Storage.Redis.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Arrow\TransportR.Serialization.Arrow.csproj" />
-
-    <ProjectReference Include="..\..\src\TransportR.Auth.ClientCredentials\TransportR.Auth.ClientCredentials.csproj" />
-
     <ProjectReference Include="..\..\src\TransportR.Serialization.Json\TransportR.Serialization.Json.csproj" />
   </ItemGroup>
 
