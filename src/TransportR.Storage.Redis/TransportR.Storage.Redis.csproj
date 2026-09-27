@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\TransportR\TransportR.csproj" />
@@ -10,9 +10,9 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <PackageId>TransportR.Storage.Redis</PackageId>
+    <Description>Redis-backed state store for TransportR high availability</Description>
+    <PackageTags>transport;streaming;redis;high-availability;state-store</PackageTags>
   </PropertyGroup>
 
 </Project>

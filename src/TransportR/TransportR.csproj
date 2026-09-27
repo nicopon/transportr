@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.12" />
@@ -15,13 +15,8 @@
     
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR</PackageId>
-    <Version>0.1.0</Version>
-    <Authors>Nicolas Ponsart</Authors>
-    <Description>Core library for TransportR - High-performance data transport over SignalR</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/nicopon/TransportR</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageTags>signalr;transport;streaming</PackageTags>
+    <Description>Core library for TransportR - High-performance data transport protocol and contracts</Description>
+    <PackageTags>signalr;transport;streaming;bulk-data</PackageTags>
   </PropertyGroup>
 
 </Project>

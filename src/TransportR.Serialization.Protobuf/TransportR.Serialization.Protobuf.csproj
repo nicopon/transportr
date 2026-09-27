@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\TransportR\TransportR.csproj" />
@@ -11,9 +11,9 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <PackageId>TransportR.Serialization.Protobuf</PackageId>
+    <Description>Protobuf-net batch serializer for TransportR</Description>
+    <PackageTags>transport;streaming;serialization;protobuf</PackageTags>
   </PropertyGroup>
 
 </Project>
