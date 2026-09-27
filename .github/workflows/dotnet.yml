@@ -75,10 +75,14 @@ jobs:
       with:
         dotnet-version: 10.0.x
     - name: Publish to NuGet.org
-      if: ${{ secrets.NUGET_API_KEY != '' }}
       env:
         NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-      run: dotnet nuget push ./artifacts/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      run: |
+        if [ -n "$NUGET_API_KEY" ]; then
+          dotnet nuget push ./artifacts/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        else
+          echo "NUGET_API_KEY not set, skipping NuGet.org publish"
+        fi
     - name: Publish to GitHub Packages
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
