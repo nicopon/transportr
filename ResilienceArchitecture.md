@@ -181,7 +181,7 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 
 **Out of the box there is therefore no backpressure anywhere**, and a consumer slower than its producer is absorbed in memory until something dies. **Set both ends: either one alone moves the backlog to the other process.** The receiver's bound stops the sender's HTTP write through the chain above, but not its serialization worker, which never waits — serialized batches queue behind the blocked write. Measured: `slow-receiver` holds its receiver at 193 MB while its sender, which it does not assert, peaks at 451 MB; an integration moving Arrow batches reached 1 693 MB on the sender with the receiver bounded alone, and 1 038 MB on the receiver with neither. The send window is what stops the worker, and the receiver's bound is what the window cannot see.
 
-A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly.
+A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one; without the `Abort` the receiver reopens a stream the hub answers at once, with no end.
 
 The sender's window is taken **by the producer, before serialization**. Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
 
@@ -205,6 +205,7 @@ That placement is also why the sender's window cannot count bytes: the serialize
 | `CompleteAck` | 0x04 | Acknowledgment of Complete |
 | `Ping` | 0x05 | Stream Handshake Request |
 | `Pong` | 0x06 | Stream Handshake Response (+ Resume Offset) |
+| `Abort` | 0x07 | The sending end gave up; `BatchId` carries an `AbortReason` |
 
 ---
 

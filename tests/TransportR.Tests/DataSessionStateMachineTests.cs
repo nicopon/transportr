@@ -92,6 +92,23 @@ public class DataSessionStateMachineTests
         Assert.Equal(SessionState.Failed, _fsm.CurrentState);
     }
 
+    [Theory]
+    [InlineData(SessionState.ReceiverCompleteReceived)]
+    [InlineData(SessionState.ReceiverAckSent)]
+    public void OnAborted_FromAReceiverClosingState_MovesToFailed(SessionState state)
+    {
+        // A sender that gave up on its stall bound sends this Abort to a receiver that may already
+        // hold every batch but whose CompleteAck never arrived. That receiver fails with the sender
+        // rather than reaching Completed on the hub's closing EOF: the two ends agree on a failure
+        // instead of a sender reporting one and a receiver reporting success.
+        _fsm.TransitionTo(state);
+
+        var result = _fsm.OnAborted();
+
+        Assert.True(result);
+        Assert.Equal(SessionState.Failed, _fsm.CurrentState);
+    }
+
     [Fact]
     public void OnAborted_FromCompleted_ReturnsFalseAndKeepsState()
     {

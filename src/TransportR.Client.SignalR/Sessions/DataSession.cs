@@ -58,6 +58,12 @@ internal class DataSession<T> : IDataSession<T>
     /// </summary>
     private volatile string? _abortReason;
 
+    /// <summary>
+    /// Set once this side has put an Abort on its outgoing channel, so that disposal knows to give
+    /// it time to reach the wire.
+    /// </summary>
+    private volatile bool _abortQueued;
+
     private readonly Timer _heartbeatTimer;
     private int _disposed;
 
@@ -205,6 +211,7 @@ internal class DataSession<T> : IDataSession<T>
             if (stalledFor < stallTimeout) continue;
 
             _fsm.TransitionTo(SessionState.Failed);
+            AbortPeer(AbortReason.AcknowledgementTimeout);
             _batchProcessor.CompleteSenderChannel();
             _batchProcessor.AbandonSender();
 
@@ -316,6 +323,7 @@ internal class DataSession<T> : IDataSession<T>
             if (stalledFor >= stallTimeout)
             {
                 _fsm.TransitionTo(SessionState.Failed);
+                AbortPeer(AbortReason.AcknowledgementTimeout);
                 _batchProcessor.CompleteSenderChannel();
                 throw new TransferFailedException(
                     TransferId,
@@ -406,6 +414,17 @@ internal class DataSession<T> : IDataSession<T>
         }
     }
 
+    /// <summary>
+    /// Tells the peer this side is giving up. Must precede completing the send channel: the write
+    /// loop ends the data stream cleanly when the channel completes, and a clean end with nothing
+    /// before it is what the hub relays as a finished transfer.
+    /// </summary>
+    private void AbortPeer(AbortReason reason)
+    {
+        _batchProcessor.EnqueueAbort(reason);
+        _abortQueued = true;
+    }
+
     public async ValueTask DisposeAsync()
     {
         // Releasing twice is the documented pattern meeting a defensive call, not a caller error,
@@ -421,15 +440,19 @@ internal class DataSession<T> : IDataSession<T>
                 "Session released before the transfer ended - transfer abandoned (Transfer={TransferId})",
                 TransferId);
 
-            // Best-effort: give the peer a reason to fail on instead of a silence it can only read
-            // as a stall. Bounded because a stream stuck on backpressure must not hang disposal,
-            // and DisposeAsync never throws. Waits on the write direction's own HTTP request, not
-            // on the local flush: the server does not see clean EOF until it has read the request
-            // to completion, and cancelling the streams before that turns the clean close into a
-            // rupture the peer never receives Abort from.
+            AbortPeer(AbortReason.ReleasedBeforeCompletion);
+        }
+
+        // Best-effort: give the peer a reason to fail on instead of a silence it can only read as a
+        // stall. Bounded because a stream stuck on backpressure must not hang disposal, and
+        // DisposeAsync never throws. Waits on the write direction's own HTTP request, not on the
+        // local flush: the server does not see clean EOF until it has read the request to
+        // completion, and cancelling the streams before that turns the clean close into a rupture
+        // the peer never receives Abort from.
+        if (_abortQueued)
+        {
             try
             {
-                _batchProcessor.EnqueueAbort(AbortReason.ReleasedBeforeCompletion);
                 if (_httpStreamManager.WriteTask is { } writeTask)
                 {
                     await writeTask.WaitAsync(AbortWriteTimeout);

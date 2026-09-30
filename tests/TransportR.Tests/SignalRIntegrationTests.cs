@@ -261,6 +261,58 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task Receiver_FailsFast_WhenTheSenderFailsOnItsStallBound()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        // A window of one batch and a short bound: the sender gives up as soon as the receiver stops
+        // acknowledging, which is what the bound is for.
+        await using var sender = CreateClient(handler, "http://localhost", "sender", o =>
+        {
+            o.MaxInFlightBatches = 1;
+            o.CompleteStallTimeout = TimeSpan.FromMilliseconds(500);
+        });
+
+        // A batch is acknowledged only once it lands in the receive buffer. With room for one item
+        // and nobody consuming, the second batch is delivered but never acknowledged.
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver",
+            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        var receive = await receiveHandle.Task;
+
+        await send.SendAsync("item-1");
+        await send.SendAsync("item-2");
+        await Assert.ThrowsAsync<TransferFailedException>(
+            () => send.SendAsync("item-3").WaitAsync(TimeSpan.FromSeconds(10)));
+        await send.DisposeAsync();
+
+        // The consumer only starts now, after the sender has failed, so the receiver has not yet
+        // read past the batch it was parked on.
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync())
+            {
+            }
+            await receive.WaitForCompletionAsync();
+        });
+
+        var outcome = await Task.WhenAny(consumer, Task.Delay(TimeSpan.FromSeconds(10)));
+        Assert.True(outcome == consumer,
+            $"The receiver reached no outcome 10s after its sender failed (status: {receiver.GetTransfers().Single().Status}).");
+        await Assert.ThrowsAsync<TransferFailedException>(() => consumer);
+
+        await receive.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Abort_WhenSenderReleasesMidFlight_MakesTheReceiverFailFast()
     {
         using var host = TestHubServerFactory.CreateHost();
