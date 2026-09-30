@@ -55,9 +55,19 @@ they cannot take the other role's place. Issue one IdP client per participant to
 
 ## Token Renewal
 
-- Hub tracks token expiry from `exp` claim
-- Client renews automatically 5 minutes before expiry
-- `InitTransfer()` rejects expired tokens
+- The hub records a token's `exp` claim when the client registers (`Connect`).
+- `InitTransfer()` refuses a client whose recorded expiry has passed, and so does a transfer the host
+  opens.
+- The client gets a fresh token when something asks it for one (a new connection, a stream request),
+  and only renews it within 5 minutes of expiry (`TokenRefreshThreshold`). A client that is connected
+  and idle asks for none.
+
+**Known limitation.** A client that stays connected past its token's lifetime without opening a
+transfer is refused by `InitTransfer()` ("Source client token has expired") until it reconnects, which
+registers it again with a fresh token. The client sends no token over an established connection, so
+nothing renews the recorded expiry there, and nothing closes a connection whose token has expired: its
+streams and its registration stay up, and only new transfers are refused. Keep the token lifetime
+longer than the time a client can sit idle, or have an idle client reconnect.
 
 ---
 
