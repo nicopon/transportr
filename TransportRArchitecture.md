@@ -179,6 +179,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | CompleteAck | 0x04 | Acknowledgment of Complete (ensures reliable termination) |
 | Ping | 0x05 | Connection probe (sender → receiver) |
 | Pong | 0x06 | Connection probe response |
+| Abort | 0x07 | The sending end gave up; `BatchId` carries an `AbortReason` |
 
 > **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. The included `TransportR.Serialization.MessagePack` uses MessagePack with Lz4 compression for high performance.
 

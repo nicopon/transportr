@@ -90,7 +90,8 @@ so authorization and the cleanup of a half-done handshake cannot drift between t
 Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHeader.cs`:
 Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload. `ChunkIO`
 (`src/TransportR/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
-`BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`) are the whole vocabulary. Payload
+`BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`) are the whole vocabulary; `Abort`
+carries an `AbortReason` in `BatchId`. Payload
 serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,
 Protobuf,Json,Arrow}` are interchangeable implementations; the hub never needs to know which one is
 in use because it never deserializes the payload. The item type sits on the interface, not on the
