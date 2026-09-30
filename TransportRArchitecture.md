@@ -94,6 +94,28 @@ TransportR clearly separates responsibilities between coordination and transfer:
 | **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
 
+### Data Plane Transport: HTTP/1.1
+
+The data-plane streams are HTTP/1.1, and the client says so on every stream request (`HttpVersion.Version11`,
+`RequestVersionExact`, in `HttpStreamManager`). It is a decision, not a default left alone:
+
+- **HTTP/2 has nothing to offer this traffic.** A participant holds two long-lived streams per transfer:
+  there is nothing to multiplex and no request header worth compressing.
+- **HTTP/2 caps an upload at its flow-control window.** With Kestrel's default windows, one sender-to-hub stream
+  reached 16 MB/s at 20 ms round-trip and 4.7 MB/s at 80 ms (h2c, loopback behind a latency-injecting TCP proxy).
+  A hub host can raise `Http2.InitialStreamWindowSize`; HTTP/1.1 needs no such tuning.
+- **The client's write side relies on HTTP/1.1.** A POST's response is read as the end of its body
+  (`HttpStreamManager`). Under HTTP/2 the response is delivered while the body is still being written, so an
+  early 2xx would end the stream with a writer still running.
+
+For a deployment:
+
+- Kestrel may offer HTTP/2 to other clients; TransportR clients do not ask for it.
+- Write requests carry `Expect: 100-continue`. Over HTTP/1.1 it is what lets the client see a cut on a stream it
+  has nothing to write on (see "Disconnection Detection" in `ResilienceArchitecture.md`). A reverse proxy in front
+  of the hub must accept it: one that answers `417` fails every write stream.
+- A reverse proxy that speaks HTTP/2 to the hub is not covered: that hop has not been validated.
+
 ### Resilience & Reliability
 
 TransportR utilizes a **Dataplane First** resilience strategy:

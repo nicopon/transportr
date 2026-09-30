@@ -228,6 +228,12 @@ internal class HttpStreamManager : IAsyncDisposable
         var request = new HttpRequestMessage(isWrite ? HttpMethod.Post : HttpMethod.Get, url);
         request.Headers.Add("X-Connection-Type", type.ToString());
 
+        // Stated rather than inherited: the write side below reads a response as the end of the
+        // request body, which only HTTP/1.1 guarantees, and HTTP/2 caps an upload at its flow-control
+        // window. See "Data plane transport" in TransportRArchitecture.md.
+        request.Version = HttpVersion.Version11;
+        request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+
         // Cookie header handled by shared CookieContainer in HttpClient
 
 

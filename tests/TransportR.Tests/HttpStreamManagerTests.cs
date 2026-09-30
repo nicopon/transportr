@@ -111,7 +111,58 @@ public class HttpStreamManagerTests
         Assert.False(result.IsRetryable);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task StartStreams_AsksForHttp11Exactly_InBothDirections(bool isSender)
+    {
+        // The data plane is HTTP/1.1 on purpose, and the defaults are not what says so: a request
+        // built by hand ignores the client's DefaultRequestVersion, and "1.1 or lower" is silent
+        // about higher ones. Both directions are checked because each has its own request.
+        var capture = new CapturingHandler();
+        var client = new HttpClient(capture)
+        {
+            DefaultRequestVersion = HttpVersion.Version20,
+            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrHigher,
+        };
+        var context = new StubSessionContext(client);
+        await using var manager = new HttpStreamManager(context, context, _transferId, "http://test/data");
+
+        manager.StartStreams(
+            isSender,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => Task.CompletedTask,
+            sessionToken: CancellationToken.None);
+        await (isSender ? manager.SenderTask! : manager.ReceiverTask!);
+
+        Assert.Equal(2, capture.Requests.Count);
+        Assert.All(capture.Requests, request =>
+        {
+            Assert.Equal(HttpVersion.Version11, request.Version);
+            Assert.Equal(HttpVersionPolicy.RequestVersionExact, request.VersionPolicy);
+        });
+    }
+
     // ========== STUBS ==========
+
+    private class CapturingHandler : HttpMessageHandler
+    {
+        private readonly List<(Version Version, HttpVersionPolicy VersionPolicy)> _requests = new();
+
+        public IReadOnlyList<(Version Version, HttpVersionPolicy VersionPolicy)> Requests
+        {
+            get { lock (_requests) return _requests.ToList(); }
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            lock (_requests) _requests.Add((request.Version, request.VersionPolicy));
+
+            // A write request has to be consumed, as the server would, or its body callback never runs.
+            if (request.Content != null) await request.Content.CopyToAsync(Stream.Null, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Array.Empty<byte>()) };
+        }
+    }
 
     private class StubHttpMessageHandler : HttpMessageHandler
     {

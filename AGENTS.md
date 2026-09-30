@@ -80,6 +80,10 @@ data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid
 race conditions — don't reintroduce a control-plane message for something the data plane already
 decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`).
 
+The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`: do not enable HTTP/2 without reading
+"Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md` (an upload is capped by the flow-control
+window, and the write side relies on a response meaning the body is over).
+
 The handshake itself lives in `SignalRTransferInitiator`, not in the hub: `CommandHub.InitTransfer`
 drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
 which opens a transfer between two registered clients without either asking. One implementation,
