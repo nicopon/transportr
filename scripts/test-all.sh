@@ -8,8 +8,8 @@
 # Steps:
 #   1. Initialize test data (2,000,000 orders) and download tools
 #   2. Build solution in Release mode
-#   3. Run all scenarios: default, embedded-idp, oidc, chaos, chaos-bounded, slow-receiver,
-#      ha-redis
+#   3. Run all scenarios: default, embedded-idp, oidc, data-plane-probe, chaos, chaos-bounded,
+#      chaos-cut-sender, chaos-cut-receiver, slow-receiver, ha-redis
 #
 
 set -e
@@ -27,7 +27,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Scenarios to run (in order)
-SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded slow-receiver ha-redis"
+SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded chaos-cut-sender chaos-cut-receiver slow-receiver ha-redis"
 
 # Track results
 FAILED=0

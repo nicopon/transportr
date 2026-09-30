@@ -67,6 +67,8 @@ Unified benchmark runner with scenario support.
 | `oidc` | OIDC authentication with TestIdp |
 | `data-plane-probe` | OIDC run that asks the live hub to refuse anonymous and wrong-role stream requests |
 | `chaos` | Network chaos simulation |
+| `chaos-cut-sender` | Holds the sender's link silent (nothing passes, nothing is refused), then closes its connections; the transfer must resume and deliver every line |
+| `chaos-cut-receiver` | The same cut on the receiver's link |
 | `ha` | HA mode (2 Hubs + TestProxy) with sticky sessions |
 | `ha-redis` | Redis State Store (single hub, for HA preparation) |
 | `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
