@@ -48,12 +48,20 @@ create_hub_proxy() {
     
     local cli="$PROJECT_ROOT/tools/toxiproxy-cli"
     
-    # Create proxy - proxy name is the last positional argument
-    $cli -h "localhost:$TOXIPROXY_PORT" create \
+    # Create proxy - proxy name is the last positional argument. A failed create is tolerated only
+    # if the proxy is there afterwards (a leftover from an earlier run makes it fail); the check
+    # below is what decides, so the CLI's own message is kept for when it does not pass.
+    local create_output
+    create_output=$("$cli" -h "localhost:$TOXIPROXY_PORT" create \
         -l "localhost:$HUB_PROXY_PORT" \
         -u "localhost:$HUB_REAL_PORT" \
-        hub_proxy 2>/dev/null || true
-    
+        hub_proxy 2>&1) || true
+
+    if ! curl -sf "http://localhost:$TOXIPROXY_PORT/proxies/hub_proxy" > /dev/null; then
+        log_error "Hub proxy does not exist after creating it. toxiproxy-cli said: ${create_output:-<nothing>}"
+        return 1
+    fi
+
     log_info "Hub proxy created"
     
     # Apply permanent bandwidth limit (100 Mbps = 12.5 MB/s = 12500 KB/s)
