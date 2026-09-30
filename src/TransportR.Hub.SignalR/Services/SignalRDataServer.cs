@@ -11,6 +11,8 @@ namespace TransportR.Hub.SignalR.Services;
 
 public class SignalRDataServer : ITransportRServer
 {
+    private const string DestinationLostMessage = "The destination of the stream is no longer connected.";
+
     private readonly ILogger<SignalRDataServer> _logger;
     private readonly IHubContext<CommandHub> _hubContext;
     private readonly ITransferManager _transferManager;
@@ -60,6 +62,9 @@ public class SignalRDataServer : ITransportRServer
                 throw new OperationCanceledException($"Transfer {transferId} was cancelled during connection");
             }
 
+            // Taken before the stream: a reset landing between the two reads then cuts this source
+            // instead of leaving it writing to a stream that nobody reads.
+            var receiverToken = bridge.ReceiverToken;
             var receiverOutput = await bridge.WaitForReceiverStream().ConfigureAwait(false);
             _logger.LogInformation("BRIDGE: Piping {BridgeKey}", bridgeKey);
 
@@ -69,7 +74,10 @@ public class SignalRDataServer : ITransportRServer
                 inputToCopy = new CountingStream(input, bytes => _progressMonitor.OnBytesTransferred(bytes));
             }
 
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, bridge.SenderToken);
+            // The bridge does not reach across to the source when its destination leaves; a source
+            // parked on an input that stays silent learns of it only through this token.
+            var senderToken = bridge.SenderToken;
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, senderToken, receiverToken);
             
             try 
             {
@@ -96,11 +104,24 @@ public class SignalRDataServer : ITransportRServer
                 }
                 else // Cancelled
                 {
-                    _logger.LogInformation("BRIDGE: Sender POST was cancelled {BridgeKey}", bridgeKey);
-                    return;
+                    // Told apart by exclusion: a write to a response that has gone can fail with a
+                    // cancellation of its own before the destination's token has been cancelled.
+                    if (cancellationToken.IsCancellationRequested || senderToken.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("BRIDGE: Sender POST was cancelled {BridgeKey}", bridgeKey);
+
+                        // Ends quietly, but the registration must not outlive the request: kept, the
+                        // bridge stays Active on a source nobody is on and is never judged idle. A
+                        // source that was replaced is no longer the current one, so this is a no-op.
+                        bridge.OnDisconnected(connectionId);
+                        return;
+                    }
+
+                    throw new IOException(DestinationLostMessage);
                 }
             }
-            catch (Exception copyEx)
+            // An IOException here is a lost destination, reported once by the handler below.
+            catch (Exception copyEx) when (copyEx is not IOException)
             {
                 _logger.LogWarning(copyEx, "BRIDGE: CopyToAsync failed/interrupted for {BridgeKey}", bridgeKey);
                 throw;
@@ -122,6 +143,11 @@ public class SignalRDataServer : ITransportRServer
             _logger.LogWarning("BRIDGE: Source Disconnected {BridgeKey} ({Message})", bridgeKey, ex.Message);
             bridge.OnDisconnected(connectionId);
             
+            // The source is healthy and answers for nothing here, but a normal end would tell its
+            // client the stream is over rather than that it has to reopen. A failing read never gets
+            // this far (it is a Rupture above), so an IOException is the destination's.
+            if (ex is IOException) throw;
+
             // Note: We do NOT send StreamDisconnected notifications anymore.
             // Clients are expected to detect IOException and reconnect autonomously.
         }
@@ -157,6 +183,14 @@ public class SignalRDataServer : ITransportRServer
             {
                  _logger.LogInformation("BRIDGE: Sink Closing cleanly (Sender finished) {BridgeKey}", bridgeKey);
             }
+            else
+            {
+                // WhenAny hands back the cancelled delay rather than throwing, so nothing below
+                // releases the registration. Left in place, the bridge stays Active on a response
+                // nobody reads and is never judged idle.
+                _logger.LogInformation("BRIDGE: Sink cancelled {BridgeKey}", bridgeKey);
+                bridge.OnDisconnected(connectionId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -174,13 +208,16 @@ public class SignalRDataServer : ITransportRServer
     private async Task<StreamEndReason> CopyAndFlushAsync(Stream source, Stream destination, int bufferSize, CancellationToken token)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
+        var writing = false;
         try
         {
             int bytesRead;
             while ((bytesRead = await source.ReadAsync(new Memory<byte>(buffer), token).ConfigureAwait(false)) != 0)
             {
+                writing = true;
                 await destination.WriteAsync(new ReadOnlyMemory<byte>(buffer, 0, bytesRead), token).ConfigureAwait(false);
                 await destination.FlushAsync(token).ConfigureAwait(false);
+                writing = false;
             }
             // ReadAsync returned 0 = Clean EOF
             return StreamEndReason.CleanEOF;
@@ -188,6 +225,12 @@ public class SignalRDataServer : ITransportRServer
         catch (OperationCanceledException)
         {
             return StreamEndReason.Cancelled;
+        }
+        // Thrown from a handler, so the Rupture handlers below do not see it. A Rupture is the source's
+        // own connection failing; here the source is fine and the peer it writes to is not.
+        catch (Exception ex) when (writing && (ex is IOException or ObjectDisposedException))
+        {
+            throw new IOException(DestinationLostMessage, ex);
         }
         catch (IOException)
         {

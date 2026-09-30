@@ -97,8 +97,16 @@ public class StreamController : ControllerBase
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in StreamController.Send (Transfer: {TransferId})", transferId);
-            Response.StatusCode = 500;
+            // An IOException is a peer's connection failing, which the server has already reported as
+            // a warning; anything else is a fault of the hub and keeps its trace.
+            if (ex is not IOException)
+            {
+                _logger.LogError(ex, "Error in StreamController.Send (Transfer: {TransferId})", transferId);
+            }
+
+            // A status written while the client is still sending its body reaches it late or not at
+            // all over HTTP/1.1; a connection that closes is what it reliably reacts to.
+            HttpContext.Abort();
         }
     }
 

@@ -111,6 +111,50 @@ public class SignalRDataServerTests
     }
 
     [Fact]
+    public async Task SendCancelled_ReleasesTheSourceRegistration()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        using var request = new CancellationTokenSource();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, request.Token);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        // The source's client is gone. Its request ending is an ordinary end for the controller, but
+        // the registration it left has to go: kept, the bridge stays Active for a stream nobody is
+        // on, is never judged idle, and the receiver waits on it for good.
+        request.Cancel();
+        await EndsAsync(send);
+
+        Assert.Equal(BridgeState.WaitingForSender, bridge.State);
+    }
+
+    [Fact]
+    public async Task SendCancelledAfterBeingReplaced_LeavesTheNewSource()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var firstInput = new PushedStream();
+        var first = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, firstInput, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        // The reconnected client takes the first source's place. That ends the first one's wait;
+        // whatever it does on the way out has to be about its own registration, not the bridge's
+        // current one.
+        using var secondInput = new PushedStream();
+        var second = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, secondInput, CancellationToken.None);
+        await EndsAsync(first);
+        await Task.Delay(100);
+
+        Assert.Equal(BridgeState.Active, bridge.State);
+        Assert.False(second.IsCompleted);
+    }
+
+    [Fact]
     public Task SourceWritingToAResetDestination_EndsAbnormally() =>
         AssertSourceEndsWhenItsDestinationFailsAsync(new IOException("destination reset"));
 

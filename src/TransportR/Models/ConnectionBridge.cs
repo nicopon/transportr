@@ -5,7 +5,9 @@ namespace TransportR.Models;
 
 /// <summary>
 /// Represents a bridge between sender and receiver streams.
-/// When either side disconnects, the bridge cancels both streams to ensure synchronized reconnection.
+/// A disconnection ends only the stream generation of the side that left; its peer stays registered.
+/// The bridge does not reach across: the copy loop of the source has to notice that its destination
+/// is gone, by observing <see cref="ReceiverToken"/>, or it keeps writing to a stream nobody reads.
 /// </summary>
 public class ConnectionBridge
 {
@@ -118,8 +120,8 @@ public class ConnectionBridge
     }
 
     /// <summary>
-    /// Called when either side disconnects. Cancels both streams and resets for reconnection.
-    /// This ensures both parties reconnect together.
+    /// Called when either side disconnects. Cancels the stream generation of that side only and resets
+    /// it for reconnection; the peer stays registered on its own generation.
     /// Only resets if the disconnecting party is the CURRENTLY active one.
     /// </summary>
     public void OnDisconnected(Guid connectionId)
