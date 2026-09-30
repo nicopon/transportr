@@ -234,13 +234,27 @@ fi
 if [ "$ENABLE_CHAOS" == "true" ]; then
     create_hub_proxy || exit 1
     
-    # Override client URLs to use proxy
-    export Sender__HubUrl="http://localhost:$HUB_PROXY_PORT"
-    export Receiver__HubUrl="http://localhost:$HUB_PROXY_PORT"
-    log_info "Clients will connect through Toxiproxy (port $HUB_PROXY_PORT)"
-    
-    # Start chaos injection loop
-    start_chaos_injection
+    # Override client URLs to use proxy. Only the .env files set CHAOS_CLIENTS: a fault that hits
+    # one end while the other stays on the direct route is a different fault from one that hits both.
+    case "${CHAOS_CLIENTS:-both}" in
+        both)     PROXIED_CLIENTS="sender receiver" ;;
+        sender)   PROXIED_CLIENTS="sender" ;;
+        receiver) PROXIED_CLIENTS="receiver" ;;
+        *) log_error "Unknown CHAOS_CLIENTS: $CHAOS_CLIENTS (both, sender or receiver)"; exit 1 ;;
+    esac
+    for client in $PROXIED_CLIENTS; do
+        case "$client" in
+            sender)   export Sender__HubUrl="http://localhost:$HUB_PROXY_PORT" ;;
+            receiver) export Receiver__HubUrl="http://localhost:$HUB_PROXY_PORT" ;;
+        esac
+    done
+    log_info "Through Toxiproxy (port $HUB_PROXY_PORT): $PROXIED_CLIENTS"
+
+    case "${CHAOS_PROGRAM:-loop}" in
+        loop) start_chaos_injection ;;
+        hold) ;;  # started below, once the sender is running
+        *) log_error "Unknown CHAOS_PROGRAM: $CHAOS_PROGRAM (loop or hold)"; exit 1 ;;
+    esac
 fi
 
 # Start Receivers
@@ -248,6 +262,10 @@ start_receivers "$NUM_RECEIVERS"
 
 # Start Sender
 start_sender
+
+if [ "$ENABLE_CHAOS" == "true" ] && [ "${CHAOS_PROGRAM:-loop}" == "hold" ]; then
+    start_hold_injection "${CHAOS_HOLD_START_SECONDS:?}" "${CHAOS_HOLD_SECONDS:?}"
+fi
 
 # Data plane probe: runs against the live transfer, so it has to sit between the sender starting
 # and the wait for completion.
@@ -263,8 +281,18 @@ if [ "$SAMPLE_RSS" == "true" ] || [ -n "$MAX_RECEIVER_RSS_MB" ] || [ -n "$MAX_SE
     start_rss_sampler
 fi
 
-# Wait for receivers to complete
-wait_for_receivers
+# Wait for receivers to complete. A scenario that expects a fault to be survived declares a
+# deadline: without one, a receiver whose sender gave up is only released by the hub's bridge
+# timeout, minutes later, and the run reads as hung rather than failed.
+if ! wait_for_receivers; then
+    log_error "--- What the sender said ---"
+    if [ -n "$SENDER_PID" ] && ps -p "$SENDER_PID" > /dev/null 2>&1; then
+        log_error "Sender is still running."
+    fi
+    grep -h "TRANSFER FAILED\|failed\|Failed" "$OUTPUT_DIR"/sender*.log 2>/dev/null | sort -u | head -n 5
+    log_error "-----------------------------"
+    exit 1
+fi
 stop_rss_sampler
 
 # Validation
@@ -296,6 +324,20 @@ for f in "$OUTPUT_DIR"/orders_*.csv; do
     fi
     TOTAL_LINES=$((TOTAL_LINES + FILE_LINES))
 done
+
+# A single fault is only a test if it fell while the transfer was under way. Both moments are
+# recorded with the sender's liveness by start_hold_injection; a hold that fired after the sender
+# had finished proves nothing, whatever the verdict.
+if [ "$ENABLE_CHAOS" == "true" ] && [ "${CHAOS_PROGRAM:-loop}" == "hold" ]; then
+    events="$OUTPUT_DIR/chaos-events.log"
+    if ! grep -q "^held sender_alive=yes" "$events" 2>/dev/null \
+       || ! grep -q "^released sender_alive=yes" "$events" 2>/dev/null; then
+        log_error "❌ Error: the fault did not fall mid-transfer. chaos-events.log:"
+        cat "$events" >&2 2>/dev/null
+        exit 1
+    fi
+    log_info "Fault landed mid-transfer: $(tr '\n' ';' < "$events")"
+fi
 
 assert_peak_rss receiver "$MAX_RECEIVER_RSS_MB" || exit 1
 assert_peak_rss sender "$MAX_SENDER_RSS_MB" || exit 1

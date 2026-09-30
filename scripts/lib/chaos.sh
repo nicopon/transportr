@@ -133,6 +133,66 @@ remove_timeout() {
         > /dev/null 2>&1 || true
 }
 
+# Hold every byte in both directions, refusing nothing: a cable pulled and not yet replugged as
+# each end sees it. `inject_timeout` cannot stand in for this - Toxiproxy applies a toxic to the
+# downstream only unless told otherwise, so the clients' uploads would keep flowing.
+# Non-zero when a toxic was not created, because a fault that never happened would let the
+# scenario pass for the wrong reason.
+inject_silent_hold() {
+    local stream
+    for stream in downstream upstream; do
+        curl -sf -X POST "http://localhost:$TOXIPROXY_PORT/proxies/hub_proxy/toxics" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"chaos_hold_$stream\",\"type\":\"timeout\",\"stream\":\"$stream\",\"attributes\":{\"timeout\":0}}" \
+            > /dev/null || return 1
+    done
+    log_info "Holding the hub proxy silent"
+}
+
+# End the hold by closing every connection that went through it. Removing the toxics alone would
+# hand the held bytes on to connections the clients may be about to give up on, which is a
+# different fault: the one being reproduced is a link that comes back with its connections closed.
+# The proxy is disabled while the toxics are still attached so that nothing is delivered on the
+# way out, and enabled again once they are gone.
+release_silent_hold() {
+    local base="http://localhost:$TOXIPROXY_PORT/proxies/hub_proxy"
+    curl -sf -X POST "$base" -H "Content-Type: application/json" -d '{"enabled":false}' > /dev/null || return 1
+    curl -s -X DELETE "$base/toxics/chaos_hold_downstream" > /dev/null || true
+    curl -s -X DELETE "$base/toxics/chaos_hold_upstream" > /dev/null || true
+    curl -sf -X POST "$base" -H "Content-Type: application/json" -d '{"enabled":true}' > /dev/null || return 1
+    log_info "Released the hub proxy, connections closed"
+}
+
+# One fault instead of a loop. Started once the sender is running, so that the delay is counted
+# from the transfer and not from the setup. Each moment is written to chaos-events.log together
+# with whether the sender was still alive, which is what lets the runner tell a fault that landed
+# mid-transfer from one that fired after the transfer was over.
+start_hold_injection() {
+    local start_after=$1 hold_for=$2
+    local events="${OUTPUT_DIR:-output}/chaos-events.log"
+    : > "$events"
+
+    log_step "Scheduling one silent hold of ${hold_for}s, ${start_after}s after the sender started..."
+    (
+        sleep "$start_after"
+        if inject_silent_hold; then
+            echo "held sender_alive=$(pgrep -f 'Sender.dll' > /dev/null && echo yes || echo no) at=$(date +%s)" >> "$events"
+        else
+            echo "hold_failed at=$(date +%s)" >> "$events"
+            exit 1
+        fi
+        sleep "$hold_for"
+        if release_silent_hold; then
+            echo "released sender_alive=$(pgrep -f 'Sender.dll' > /dev/null && echo yes || echo no) at=$(date +%s)" >> "$events"
+        else
+            echo "release_failed at=$(date +%s)" >> "$events"
+        fi
+    ) &
+
+    CHAOS_INJECTION_PID=$!
+    register_pid $CHAOS_INJECTION_PID
+}
+
 # Run periodic chaos injection in background
 start_chaos_injection() {
     log_step "Starting chaos injection loop..."

@@ -66,13 +66,31 @@ start_sender() {
     echo $sender_pid
 }
 
-# Wait for receivers to complete
+# Wait for receivers to complete. Without TRANSFER_TIMEOUT_SECONDS there is no deadline; with it,
+# a receiver still running when it expires is a failure and the function returns non-zero.
 wait_for_receivers() {
     log_step "Waiting for transfer to complete..."
-    
+
+    local deadline=""
+    if [ -n "$TRANSFER_TIMEOUT_SECONDS" ]; then
+        deadline=$(( $(date +%s) + TRANSFER_TIMEOUT_SECONDS ))
+    fi
+
     for pid in "${RECEIVER_PIDS[@]}"; do
-        if ps -p $pid > /dev/null 2>&1; then
-            wait $pid 2>/dev/null || true
+        if ! ps -p $pid > /dev/null 2>&1; then
+            continue
         fi
+        if [ -z "$deadline" ]; then
+            wait $pid 2>/dev/null || true
+            continue
+        fi
+        while ps -p $pid > /dev/null 2>&1; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+                log_error "❌ Error: receiver $pid still running ${TRANSFER_TIMEOUT_SECONDS}s after the sender started"
+                return 1
+            fi
+            sleep 1
+        done
+        wait $pid 2>/dev/null || true
     done
 }
