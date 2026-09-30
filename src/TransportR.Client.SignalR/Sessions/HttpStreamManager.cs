@@ -233,6 +233,15 @@ internal class HttpStreamManager : IAsyncDisposable
 
         if (isWrite)
         {
+            // Over HTTP/1.1 nothing reads the socket while a request body is being sent, so a
+            // connection the hub closes is only noticed by the next write - which a sender with a
+            // full window, or a receiver with nothing to acknowledge, may not make for minutes. A
+            // 404 answered before the body is read is lost the same way: the request stays
+            // pending. Expect makes the handler read the response alongside the body, and sends
+            // the request headers at once, so the hub also learns of a stream whose body is still
+            // empty.
+            request.Headers.ExpectContinue = true;
+
             request.Content = new PushStreamContent(async (stream, _, _) =>
             {
                 // Flushed but never disposed, and the stream underneath is never closed: HttpClient
