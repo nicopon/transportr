@@ -1,3 +1,4 @@
+using System.Net;
 using System.Collections.Concurrent;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -55,6 +56,7 @@ var clusters = new[]
 
 builder.Services.AddReverseProxy()
     .LoadFromMemory(routes, clusters);
+builder.Services.AddSingleton<IForwarderHttpClientFactory, FlushingForwarderHttpClientFactory>();
 
 builder.Services.AddSingleton<ProxyStateStore>(stateStore);
 
@@ -235,5 +237,77 @@ public class ProxyStateStore : IStateStore
     {
         _sessions.TryRemove(transferId, out _);
         return Task.CompletedTask;
+    }
+}
+
+
+/// <summary>
+/// YARP copies a request body to the destination without flushing, so a small write that follows a
+/// pause waits in the outbound connection's buffer until more bytes come or the body ends. The
+/// chunks that close a transfer are small and follow the last batch after a pause: the
+/// acknowledgements and the Complete signal of a transfer that had in fact been delivered stalled
+/// behind it. A transform cannot replace the outgoing content, so the handler does.
+/// </summary>
+sealed class FlushingForwarderHttpClientFactory : ForwarderHttpClientFactory
+{
+    protected override HttpMessageHandler WrapHandler(ForwarderHttpClientContext context, HttpMessageHandler handler) =>
+        new FlushingHandler(handler);
+
+    private sealed class FlushingHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Content is { } content)
+            {
+                request.Content = new FlushingContent(content);
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+}
+
+/// <summary>Forwards another content's body, flushing the destination after every write.</summary>
+sealed class FlushingContent : HttpContent
+{
+    private readonly HttpContent _inner;
+
+    public FlushingContent(HttpContent inner)
+    {
+        _inner = inner;
+        foreach (var header in inner.Headers)
+        {
+            Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+    }
+
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+        _inner.CopyToAsync(new FlushOnWriteStream(stream));
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = _inner.Headers.ContentLength ?? -1;
+        return _inner.Headers.ContentLength.HasValue;
+    }
+
+    private sealed class FlushOnWriteStream(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) { inner.Write(buffer, offset, count); inner.Flush(); }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await inner.WriteAsync(buffer, cancellationToken);
+            await inner.FlushAsync(cancellationToken);
+        }
     }
 }
