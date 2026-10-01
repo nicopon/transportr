@@ -53,10 +53,11 @@ internal class DataSession<T> : IDataSession<T>
     private bool _isSender;
 
     /// <summary>
-    /// Set when an Abort chunk arrives, read from another thread by whatever call the peer's abort
-    /// unblocks (SendAsync, CompleteAsync, WaitForCompletionAsync).
+    /// Set when the transfer is failed from outside any call - a peer's Abort, a stream the hub
+    /// refuses for good - and read from another thread by whatever call that unblocks (SendAsync,
+    /// CompleteAsync, WaitForCompletionAsync).
     /// </summary>
-    private volatile string? _abortReason;
+    private volatile string? _failureReason;
 
     /// <summary>
     /// Set once this side has put an Abort on its outgoing channel, so that disposal knows to give
@@ -125,7 +126,7 @@ internal class DataSession<T> : IDataSession<T>
             return Task.CompletedTask;
         };
         _batchProcessor.OnAbortReceived += (reason) => {
-            _abortReason = reason.Describe();
+            _failureReason = reason.Describe();
             if (_fsm.OnAborted())
             {
                 _config.Logger.LogWarning(
@@ -227,10 +228,10 @@ internal class DataSession<T> : IDataSession<T>
     }
 
     /// <summary>
-    /// Awaits a producer task, translating a cancellation neither this call nor its caller
-    /// requested - an Abort abandoning the accumulator, or DisposeAsync doing the same - into
-    /// <see cref="TransferFailedException"/>. A cancellation the caller's own token carries is left
-    /// alone: that one was asked for.
+    /// Awaits a producer task, translating what a transfer that has ended does to it - an Abort or
+    /// DisposeAsync abandoning the accumulator, which cancels a parked call and closes the queue under
+    /// a later one - into <see cref="TransferFailedException"/>. A cancellation the caller's own token
+    /// carries is left alone: that one was asked for.
     /// </summary>
     private async Task AwaitOrTranslateAsync(Task task, CancellationToken callerToken)
     {
@@ -240,9 +241,18 @@ internal class DataSession<T> : IDataSession<T>
         }
         catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
         {
-            throw new TransferFailedException(TransferId, _abortReason ?? "Transfer failed before it could complete.");
+            throw new TransferFailedException(TransferId, FailureMessage);
+        }
+        catch (Exception ex) when (ex is ChannelClosedException or ObjectDisposedException
+            && _fsm.CurrentState is SessionState.Failed or SessionState.Disposed)
+        {
+            throw new TransferFailedException(TransferId, FailureMessage);
         }
     }
+
+    private string FailureMessage =>
+        _failureReason
+        ?? (_fsm.CurrentState == SessionState.Disposed ? ReleasedBeforeCompletion : "Transfer failed before it could complete.");
 
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
     {
@@ -253,7 +263,7 @@ internal class DataSession<T> : IDataSession<T>
             throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
         }
 
-        await _batchProcessor.CompleteSenderAsync(cancellationToken);
+        await AwaitOrTranslateAsync(_batchProcessor.CompleteSenderAsync(cancellationToken), cancellationToken);
         
         // We used to wait for PendingBatches > 0 here, but that causes deadlocks if ACKs are buffered.
         // We now rely on the "Complete" signal to flush the pipe.
@@ -412,6 +422,20 @@ internal class DataSession<T> : IDataSession<T>
         {
             throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
         }
+    }
+
+    /// <summary>
+    /// Fails a transfer this side cannot finish and releases whoever is parked on it. Failing the
+    /// state alone leaves them waiting: nothing else wakes a consumer on an empty buffer or a producer
+    /// on a full window, and the contract has the consumer ask for the outcome only after the
+    /// enumeration ends.
+    /// </summary>
+    private void FailTransfer(string reason)
+    {
+        if (!_fsm.TransitionTo(SessionState.Failed)) return;
+
+        _failureReason = reason;
+        _batchProcessor.Fail(reason);
     }
 
     /// <summary>
@@ -593,7 +617,7 @@ internal class DataSession<T> : IDataSession<T>
                     }
                     else
                     {
-                        _fsm.TransitionTo(SessionState.Failed);
+                        FailTransfer($"The data stream failed permanently: {result.ErrorMessage}");
                     }
                 }
             }

@@ -416,9 +416,19 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     private void HandleAbort(AbortReason reason)
     {
-        _receiveBuffer?.Complete(new TransferFailedException(_transferId, reason.Describe()));
-        AbandonSender();
+        Fail(reason.Describe());
         OnAbortReceived?.Invoke(reason);
+    }
+
+    /// <summary>
+    /// Releases whatever is parked on a transfer that cannot finish: a producer on the send window at
+    /// once, a consumer once it has taken what was already admitted. Ending the enumeration quietly
+    /// instead would tell the consumer it had everything.
+    /// </summary>
+    public void Fail(string reason)
+    {
+        _receiveBuffer?.Complete(new TransferFailedException(_transferId, reason));
+        AbandonSender();
     }
 
     /// <summary>
