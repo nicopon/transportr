@@ -64,6 +64,8 @@ public record TransferParticipants(Guid SenderId, Guid ReceiverId);
 /// </summary>
 public class TransferState
 {
+    private readonly TimeProvider _time;
+
     public string TransferId { get; }
     public DateTime LastActivityUtc { get; private set; }
     public DateTime LastProgressUtc { get; private set; }
@@ -76,38 +78,43 @@ public class TransferState
     public long ItemsReceived { get; private set; }
     public long AcksSent { get; private set; }
 
-    public TransferState(string transferId)
+    public TransferState(string transferId, TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         TransferId = transferId;
-        LastActivityUtc = DateTime.UtcNow;
-        LastProgressUtc = DateTime.UtcNow;
+        LastActivityUtc = Now;
+        LastProgressUtc = LastActivityUtc;
     }
+
+    private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     public void Touch()
     {
-        LastActivityUtc = DateTime.UtcNow;
+        LastActivityUtc = Now;
     }
 
     public void UpdateSender(long items, long acks)
     {
+        var now = Now;
         if (items > ItemsSent || acks > AcksReceived)
         {
-            LastProgressUtc = DateTime.UtcNow;
+            LastProgressUtc = now;
         }
         ItemsSent = items;
         AcksReceived = acks;
-        LastActivityUtc = DateTime.UtcNow;
+        LastActivityUtc = now;
     }
 
     public void UpdateReceiver(long items, long acks)
     {
+        var now = Now;
         if (items > ItemsReceived || acks > AcksSent)
         {
-             LastProgressUtc = DateTime.UtcNow;
+             LastProgressUtc = now;
         }
         ItemsReceived = items;
         AcksSent = acks;
-        LastActivityUtc = DateTime.UtcNow;
+        LastActivityUtc = now;
     }
 }
 

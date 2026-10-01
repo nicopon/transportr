@@ -17,12 +17,16 @@ public class InMemoryStateStore : IStateStore
     private readonly ConcurrentDictionary<string, TransferSession> _sessions = new(); 
 
     private readonly TimeSpan _disconnectedGrace;
+    private readonly TimeProvider _time;
 
-    public InMemoryStateStore(IOptions<ClientRegistryConfiguration>? config = null)
+    public InMemoryStateStore(IOptions<ClientRegistryConfiguration>? config = null, TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         var settings = config?.Value ?? new ClientRegistryConfiguration();
         _disconnectedGrace = TimeSpan.FromSeconds(settings.DisconnectedGraceSeconds);
     }
+
+    private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     // ========== Clients ==========
 
@@ -65,7 +69,7 @@ public class InMemoryStateStore : IStateStore
     private bool IsExpired(ClientRegistration client)
     {
         if (client.DisconnectedAtUtc is not { } disconnectedAt) return false;
-        if (DateTime.UtcNow - disconnectedAt <= _disconnectedGrace) return false;
+        if (Now - disconnectedAt <= _disconnectedGrace) return false;
 
         _clients.TryRemove(client.ClientId, out _);
         _connectionIndex.TryRemove(client.ConnectionId, out _);
@@ -128,7 +132,7 @@ public class InMemoryStateStore : IStateStore
     {
         if (_sessions.TryGetValue(transferId, out var session))
         {
-            if (session.ExpiresAtUtc > DateTime.UtcNow)
+            if (session.ExpiresAtUtc > Now)
                 return Task.FromResult<TransferSession?>(session);
             
             // Lazy expiration
@@ -141,7 +145,7 @@ public class InMemoryStateStore : IStateStore
     {
         if (_sessions.TryGetValue(transferId, out var session))
         {
-            if (session.ExpiresAtUtc > DateTime.UtcNow)
+            if (session.ExpiresAtUtc > Now)
             {
                 _sessions[transferId] = session with { ExpiresAtUtc = newExpiry };
             }

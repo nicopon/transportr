@@ -24,6 +24,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private readonly SignalRTransferInitiator _initiator;
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<CommandHub> _logger;
+    private readonly TimeProvider _time;
 
     public CommandHub(
         IStateStore stateStore,
@@ -33,8 +34,10 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         SignalRTransferInitiator initiator,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
-        IFlowControlService? flowControlService = null)
+        IFlowControlService? flowControlService = null,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _stateStore = stateStore;
         _transferManager = transferManager;
         _identityProvider = identityProvider;
@@ -59,7 +62,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         // The store decides whether the mark still applies: a reconnect can overtake this
         // callback, and writing back a registration read before it would resurrect the dead
         // ConnectionId over the live one.
-        await _stateStore.MarkDisconnectedAsync(Context.ConnectionId, DateTime.UtcNow);
+        await _stateStore.MarkDisconnectedAsync(Context.ConnectionId, _time.GetUtcNow().UtcDateTime);
 
         _logger.LogInformation("Client disconnected: {ConnectionId}", Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
@@ -101,7 +104,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             identity.Groups.ToHashSet(),
             affinityToken,
             identity.TokenExpiry,
-            DateTime.UtcNow,
+            _time.GetUtcNow().UtcDateTime,
             Subject: identity.Subject);
         
         await _stateStore.SaveClientAsync(registration);

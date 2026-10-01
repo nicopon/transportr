@@ -19,10 +19,11 @@ public class ConnectionBridge
     private readonly TaskCompletionSource _completionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly BridgeStateMachine _fsm;
+    private readonly TimeProvider _time;
 
     public string BridgeKey { get; }
     public BridgeState State => _fsm.CurrentState;
-    public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
+    public DateTime LastActivity { get; private set; }
 
     /// <summary>
     /// The token of the sender's current stream generation. Taken under the bridge lock: a reset
@@ -44,11 +45,15 @@ public class ConnectionBridge
 
     public Task CompletionTask => _completionTcs.Task;
 
-    public ConnectionBridge(string bridgeKey, ILogger logger)
+    public ConnectionBridge(string bridgeKey, ILogger logger, TimeProvider? timeProvider = null)
     {
         BridgeKey = bridgeKey;
         _fsm = new BridgeStateMachine(bridgeKey, logger);
+        _time = timeProvider ?? TimeProvider.System;
+        LastActivity = Now;
     }
+
+    private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
     private Guid _currentReceiverId;
     private Guid _currentSenderId;
@@ -70,7 +75,7 @@ public class ConnectionBridge
 
             _fsm.OnReceiverRegistered();
             _currentReceiverId = connectionId;
-            LastActivity = DateTime.UtcNow;
+            LastActivity = Now;
             _receiverStreamTcs.TrySetResult(receiverOutput);
         }
 
@@ -103,7 +108,7 @@ public class ConnectionBridge
 
             _fsm.OnSenderRegistered();
             _currentSenderId = connectionId;
-            LastActivity = DateTime.UtcNow;
+            LastActivity = Now;
             _senderStreamTcs.TrySetResult(senderInput);
         }
 
@@ -145,7 +150,7 @@ public class ConnectionBridge
     {
         if (_fsm.OnSenderLost())
         {
-            LastActivity = DateTime.UtcNow;
+            LastActivity = Now;
         }
 
         if (!_senderCts.IsCancellationRequested)
@@ -163,7 +168,7 @@ public class ConnectionBridge
     {
         if (_fsm.OnReceiverLost())
         {
-            LastActivity = DateTime.UtcNow;
+            LastActivity = Now;
         }
 
         if (!_receiverCts.IsCancellationRequested)

@@ -11,6 +11,7 @@ public class TransferCleanupService : BackgroundService
     private readonly ITransferManager _transferManager;
     private readonly ITransferTerminator _terminator;
     private readonly ILogger<TransferCleanupService> _logger;
+    private readonly TimeProvider _time;
 
     // No activity at all (not even a heartbeat): the peer is gone.
     private readonly TimeSpan _inactivityTimeout;
@@ -24,8 +25,10 @@ public class TransferCleanupService : BackgroundService
         ITransferManager transferManager,
         ITransferTerminator terminator,
         IOptions<DataPlaneConfiguration> config,
-        ILogger<TransferCleanupService> logger)
+        ILogger<TransferCleanupService> logger,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _inactivityTimeout = TimeSpan.FromSeconds(config.Value.TransferInactivityTimeoutSeconds);
         _stalledProgressTimeout = config.Value.StalledProgressTimeoutSeconds is { } stalled
             ? TimeSpan.FromSeconds(stalled)
@@ -42,7 +45,7 @@ public class TransferCleanupService : BackgroundService
             _inactivityTimeout,
             _stalledProgressTimeout?.ToString() ?? "disabled");
 
-        using var timer = new PeriodicTimer(_checkInterval);
+        using var timer = new PeriodicTimer(_checkInterval, _time);
         
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
@@ -59,7 +62,7 @@ public class TransferCleanupService : BackgroundService
 
     private async Task CleanupStaleTransfersAsync(CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         var transfers = _transferManager.GetAllTransfers();
 
         foreach (var transfer in transfers)

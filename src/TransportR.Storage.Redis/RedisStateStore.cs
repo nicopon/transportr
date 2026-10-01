@@ -27,12 +27,15 @@ public class RedisStateStore : IStateStore
     // simply idle between transfers vanished from discovery while still connected.
     private readonly TimeSpan _connectedTtl;
     private readonly TimeSpan _disconnectedGrace;
+    private readonly TimeProvider _time;
 
     public RedisStateStore(
         IConnectionMultiplexer redis,
         ILogger<RedisStateStore> logger,
-        IOptions<ClientRegistryConfiguration>? config = null)
+        IOptions<ClientRegistryConfiguration>? config = null,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _redis = redis;
         _logger = logger;
         _db = _redis.GetDatabase();
@@ -51,7 +54,7 @@ public class RedisStateStore : IStateStore
     {
         var key = $"{KeyPrefix}sessions:{session.TransferId}";
         var json = JsonSerializer.Serialize(session);
-        var ttl = session.ExpiresAtUtc - DateTime.UtcNow;
+        var ttl = session.ExpiresAtUtc - _time.GetUtcNow().UtcDateTime;
         
         if (ttl <= TimeSpan.Zero)
         {
@@ -76,7 +79,7 @@ public class RedisStateStore : IStateStore
     public async Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
         var key = $"{KeyPrefix}sessions:{transferId}";
-        var ttl = newExpiry - DateTime.UtcNow;
+        var ttl = newExpiry - _time.GetUtcNow().UtcDateTime;
         
         if (ttl <= TimeSpan.Zero)
         {

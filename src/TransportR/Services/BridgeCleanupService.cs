@@ -19,6 +19,7 @@ public class BridgeCleanupService : BackgroundService
     private readonly ITransferManager _transferManager;
     private readonly IBridgeManager _bridgeManager;
     private readonly DataPlaneConfiguration _config;
+    private readonly TimeProvider _time;
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(5);
 
     public BridgeCleanupService(
@@ -27,8 +28,10 @@ public class BridgeCleanupService : BackgroundService
         IStateStore stateStore,
         ITransferManager transferManager,
         IBridgeManager bridgeManager,
-        IOptions<DataPlaneConfiguration> config)
+        IOptions<DataPlaneConfiguration> config,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
         _notifier = notifier;
         _stateStore = stateStore;
@@ -46,7 +49,7 @@ public class BridgeCleanupService : BackgroundService
             try
             {
                 await CleanupStaleBridgesAsync(stoppingToken);
-                await Task.Delay(_checkInterval, stoppingToken);
+                await Task.Delay(_checkInterval, _time, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -55,7 +58,7 @@ public class BridgeCleanupService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in bridge cleanup loop");
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), _time, stoppingToken);
             }
         }
         
@@ -65,7 +68,7 @@ public class BridgeCleanupService : BackgroundService
     private async Task CleanupStaleBridgesAsync(CancellationToken ct)
     {
         var timeout = TimeSpan.FromSeconds(_config.BridgeTimeoutSeconds);
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         
         foreach (var kvp in _bridgeManager.Bridges)
         {

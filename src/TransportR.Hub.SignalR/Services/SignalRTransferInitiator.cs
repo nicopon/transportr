@@ -25,6 +25,7 @@ public class SignalRTransferInitiator : ITransferInitiator
     private readonly IFlowControlService? _flowControlService;
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<SignalRTransferInitiator> _logger;
+    private readonly TimeProvider _time;
 
     public SignalRTransferInitiator(
         IHubContext<CommandHub> hubContext,
@@ -32,8 +33,10 @@ public class SignalRTransferInitiator : ITransferInitiator
         ITransferManager transferManager,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<SignalRTransferInitiator> logger,
-        IFlowControlService? flowControlService = null)
+        IFlowControlService? flowControlService = null,
+        TimeProvider? timeProvider = null)
     {
+        _time = timeProvider ?? TimeProvider.System;
         _hubContext = hubContext;
         _stateStore = stateStore;
         _transferManager = transferManager;
@@ -148,8 +151,8 @@ public class SignalRTransferInitiator : ITransferInitiator
 
         await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId);
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeoutMs);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs), _time);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
             bool receiverReady;
@@ -217,8 +220,8 @@ public class SignalRTransferInitiator : ITransferInitiator
         await _hubContext.Clients.Client(receiver.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
     }
 
-    private static bool IsTokenExpired(ClientRegistration client)
+    private bool IsTokenExpired(ClientRegistration client)
     {
-        return client.TokenExpiry.HasValue && DateTime.UtcNow > client.TokenExpiry.Value;
+        return client.TokenExpiry.HasValue && _time.GetUtcNow().UtcDateTime > client.TokenExpiry.Value;
     }
 }

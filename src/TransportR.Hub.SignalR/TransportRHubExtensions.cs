@@ -118,6 +118,10 @@ public static class TransportRHubExtensions
     /// </summary>
     public static DataHubBuilder AddDataHub(this IServiceCollection services)
     {
+        // Every hub-side clock and timer reads this one. TryAdd, so that a host registering its own
+        // before or after this call keeps it.
+        services.TryAddSingleton(TimeProvider.System);
+
         // Default state store (in-memory)
         services.AddSingleton<IStateStore, InMemoryStateStore>();
         
