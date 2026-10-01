@@ -59,10 +59,12 @@ public class ConnectionBridge
     private Guid _currentSenderId;
 
     /// <summary>
-    /// Register a receiver stream. Returns false if bridge is cancelled.
+    /// Register a receiver stream and wait for its sender. Returns false if the bridge is cancelled,
+    /// this registration is replaced, or <paramref name="cancellationToken"/> fires first, in which
+    /// case the registration is released.
     ///Provider a unique connection ID to prevent stale disconnects from resetting the bridge.
     /// </summary>
-    public async Task<bool> RegisterReceiverAsync(Stream receiverOutput, Guid connectionId)
+    public async Task<bool> RegisterReceiverAsync(Stream receiverOutput, Guid connectionId, CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
@@ -82,8 +84,13 @@ public class ConnectionBridge
         // Wait for sender input to arrive (or cancellation)
         try
         {
-            await _senderStreamTcs.Task;
+            await _senderStreamTcs.Task.WaitAsync(cancellationToken);
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ReleaseAbandoned(connectionId);
+            return false;
         }
         catch (OperationCanceledException)
         {
@@ -92,10 +99,12 @@ public class ConnectionBridge
     }
 
     /// <summary>
-    /// Register a sender stream. Returns false if bridge is cancelled.
+    /// Register a sender stream and wait for its receiver. Returns false if the bridge is cancelled,
+    /// this registration is replaced, or <paramref name="cancellationToken"/> fires first, in which
+    /// case the registration is released.
     /// Provider a unique connection ID to prevent stale disconnects from resetting the bridge.
     /// </summary>
-    public async Task<bool> RegisterSenderAsync(Stream senderInput, Guid connectionId)
+    public async Task<bool> RegisterSenderAsync(Stream senderInput, Guid connectionId, CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
@@ -115,14 +124,29 @@ public class ConnectionBridge
         // Wait for receiver output to arrive (or cancellation)
         try
         {
-            await _receiverStreamTcs.Task;
+            await _receiverStreamTcs.Task.WaitAsync(cancellationToken);
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ReleaseAbandoned(connectionId);
+            return false;
         }
         catch (OperationCanceledException)
         {
             return false;
         }
     }
+
+    /// <summary>
+    /// Releases a registration whose request went away while it waited for its peer.
+    /// </summary>
+    /// <remarks>
+    /// The peer may never come, and nothing else ends the wait but a cancelled bridge, which for a
+    /// bridge nobody completes is the idle timeout. Until then the registration stands for a stream
+    /// nobody is on, and an in-memory host keeps the client's own cancelled request open as long.
+    /// </remarks>
+    private void ReleaseAbandoned(Guid connectionId) => OnDisconnected(connectionId);
 
     /// <summary>
     /// Called when either side disconnects. Cancels the stream generation of that side only and resets

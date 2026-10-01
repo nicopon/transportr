@@ -132,6 +132,42 @@ public class SignalRDataServerTests
     }
 
     [Fact]
+    public async Task SendCancelledWhileWaitingForADestination_EndsAndReleasesTheSource()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+
+        using var input = new PushedStream();
+        using var request = new CancellationTokenSource();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, request.Token);
+        await UntilAsync(() => bridge.State == BridgeState.WaitingForReceiver);
+
+        // The source's client went away before any destination came. A wait deaf to that holds the
+        // request until the bridge is cancelled, which for a bridge nobody completes is the idle
+        // timeout, and an in-memory host keeps the client's own cancelled request open as long.
+        request.Cancel();
+        await EndsAsync(send);
+
+        Assert.Equal(BridgeState.Idle, bridge.State);
+    }
+
+    [Fact]
+    public async Task ReceiveCancelledWhileWaitingForASource_EndsAndReleasesTheSink()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Control);
+
+        using var request = new CancellationTokenSource();
+        var receive = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Control, new MemoryStream(), request.Token);
+        await UntilAsync(() => bridge.State == BridgeState.WaitingForSender);
+
+        request.Cancel();
+        await EndsAsync(receive);
+
+        Assert.Equal(BridgeState.Idle, bridge.State);
+    }
+
+    [Fact]
     public async Task SendCancelledAfterBeingReplaced_LeavesTheNewSource()
     {
         var hub = new Harness();

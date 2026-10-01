@@ -57,7 +57,7 @@ public class SignalRDataServer : ITransportRServer
 
         try
         {
-            if (!await bridge.RegisterSenderAsync(input, connectionId).ConfigureAwait(false))
+            if (!await bridge.RegisterSenderAsync(input, connectionId, cancellationToken).ConfigureAwait(false))
             {
                 throw new OperationCanceledException($"Transfer {transferId} was cancelled during connection");
             }
@@ -169,7 +169,7 @@ public class SignalRDataServer : ITransportRServer
 
         try
         {
-            if (!await bridge.RegisterReceiverAsync(output, connectionId).ConfigureAwait(false))
+            if (!await bridge.RegisterReceiverAsync(output, connectionId, cancellationToken).ConfigureAwait(false))
             {
                 throw new OperationCanceledException($"Transfer {transferId} was cancelled during connection");
             }
