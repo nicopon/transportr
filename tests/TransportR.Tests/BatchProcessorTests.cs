@@ -31,6 +31,30 @@ public class BatchProcessorTests
     }
 
     [Fact]
+    public async Task ResendUnackedBatches_WhileBatchesAreStillBeingRegistered_DoesNotFail()
+    {
+        // A stream opens while the serialization worker is still registering batches, which is every
+        // stream of a sender that has not finished producing. The resend walks the batches that are
+        // there; one that fails on the others' arrival ends the stream, and a session released at that
+        // moment has no stream left to say so on.
+        await using var processor = CreateProcessor(batchSize: 1);
+        await processor.StartSenderAsync(CancellationToken.None);
+
+        const int batches = 3000;
+        for (var i = 0; i < batches; i++)
+        {
+            await processor.SendAsync("item", CancellationToken.None);
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (processor.UnackedCount < batches)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The batches were not all registered in time.");
+            await processor.ResendUnackedBatchesAsync(Stream.Null, _transferId, false, -1, CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task HandleBatchAck_ShouldRemoveUnackedBatch()
     {
         // Arrange

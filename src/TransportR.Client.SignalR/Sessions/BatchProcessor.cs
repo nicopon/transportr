@@ -440,7 +440,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public async Task ResendUnackedBatchesAsync(Stream outputStream, Guid transferGuid, bool didPingPong, int nextExpectedFromPong, CancellationToken token)
     {
-        foreach (var kvp in _unackedBatches.OrderBy(x => x.Key))
+        // A snapshot: ordering the dictionary itself sizes an array and then copies into it, and a
+        // batch registered in between throws, which ends the stream the resend is part of.
+        foreach (var kvp in _unackedBatches.ToArray().OrderBy(x => x.Key))
         {
             if (token.IsCancellationRequested) return;
             
