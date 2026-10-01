@@ -17,6 +17,7 @@ public class StreamController : ControllerBase
     private readonly ITransferManager _transferManager;
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;
+    private readonly IBridgeManager _bridgeManager;
     private readonly ILogger<StreamController> _logger;
 
     public StreamController(
@@ -24,12 +25,14 @@ public class StreamController : ControllerBase
         ITransferManager transferManager,
         IStateStore stateStore,
         IClientIdentityProvider identityProvider,
+        IBridgeManager bridgeManager,
         ILogger<StreamController> logger)
     {
         _brokerServer = brokerServer;
         _transferManager = transferManager;
         _stateStore = stateStore;
         _identityProvider = identityProvider;
+        _bridgeManager = bridgeManager;
         _logger = logger;
     }
 
@@ -121,6 +124,15 @@ public class StreamController : ControllerBase
             return;
         }
 
+        // A source that finished its data stream has nothing more to send, and its bridge says so to
+        // every sink that comes. Answered with an empty 200, a sink that lost the end of the stream
+        // takes it for a stream that broke and reopens it, without end.
+        if (type == ConnectionType.Data && DataStreamFinished(transferId))
+        {
+            Response.StatusCode = 410;
+            return;
+        }
+
         DisableKestrelLimits();
         Response.StatusCode = 200;
         Response.ContentType = "application/octet-stream";
@@ -137,6 +149,10 @@ public class StreamController : ControllerBase
         }
     }
     
+    private bool DataStreamFinished(string transferId) =>
+        _bridgeManager.Bridges.TryGetValue(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
+        && bridge.CompletionTask.IsCompletedSuccessfully;
+
     private ConnectionType ParseConnectionType(HttpRequest request)
     {
         var connectionTypeString = request.Headers["X-Connection-Type"].ToString();

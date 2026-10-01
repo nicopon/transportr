@@ -257,6 +257,68 @@ public class SignalRDataServerTests
     }
 
     [Fact]
+    public async Task Receive_OnADataStreamTheSourceAlreadyFinished_AnswersGone()
+    {
+        var hub = new Harness();
+        hub.BridgeFor(ConnectionType.Data).Complete();
+        var server = new RecordingServer();
+
+        var http = await ReceiveAsync(hub, server, ConnectionType.Data);
+
+        // A 200 with nothing in it is what a stream that broke looks like, and its client reopens
+        // it. This one is over for good, and says so in the one way a client already reads as final.
+        Assert.Equal(StatusCodes.Status410Gone, http.Response.StatusCode);
+        Assert.False(server.Reached);
+    }
+
+    [Fact]
+    public async Task Receive_OnADataStreamStillOpen_IsServed()
+    {
+        var hub = new Harness();
+        var server = new RecordingServer();
+
+        var http = await ReceiveAsync(hub, server, ConnectionType.Data);
+
+        Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
+        Assert.True(server.Reached);
+    }
+
+    [Fact]
+    public async Task Receive_OnAControlStream_IsServedWhateverBecameOfTheDataStream()
+    {
+        var hub = new Harness();
+        hub.BridgeFor(ConnectionType.Data).Complete();
+        var server = new RecordingServer();
+
+        var http = await ReceiveAsync(hub, server, ConnectionType.Control);
+
+        Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
+        Assert.True(server.Reached);
+    }
+
+    private static async Task<DefaultHttpContext> ReceiveAsync(Harness hub, ITransportRServer server, ConnectionType type)
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers["X-Connection-Type"] = type.ToString();
+
+        // The identity provider and the state store are only read once a caller is authenticated,
+        // and this one is not: dev mode, where the data plane is open.
+        var controller = new StreamController(
+            server,
+            new KnownTransfer(),
+            stateStore: null!,
+            identityProvider: null!,
+            hub.Bridges,
+            NullLogger<StreamController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+
+        await controller.Receive(TransferId);
+        return http;
+    }
+
+    [Fact]
     public async Task Send_WhenTheServerFailsAbnormally_AbortsTheConnectionInsteadOfAnswering()
     {
         var lifetime = new RecordingLifetime();
@@ -271,6 +333,7 @@ public class SignalRDataServerTests
             new KnownTransfer(),
             stateStore: null!,
             identityProvider: null!,
+            new BridgeManager(NullLoggerFactory.Instance),
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -346,6 +409,23 @@ public class SignalRDataServerTests
 
         public Task HandleReceiveAsync(string transferId, ConnectionType type, Stream output, CancellationToken cancellationToken = default) =>
             Task.FromException(failure);
+    }
+
+    private sealed class RecordingServer : ITransportRServer
+    {
+        public bool Reached { get; private set; }
+
+        public Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
+        {
+            Reached = true;
+            return Task.CompletedTask;
+        }
+
+        public Task HandleReceiveAsync(string transferId, ConnectionType type, Stream output, CancellationToken cancellationToken = default)
+        {
+            Reached = true;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingLifetime : IHttpRequestLifetimeFeature

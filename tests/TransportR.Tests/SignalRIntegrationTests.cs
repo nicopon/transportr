@@ -359,11 +359,14 @@ public class SignalRIntegrationTests
     [Fact]
     public async Task Abort_WhenSenderReleasesMidFlight_MakesTheReceiverFailFast()
     {
-        using var host = TestHubServerFactory.CreateHost();
-        var handler = host.GetTestServer().CreateHandler();
+        // On Kestrel: in memory the receiver's DisposeAsync below waited, in a fifth to a quarter of
+        // repeated runs, on a stream request the hub had not let go of, and the run sat there until
+        // the bridge's idle timeout. Over a socket the client ends its own request; 200 repeated runs
+        // there never waited.
+        await using var host = await TestHubServerFactory.StartLoopbackAsync();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(null, host.BaseUrl, "sender");
+        await using var receiver = CreateClient(null, host.BaseUrl, "receiver");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -401,6 +404,59 @@ public class SignalRIntegrationTests
             $"Expected the Abort to fail the receive in under a second; took {stopwatch.Elapsed}.");
 
         await receive.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Abort_WhileTheReceiverConsumerIsStuck_StillFailsTheReceiver()
+    {
+        await using var host = await TestHubServerFactory.StartLoopbackAsync();
+
+        // Capped at 50 opens: a receiver that reopens in a loop would otherwise exhaust the
+        // machine's ephemeral ports while this test reports it.
+        var opens = new DataStreamOpenCounter(limit: 50);
+
+        await using var sender = CreateClient(null, host.BaseUrl, "sender", o =>
+        {
+            o.MaxInFlightBatches = 1;
+            o.CompleteStallTimeout = TimeSpan.FromSeconds(1);
+        });
+        await using var receiver = CreateClient(null, host.BaseUrl, "receiver",
+            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        await using var receive = await receiveHandle.Task;
+
+        // Nobody enumerates yet. The receiver admits the first item and holds the second, so its read
+        // loop parks with the rest of the data stream unread in its socket, and the third item
+        // parks the sender on its window until it gives up.
+        await send.SendAsync("item-1");
+        await send.SendAsync("item-2");
+        await Assert.ThrowsAsync<TransferFailedException>(
+            () => send.SendAsync("item-3").WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // The Abort the sender wrote on giving up is in that socket, behind the item the reader never
+        // took. Releasing the handle then cancels the sender's control read, which makes the hub cut
+        // the receiver's control write, and the receiver restarts both of its streams.
+        await send.DisposeAsync();
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync()) { }
+        });
+
+        if (await Task.WhenAny(consumer, Task.Delay(TimeSpan.FromSeconds(5))) != consumer)
+        {
+            Assert.Fail($"The receiver was never told its sender gave up; it opened its data stream {opens.Opens} times.");
+        }
+
+        await Assert.ThrowsAsync<TransferFailedException>(() => consumer);
+        Assert.True(opens.Opens < 10, $"The receiver opened its data stream {opens.Opens} times.");
     }
 
     [Fact]
@@ -688,8 +744,11 @@ public class SignalRIntegrationTests
         Assert.Contains(receivers, c => c.ClientId == receiver.ClientId);
     }
 
+    /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>
+    /// <param name="networkHandler">What carries the data streams over the network; the default socket handler if null.</param>
     private SignalRDataClient<string> CreateClient(
-        HttpMessageHandler handler, string url, string logPrefix, Action<ClientOptions>? configure = null)
+        HttpMessageHandler? handler, string url, string logPrefix, Action<ClientOptions>? configure = null,
+        HttpMessageHandler? networkHandler = null)
     {
         // Custom Connection Manager that uses TestServer's HttpMessageHandler
         var options = new ClientOptions();
@@ -708,14 +767,19 @@ public class SignalRIntegrationTests
             tokenProvider: null,
              configureHttpConnection: (httpOpts) => 
              {
-                 httpOpts.HttpMessageHandlerFactory = _ => handler;
+                 if (handler != null)
+                 {
+                     httpOpts.HttpMessageHandlerFactory = _ => handler;
+                 }
              }
         );
         
         var registry = new SessionRegistry<string>(logger);
         var serializer = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
-        var httpClient = new HttpClient(handler) { BaseAddress = new Uri(url) };
+        var httpClient = handler != null
+            ? new HttpClient(handler) { BaseAddress = new Uri(url) }
+            : new HttpClient(networkHandler ?? new SocketsHttpHandler()) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
 
         return new SignalRDataClient<string>(
             connectionManager,
@@ -728,5 +792,30 @@ public class SignalRIntegrationTests
             httpClient,
             streamManager
         );
+    }
+
+    /// <summary>
+    /// Counts the data streams a client opens and, past <paramref name="limit"/>, parks any further
+    /// one until it is cancelled.
+    /// </summary>
+    private sealed class DataStreamOpenCounter(int limit) : DelegatingHandler(new SocketsHttpHandler())
+    {
+        private int _opens;
+
+        public int Opens => Volatile.Read(ref _opens);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var isDataRead = request.Method == HttpMethod.Get
+                && request.Headers.TryGetValues("X-Connection-Type", out var types)
+                && types.Contains(ConnectionType.Data.ToString());
+
+            if (isDataRead && Interlocked.Increment(ref _opens) > limit)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            return await base.SendAsync(request, cancellationToken);
+        }
     }
 }
