@@ -50,7 +50,7 @@ sequenceDiagram
     H-->>S: [Receiver]
     S->>H: 4. InitTransfer(ReceiverId)
     H->>R: GetReadyToReceive(TransferId)
-    H->>S: GetReadyToSend(TransferId)
+    H-->>S: TransferId (the sender starts its session from it)
     
     loop Data Transfer
         S->>H: Batch (header + payload)

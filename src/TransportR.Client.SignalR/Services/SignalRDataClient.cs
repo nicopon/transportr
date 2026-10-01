@@ -49,6 +49,8 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     // The hub declares no default for this: one setting, one place that answers for it.
     private const int HandshakeTimeoutMs = 20_000;
 
+    private readonly SignalRTransferSignaling<T> _signaling;
+
     // Internal so that only the builder instantiates it.
     internal SignalRDataClient(
         HubConnectionManager connectionManager,
@@ -74,7 +76,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         _httpClient = httpClient;
         
         // SRP: Extract signaling logic
-        var signaling = new SignalRTransferSignaling<T>(
+        _signaling = new SignalRTransferSignaling<T>(
             connectionManager,
             sessionRegistry,
             this, // ISessionContext
@@ -91,7 +93,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
                 if (_registered) await ReRegisterAsync("SignalR reconnection");
             }
         );
-        signaling.Initialize();
+        _signaling.Initialize();
     }
 
 
@@ -197,13 +199,8 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         try
         {
             var transferId = await _connectionManager.Connection.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), targetClientId, size, HandshakeTimeoutMs);
-            
-            if (!_sessionRegistry.TryGetSession(transferId, out var session))
-            {
-                 throw new InvalidOperationException($"Failed to acquire session for {transferId} after Hub confirmation. Logic error?");
-            }
-            
-            return new HttpSend<T>(session!);
+
+            return new HttpSend<T>(await _signaling.GetOrStartRequestedSendAsync(transferId, size, targetClientId));
         }
         catch (Exception ex) when (ex.Message.Contains("AFFINITY_REDIRECT:"))
         {

@@ -142,6 +142,30 @@ internal class SignalRTransferSignaling<T>
 
     private async Task<bool> HandleGetReadyToSend(string transferId, int size, Guid receiverId)
     {
+        await StartSendSessionAsync(transferId, size, receiverId);
+        return true;
+    }
+
+    /// <summary>
+    /// The send session of a transfer this client asked for, once the hub has returned its id.
+    /// </summary>
+    /// <remarks>
+    /// A hub that readies the sender itself, through <see cref="ICommandClient.GetReadyToSend"/>,
+    /// does so before it answers <c>InitTransfer</c>, and the session exists by then. A hub that does
+    /// not call the sender back answers first, and the session is started here.
+    /// </remarks>
+    public async Task<IDataSession<T>> GetOrStartRequestedSendAsync(string transferId, int size, Guid receiverId)
+    {
+        if (_sessionRegistry.TryGetSession(transferId, out var existing) && existing != null)
+        {
+            return existing;
+        }
+
+        return await StartSendSessionAsync(transferId, size, receiverId);
+    }
+
+    private async Task<IDataSession<T>> StartSendSessionAsync(string transferId, int size, Guid receiverId)
+    {
         _logger.LogDebug("Starting send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
         
         if (_sessionRegistry.ContainsKey(transferId))
@@ -151,7 +175,7 @@ internal class SignalRTransferSignaling<T>
 
         var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, size, _dataUrl));
         await session.StartSenderAsync();
-        return true;
+        return session;
     }
 
     private async Task<bool> HandleRequestSend(string transferId, int size, Guid receiverId)

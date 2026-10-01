@@ -85,9 +85,7 @@ public class SignalRTransferInitiator : ITransferInitiator
             throw new HubException("Source and target clients are connected to different hub instances.");
         }
 
-        return await HandshakeAsync(
-            sender, sender.ConnectionId, receiver, batchSize, timeoutMs,
-            nameof(ICommandClient.RequestSend), cancellationToken);
+        return await HandshakeAsync(sender, receiver, batchSize, timeoutMs, requestSender: true, cancellationToken);
     }
 
     internal void ValidateTransferRequest(ClientRegistration sourceClient, ClientRegistration targetClient)
@@ -125,29 +123,29 @@ public class SignalRTransferInitiator : ITransferInitiator
     }
 
     /// <summary>
-    /// Readies the receiver, then the sender, and returns the transfer id once both have accepted.
+    /// Readies the receiver, then, for a transfer the host opens, the sender, and returns the transfer
+    /// id once they have accepted.
     /// </summary>
-    /// <param name="senderConnectionId">
-    /// The connection the sender is invoked on. A sender asking for the transfer is invoked on the
-    /// connection it asked from, which a stale registration could otherwise contradict.
-    /// </param>
-    /// <param name="senderMethod">
-    /// <see cref="ICommandClient.GetReadyToSend"/> when the sender asked for the transfer and picks
-    /// its session up by id afterwards; <see cref="ICommandClient.RequestSend"/> when it did not.
+    /// <param name="requestSender">
+    /// True when the host opens the transfer: the sender learns of it through
+    /// <see cref="ICommandClient.RequestSend"/>. False when the sender asked for it through
+    /// <see cref="CommandHub.InitTransfer"/>: it is not called back, and starts its session from the
+    /// id it is returned. The hub runs one invocation at a time per client and InitTransfer is one,
+    /// so the answer to a callback would queue behind anything else the sender invoked meanwhile, and
+    /// the handshake would wait out its timeout.
     /// </param>
     internal async Task<string> HandshakeAsync(
         ClientRegistration sender,
-        string senderConnectionId,
         ClientRegistration receiver,
         int batchSize,
         int timeoutMs,
-        string senderMethod,
+        bool requestSender,
         CancellationToken cancellationToken = default)
     {
         var transferId = Guid.NewGuid().ToString();
 
-        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (BatchSize={Size}, via {SenderMethod})",
-            transferId, sender.ClientId, receiver.ClientId, batchSize, senderMethod);
+        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (BatchSize={Size}, opened by {Opener})",
+            transferId, sender.ClientId, receiver.ClientId, batchSize, requestSender ? "the host" : "the sender");
 
         await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId);
 
@@ -181,11 +179,16 @@ public class SignalRTransferInitiator : ITransferInitiator
                 throw new HubException($"Target client {receiver.ClientId} refused the transfer.");
             }
 
+            if (!requestSender)
+            {
+                return transferId;
+            }
+
             bool senderReady;
             try
             {
-                senderReady = await _hubContext.Clients.Client(senderConnectionId)
-                    .InvokeAsync<bool>(senderMethod, transferId, batchSize, receiver.ClientId, cts.Token);
+                senderReady = await _hubContext.Clients.Client(sender.ConnectionId)
+                    .InvokeAsync<bool>(nameof(ICommandClient.RequestSend), transferId, batchSize, receiver.ClientId, cts.Token);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -196,8 +199,8 @@ public class SignalRTransferInitiator : ITransferInitiator
 
             if (!senderReady)
             {
-                _logger.LogWarning("Sender {SourceClientId} refused {TransferId} ({SenderMethod}). Cancelling Receiver.",
-                    sender.ClientId, transferId, senderMethod);
+                _logger.LogWarning("Sender {SourceClientId} refused {TransferId}. Cancelling Receiver.",
+                    sender.ClientId, transferId);
                 await AbandonAsync(transferId, receiver);
                 throw new HubException("Source client refused the transfer.");
             }

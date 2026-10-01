@@ -6,10 +6,9 @@ namespace TransportR.Interfaces;
 /// </summary>
 /// <remarks>
 /// The transfer goes through the same authorization and handshake as one a sender initiates. The
-/// sender learns of it through <see cref="ICommandClient.RequestSend"/> instead of
-/// <see cref="ICommandClient.GetReadyToSend"/>, because it cannot otherwise tell a transfer it asked
-/// for from one it did not; the receiver sees an ordinary
-/// <see cref="ICommandClient.GetReadyToReceive"/>.
+/// sender learns of it through <see cref="ICommandClient.RequestSend"/>, whereas a sender that asks
+/// for a transfer is not called back and starts from the id it is returned; the receiver sees an
+/// ordinary <see cref="ICommandClient.GetReadyToReceive"/>.
 /// </remarks>
 public interface ITransferInitiator
 {

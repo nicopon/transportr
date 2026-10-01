@@ -165,9 +165,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         CheckAffinityRedirect(targetClient);
 
         // Step 3: Execute handshake
-        return await _initiator.HandshakeAsync(
-            sourceClient, Context.ConnectionId, targetClient, batchSize, timeoutMs,
-            nameof(ICommandClient.GetReadyToSend));
+        return await _initiator.HandshakeAsync(sourceClient, targetClient, batchSize, timeoutMs, requestSender: false);
     }
 
     private void CheckAffinityRedirect(ClientRegistration targetClient)
