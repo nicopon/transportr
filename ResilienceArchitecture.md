@@ -83,7 +83,7 @@ Both Sender and Receiver rely on standard `IOException` or `HttpRequestException
 The Hub **DOES NOT** actively notify clients of disconnections via SignalR (to avoid race conditions).
 
 A write stream sees a cut even when its client has nothing to write because its requests carry
-`Expect: 100-continue`; the reason, and what a reverse proxy in front of the hub must accept, are in
+`Expect: 100-continue`; the reason, and what a reverse proxy in front of the hub must accept and forward, are in
 "Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md`.
 
 ### 1b. Registration Lifetime (Hub-Side)
