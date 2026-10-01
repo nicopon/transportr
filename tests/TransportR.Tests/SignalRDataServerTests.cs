@@ -152,6 +152,44 @@ public class SignalRDataServerTests
     }
 
     [Fact]
+    public async Task SendCancelledAfterItsDestinationWasLostOnArrival_EndsAndReleasesTheSource()
+    {
+        // The destination registers, which ends the source's wait, and goes before the source's
+        // handler has resumed to look for it: the source is found a destination that is no longer
+        // there and waits for the next one. The window is a few instructions wide, so this repeats
+        // until the handler lands in it; a few runs in a hundred do.
+        const int attempts = 1000;
+        var parked = 0;
+
+        for (var i = 0; i < attempts; i++)
+        {
+            var hub = new Harness();
+            var bridge = hub.BridgeFor(ConnectionType.Data);
+
+            using var input = new PushedStream();
+            using var request = new CancellationTokenSource();
+            var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, request.Token);
+            Assert.Equal(BridgeState.WaitingForReceiver, bridge.State);
+
+            var destinationId = Guid.NewGuid();
+            _ = bridge.RegisterReceiverAsync(new MemoryStream(), destinationId);
+            bridge.OnDisconnected(destinationId);
+
+            request.Cancel();
+            if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromMilliseconds(100))) != send)
+            {
+                parked++;
+            }
+            else
+            {
+                Assert.Equal(BridgeState.Idle, bridge.State);
+            }
+        }
+
+        Assert.True(parked == 0, $"{parked} of {attempts} sources stayed parked on a destination after their request was cancelled.");
+    }
+
+    [Fact]
     public async Task ReceiveCancelledWhileWaitingForASource_EndsAndReleasesTheSink()
     {
         var hub = new Harness();

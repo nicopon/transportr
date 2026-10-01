@@ -65,7 +65,18 @@ public class SignalRDataServer : ITransportRServer
             // Taken before the stream: a reset landing between the two reads then cuts this source
             // instead of leaving it writing to a stream that nobody reads.
             var receiverToken = bridge.ReceiverToken;
-            var receiverOutput = await bridge.WaitForReceiverStream().ConfigureAwait(false);
+            Stream receiverOutput;
+            try
+            {
+                receiverOutput = await bridge.WaitForReceiverStream().WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The destination that ended the registration's wait may have left again before this
+                // got to it, which leaves a wait for the next one that only a cancelled bridge ends.
+                bridge.OnDisconnected(connectionId);
+                throw;
+            }
             _logger.LogInformation("BRIDGE: Piping {BridgeKey}", bridgeKey);
 
             Stream inputToCopy = input;
