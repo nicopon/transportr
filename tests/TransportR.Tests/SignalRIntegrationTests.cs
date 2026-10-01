@@ -365,10 +365,12 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        // A window of one batch, so a SendAsync call after termination has nowhere to go and must
-        // be unblocked rather than merely queued.
+        // A window of one batch and a receive buffer of one item that nobody drains: the receiver
+        // admits the first item and acknowledges it, then holds the acknowledgement of the second
+        // until there is room, so the window stays full for as long as the test needs it to.
         await using var sender = CreateClient(handler, "http://localhost", "sender", o => o.MaxInFlightBatches = 1);
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var receiver = CreateClient(handler, "http://localhost", "receiver",
+            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -379,33 +381,38 @@ public class SignalRIntegrationTests
         await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
         var receive = await receiveHandle.Task;
 
-        var receiveTask = Task.Run(async () =>
-        {
-            var items = new List<string>();
-            await foreach (var item in receive.ReceiveAsync())
-            {
-                items.Add(item);
-            }
-            await receive.WaitForCompletionAsync();
-            return items;
-        });
-
-        // Acknowledged normally: the receiver is alive and consuming. The window then has to be
-        // refilled by a second call, which is the one the host termination has to unblock.
+        // SendAsync returns once the item is queued, not once anything has crossed. The second call
+        // only returns once the first item has been acknowledged, which takes every stream of the
+        // transfer being up: terminating earlier catches streams still opening, and a stream
+        // parked at the hub waiting for its peer is not released at once.
         await send.SendAsync("item-1");
+        await send.SendAsync("item-2").WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Nothing can acknowledge item-2 now, so this call is parked on the window. It has to be
+        // parked before the termination: a call made after it races the notification, and the
+        // outcome then depends on which side of the release it lands.
+        var parked = send.SendAsync("item-3");
+        await Task.Delay(100);
+        Assert.False(parked.IsCompleted, "item-3 should be parked on a full window.");
 
         var terminator = host.Services.GetRequiredService<ITransferTerminator>();
         await terminator.TerminateAsync(send.TransferId);
 
         var sendStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.ThrowsAsync<TransferFailedException>(
-            () => send.SendAsync("item-2").WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAsync<TransferFailedException>(() => parked.WaitAsync(TimeSpan.FromSeconds(5)));
         sendStopwatch.Stop();
         Assert.True(sendStopwatch.Elapsed < TimeSpan.FromSeconds(1),
             $"Expected termination to fail SendAsync in under a second; took {sendStopwatch.Elapsed}.");
 
+        // Consuming earlier would make room, release the acknowledgement and unpark the call above.
         var receiveStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.ThrowsAsync<TransferFailedException>(() => receiveTask.WaitAsync(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync())
+            {
+            }
+            await receive.WaitForCompletionAsync();
+        }).WaitAsync(TimeSpan.FromSeconds(5));
         receiveStopwatch.Stop();
         Assert.True(receiveStopwatch.Elapsed < TimeSpan.FromSeconds(1),
             $"Expected termination to fail the receive in under a second; took {receiveStopwatch.Elapsed}.");
