@@ -26,8 +26,27 @@ public class RedisStateStoreTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _redis.StartAsync();
-        _multiplexer = await ConnectionMultiplexer.ConnectAsync(_redis.GetConnectionString());
+        _multiplexer = await ConnectWhenPublishedAsync(_redis.GetConnectionString());
         _store = new RedisStateStore(_multiplexer, _logger);
+    }
+
+    // StartAsync returns once the container answers from the inside; the port it publishes on the
+    // host can lag a few milliseconds behind, and a connect in that gap is refused at once rather
+    // than timing out.
+    private static async Task<IConnectionMultiplexer> ConnectWhenPublishedAsync(string connectionString)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            try
+            {
+                return await ConnectionMultiplexer.ConnectAsync(connectionString);
+            }
+            catch (RedisConnectionException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+        }
     }
 
     public async Task DisposeAsync()
