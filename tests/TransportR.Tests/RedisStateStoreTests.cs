@@ -101,19 +101,72 @@ public class RedisStateStoreTests : IAsyncLifetime
     }
 
     [DockerAvailableFact]
-    public async Task UpdateClientTokenExpiry_UpdatesExpiry()
+    public async Task RenewClient_ReplacesTheGroupsAndTheExpiry_AndNothingElse()
     {
         var clientId = Guid.NewGuid();
-        var client = CreateClient(clientId, $"conn-exp-{Guid.NewGuid()}");
-        await _store.SaveClientAsync(client);
+        var connectionId = $"conn-renew-{Guid.NewGuid()}";
+        await _store.SaveClientAsync(CreateClient(clientId, connectionId) with { Subject = "subject" });
+        await _store.MarkDisconnectedAsync(connectionId, DateTime.UtcNow);
+        var ttlBefore = await _multiplexer.GetDatabase().KeyTimeToLiveAsync($"transportr:clients:{clientId}");
         var newExpiry = DateTime.UtcNow.AddHours(2);
 
-        await _store.UpdateClientTokenExpiryAsync(clientId, newExpiry);
+        var renewed = await _store.RenewClientAsync(clientId, "subject", new HashSet<string> { "other-group" }, newExpiry);
 
-        var updated = await _store.GetClientAsync(clientId);
-        Assert.NotNull(updated);
-        // Allow 1 second tolerance for serialization round-trip
-        Assert.True(Math.Abs((updated.TokenExpiry!.Value - newExpiry).TotalSeconds) < 1);
+        Assert.NotNull(renewed);
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.True(Math.Abs((stored.TokenExpiry!.Value - newExpiry).TotalSeconds) < 1);
+        Assert.Equal(new[] { "other-group" }, stored.Groups);
+        Assert.Equal(connectionId, stored.ConnectionId);
+        Assert.NotNull(stored.DisconnectedAtUtc);
+        Assert.Equal(clientId, (await _store.GetClientByConnectionIdAsync(connectionId))?.ClientId);
+
+        // The grace of a dropped registration does not start over because its token was renewed.
+        var ttlAfter = await _multiplexer.GetDatabase().KeyTimeToLiveAsync($"transportr:clients:{clientId}");
+        Assert.True(ttlAfter <= ttlBefore);
+    }
+
+    [DockerAvailableFact]
+    public async Task RenewClient_UnderAnotherSubject_ChangesNothing()
+    {
+        var clientId = Guid.NewGuid();
+        await _store.SaveClientAsync(CreateClient(clientId, $"conn-owner-{Guid.NewGuid()}") with { Subject = "owner" });
+
+        Assert.Null(await _store.RenewClientAsync(clientId, "intruder", new HashSet<string> { "g" }, DateTime.UtcNow.AddDays(1)));
+        Assert.Null(await _store.RenewClientAsync(clientId, null, new HashSet<string> { "g" }, DateTime.UtcNow.AddDays(1)));
+
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.Equal(new[] { "test-group" }, stored!.Groups);
+    }
+
+    [DockerAvailableFact]
+    public async Task RenewClient_OfAnUnknownClient_ReturnsNull()
+    {
+        Assert.Null(await _store.RenewClientAsync(Guid.NewGuid(), "subject", new HashSet<string> { "g" }, null));
+    }
+
+    [DockerAvailableFact]
+    public async Task MarkDisconnected_RacingARenewal_IsNotLost()
+    {
+        const int rounds = 200;
+        var lost = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var clientId = Guid.NewGuid();
+            var connectionId = $"conn-race-{Guid.NewGuid()}";
+            await _store.SaveClientAsync(CreateClient(clientId, connectionId) with { Subject = "subject" });
+
+            await Task.WhenAll(
+                Task.Run(() => _store.RenewClientAsync(clientId, "subject", new HashSet<string> { "g" }, DateTime.UtcNow.AddHours(2))),
+                Task.Run(() => _store.MarkDisconnectedAsync(connectionId, DateTime.UtcNow)));
+
+            var stored = (await _store.GetClientAsync(clientId))!;
+            if (stored.DisconnectedAtUtc == null) lost++;
+            Assert.Equal(new[] { "g" }, stored.Groups);
+        }
+
+        Assert.Equal(0, lost);
     }
 
     [DockerAvailableFact]

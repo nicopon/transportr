@@ -57,9 +57,17 @@ public class TestProxyStateStore : IStateStore
         await _httpClient.DeleteAsync($"/api/state/clients/{clientId}");
     }
 
-    public async Task UpdateClientTokenExpiryAsync(Guid clientId, DateTime expiry)
+    public async Task<ClientRegistration?> RenewClientAsync(
+        Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
     {
-        await _httpClient.PutAsJsonAsync($"/api/state/clients/{clientId}/expiry", expiry);
+        var response = await _httpClient.PostAsJsonAsync(
+            $"/api/state/clients/{clientId}/renewal",
+            new { ExpectedSubject = expectedSubject, Groups = groups, TokenExpiry = tokenExpiry });
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ClientRegistration>();
     }
 
     // ========== Transfers (HA Sessions) ==========

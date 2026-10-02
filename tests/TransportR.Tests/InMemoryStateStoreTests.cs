@@ -90,21 +90,82 @@ public class InMemoryStateStoreTests
     }
 
     [Fact]
-    public async Task UpdateClientTokenExpiry_UpdatesExpiry()
+    public async Task RenewClient_ReplacesTheGroupsAndTheExpiry_AndNothingElse()
     {
-        // Arrange
         var clientId = Guid.NewGuid();
-        var client = CreateClient(clientId, "conn-exp");
-        await _store.SaveClientAsync(client);
+        await _store.SaveClientAsync(CreateClient(clientId, "conn-renew") with { Subject = "subject" });
+        var disconnectedAt = DateTime.UtcNow;
+        await _store.MarkDisconnectedAsync("conn-renew", disconnectedAt);
         var newExpiry = DateTime.UtcNow.AddHours(2);
 
-        // Act
-        await _store.UpdateClientTokenExpiryAsync(clientId, newExpiry);
+        var renewed = await _store.RenewClientAsync(clientId, "subject", new HashSet<string> { "other-group" }, newExpiry);
 
-        // Assert
-        var updated = await _store.GetClientAsync(clientId);
-        Assert.NotNull(updated);
-        Assert.Equal(newExpiry, updated.TokenExpiry);
+        Assert.NotNull(renewed);
+        var stored = await _store.GetClientAsync(clientId);
+        Assert.NotNull(stored);
+        Assert.Equal(renewed, stored);
+        Assert.Equal(newExpiry, stored.TokenExpiry);
+        Assert.Equal(new[] { "other-group" }, stored.Groups);
+        Assert.Equal("conn-renew", stored.ConnectionId);
+        Assert.Equal(disconnectedAt, stored.DisconnectedAtUtc);
+        Assert.Equal(clientId, (await _store.GetClientByConnectionIdAsync("conn-renew"))?.ClientId);
+    }
+
+    [Fact]
+    public async Task RenewClient_UnderAnotherSubject_ChangesNothing()
+    {
+        var clientId = Guid.NewGuid();
+        var registered = CreateClient(clientId, "conn-owner") with { Subject = "owner" };
+        await _store.SaveClientAsync(registered);
+
+        Assert.Null(await _store.RenewClientAsync(clientId, "intruder", new HashSet<string> { "g" }, DateTime.UtcNow.AddDays(1)));
+        Assert.Null(await _store.RenewClientAsync(clientId, null, new HashSet<string> { "g" }, DateTime.UtcNow.AddDays(1)));
+
+        Assert.Equal(registered, await _store.GetClientAsync(clientId));
+    }
+
+    [Fact]
+    public async Task RenewClient_TakesTwoAbsentSubjectsForTheSame()
+    {
+        var clientId = Guid.NewGuid();
+        await _store.SaveClientAsync(CreateClient(clientId, "conn-dev"));
+
+        Assert.NotNull(await _store.RenewClientAsync(clientId, null, new HashSet<string> { "g" }, null));
+        Assert.Null(await _store.RenewClientAsync(clientId, "someone", new HashSet<string> { "g" }, null));
+    }
+
+    [Fact]
+    public async Task RenewClient_OfAnUnknownClient_ReturnsNull()
+    {
+        Assert.Null(await _store.RenewClientAsync(Guid.NewGuid(), "subject", new HashSet<string> { "g" }, null));
+    }
+
+    [Fact]
+    public async Task MarkDisconnected_RacingARenewal_IsNotLost()
+    {
+        // The renewal changes the payload the mark was computed from, under the very connection the
+        // mark is for. A mark that gave up on that would leave a dead connection looking live, and
+        // nothing would ever evict it. The window is a few instructions wide, so the race is run
+        // many times.
+        const int rounds = 2000;
+        var lost = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var clientId = Guid.NewGuid();
+            var connectionId = $"conn-race-{round}";
+            await _store.SaveClientAsync(CreateClient(clientId, connectionId) with { Subject = "subject" });
+
+            await Task.WhenAll(
+                Task.Run(() => _store.RenewClientAsync(clientId, "subject", new HashSet<string> { "g" }, DateTime.UtcNow.AddHours(2))),
+                Task.Run(() => _store.MarkDisconnectedAsync(connectionId, DateTime.UtcNow)));
+
+            var stored = (await _store.GetClientAsync(clientId))!;
+            if (stored.DisconnectedAtUtc == null) lost++;
+            Assert.Equal(new[] { "g" }, stored.Groups);
+        }
+
+        Assert.Equal(0, lost);
     }
 
     // ========== Session Tests (HA) ==========

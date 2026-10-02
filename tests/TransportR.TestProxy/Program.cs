@@ -94,10 +94,10 @@ stateApi.MapDelete("/clients/{clientId:guid}", async (Guid clientId, ProxyStateS
     return Results.NoContent();
 });
 
-stateApi.MapPut("/clients/{clientId:guid}/expiry", async (Guid clientId, DateTime expiry, ProxyStateStore store) =>
+stateApi.MapPost("/clients/{clientId:guid}/renewal", async (Guid clientId, RenewalRequest renewal, ProxyStateStore store) =>
 {
-    await store.UpdateClientTokenExpiryAsync(clientId, expiry);
-    return Results.NoContent();
+    var renewed = await store.RenewClientAsync(clientId, renewal.ExpectedSubject, renewal.Groups, renewal.TokenExpiry);
+    return renewed != null ? Results.Ok(renewed) : Results.NotFound();
 });
 
 // ========== Sessions (HA) ==========
@@ -156,11 +156,11 @@ public class ProxyStateStore : IStateStore
 
     public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
     {
-        if (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
-            _clients.TryGetValue(clientId, out var current) &&
-            current.ConnectionId == connectionId)
+        while (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
+               _clients.TryGetValue(clientId, out var current) &&
+               current.ConnectionId == connectionId)
         {
-            _clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current);
+            if (_clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current)) break;
         }
 
         return Task.CompletedTask;
@@ -190,13 +190,24 @@ public class ProxyStateStore : IStateStore
         return Task.CompletedTask;
     }
 
-    public Task UpdateClientTokenExpiryAsync(Guid clientId, DateTime expiry)
+    public Task<ClientRegistration?> RenewClientAsync(
+        Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
     {
-        if (_clients.TryGetValue(clientId, out var existing))
+        while (_clients.TryGetValue(clientId, out var current))
         {
-            _clients[clientId] = existing with { TokenExpiry = expiry };
+            if (!string.Equals(current.Subject, expectedSubject, StringComparison.Ordinal))
+            {
+                return Task.FromResult<ClientRegistration?>(null);
+            }
+
+            var renewed = current with { Groups = groups.ToHashSet(), TokenExpiry = tokenExpiry };
+            if (_clients.TryUpdate(clientId, renewed, current))
+            {
+                return Task.FromResult<ClientRegistration?>(renewed);
+            }
         }
-        return Task.CompletedTask;
+
+        return Task.FromResult<ClientRegistration?>(null);
     }
 
     // ========== Sessions ==========
@@ -311,3 +322,5 @@ sealed class FlushingContent : HttpContent
         }
     }
 }
+
+public record RenewalRequest(string? ExpectedSubject, HashSet<string> Groups, DateTime? TokenExpiry);

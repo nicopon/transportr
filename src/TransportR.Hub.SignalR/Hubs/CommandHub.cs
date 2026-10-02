@@ -223,23 +223,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
     public async Task Ping(string transferId)
     {
-        // In JWT mode, check if token was refreshed and update expiry
-        // In dev mode, Context.User has no JWT claims so we skip this (identity will be null)
-        if (Context.User?.Identity?.IsAuthenticated == true)
-        {
-            var identity = _identityProvider.ResolveIdentity(Context.User, null, null);
-            if (identity?.TokenExpiry != null)
-            {
-                var client = await GetClientByConnectionAsync(Context.ConnectionId);
-                if (client != null && client.TokenExpiry != identity.TokenExpiry)
-                {
-                    await _stateStore.UpdateClientTokenExpiryAsync(client.ClientId, identity.TokenExpiry.Value);
-                    _logger.LogInformation("Token refreshed for client {ClientId}, new expiry: {Expiry}", 
-                        client.ClientId, identity.TokenExpiry.Value.ToString("u"));
-                }
-            }
-        }
-        
         // Keep the transfer alive during reconnection attempts
         await _transferManager.KeepAliveAsync(transferId);
         

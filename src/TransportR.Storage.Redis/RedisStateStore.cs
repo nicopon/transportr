@@ -22,6 +22,10 @@ public class RedisStateStore : IStateStore
     private const string KeyPrefix = "transportr:";
     private static readonly TimeSpan CheckpointTtl = TimeSpan.FromHours(24);
 
+    // A conditional write that keeps losing to a concurrent one is not the store's to settle: it
+    // says so, and the caller's own retry (a client's next renewal) decides.
+    private const int MaxWriteAttempts = 5;
+
     // A connected registration and a dropped one are not kept for the same reason, so they do not
     // get the same TTL. The old fixed 5 minutes applied to both, which meant a client that was
     // simply idle between transfers vanished from discovery while still connected.
@@ -141,20 +145,28 @@ public class RedisStateStore : IStateStore
         if (!Guid.TryParse(clientIdStr.ToString(), out var clientId)) return;
 
         var key = $"{KeyPrefix}clients:{clientId}";
-        var json = await _db.StringGetAsync(key);
-        if (json.IsNullOrEmpty) return;
 
-        var client = JsonSerializer.Deserialize<ClientRegistration>(json.ToString()!);
-        if (client == null || client.ConnectionId != connectionId) return;
+        for (var attempt = 0; attempt < MaxWriteAttempts; attempt++)
+        {
+            var json = await _db.StringGetAsync(key);
+            if (json.IsNullOrEmpty) return;
 
-        var updated = client with { DisconnectedAtUtc = whenUtc };
+            var client = JsonSerializer.Deserialize<ClientRegistration>(json.ToString()!);
+            if (client == null || client.ConnectionId != connectionId) return;
 
-        // Conditional write on the exact payload read above. A Connect that landed in between
-        // stored a different one, the condition fails, and the live registration stands.
-        var tx = _db.CreateTransaction();
-        tx.AddCondition(Condition.StringEqual(key, json));
-        _ = tx.StringSetAsync(key, JsonSerializer.Serialize(updated), TtlFor(updated));
-        _ = await tx.ExecuteAsync();
+            var updated = client with { DisconnectedAtUtc = whenUtc };
+
+            // Conditional write on the exact payload read above. A Connect that landed in between
+            // stored a different one, the condition fails, and the next read finds the live
+            // registration on another connection and stops; a renewal changed it under the same
+            // connection, and the mark is still owed.
+            var tx = _db.CreateTransaction();
+            tx.AddCondition(Condition.StringEqual(key, json));
+            _ = tx.StringSetAsync(key, JsonSerializer.Serialize(updated), TtlFor(updated));
+            if (await tx.ExecuteAsync()) return;
+        }
+
+        throw new InvalidOperationException($"Registration {clientId} kept changing while its disconnection was recorded.");
     }
 
     public async Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)
@@ -243,14 +255,32 @@ public class RedisStateStore : IStateStore
         }
     }
 
-    public async Task UpdateClientTokenExpiryAsync(Guid clientId, DateTime expiry)
+    public async Task<ClientRegistration?> RenewClientAsync(
+        Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
     {
-        var client = await GetClientAsync(clientId);
-        if (client != null)
+        var key = $"{KeyPrefix}clients:{clientId}";
+
+        for (var attempt = 0; attempt < MaxWriteAttempts; attempt++)
         {
-            var updated = client with { TokenExpiry = expiry };
-            await SaveClientAsync(updated);
+            var json = await _db.StringGetAsync(key);
+            if (json.IsNullOrEmpty) return null;
+
+            var client = JsonSerializer.Deserialize<ClientRegistration>(json.ToString()!);
+            if (client == null || !string.Equals(client.Subject, expectedSubject, StringComparison.Ordinal)) return null;
+
+            var renewed = client with { Groups = groups.ToHashSet(), TokenExpiry = tokenExpiry };
+
+            // Conditional on the payload read above, and the connection index is left alone: only
+            // the groups and the expiry change, and what a Connect or a disconnect wrote since
+            // makes the condition fail and the read start again. The TTL stays what it was, since
+            // renewing says nothing of whether the connection is up.
+            var tx = _db.CreateTransaction();
+            tx.AddCondition(Condition.StringEqual(key, json));
+            _ = tx.StringSetAsync(key, JsonSerializer.Serialize(renewed), expiry: null, keepTtl: true);
+            if (await tx.ExecuteAsync()) return renewed;
         }
+
+        throw new InvalidOperationException($"Registration {clientId} kept changing while its token was renewed.");
     }
 
 }

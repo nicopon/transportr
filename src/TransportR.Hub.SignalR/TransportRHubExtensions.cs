@@ -207,7 +207,7 @@ public static class TransportRHubExtensions
     }
 
     /// <summary>
-    /// Maps the CommandHub and StreamController endpoints.
+    /// Maps the CommandHub, StreamController and ClientController endpoints.
     /// </summary>
     /// <param name="requireAuth">
     /// Arms authorization on both planes. The host must have called <c>UseAuthentication()</c> and
@@ -244,7 +244,8 @@ public static class TransportRHubExtensions
             controllers.Add(builder =>
             {
                 var action = builder.Metadata.OfType<ControllerActionDescriptor>().FirstOrDefault();
-                if (action?.ControllerTypeInfo.AsType() == typeof(StreamController))
+                var controller = action?.ControllerTypeInfo.AsType();
+                if (controller == typeof(StreamController) || controller == typeof(ClientController))
                 {
                     builder.Metadata.Add(new AuthorizeAttribute());
                 }

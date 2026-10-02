@@ -18,4 +18,11 @@ public static class WireRoutes
     /// <c>{transferId}/send</c> and <c>{transferId}/receive</c>.
     /// </summary>
     public const string StreamBase = "/api/stream";
+
+    /// <summary>
+    /// The path a client renews its token on, relative to the hub's base URL:
+    /// <c>PUT {clientId}/token</c> under this base, answered with a <see cref="TokenRenewalResponse"/>.
+    /// A reverse proxy that filters by path has to let it through as it does <see cref="StreamBase"/>.
+    /// </summary>
+    public const string ClientBase = "/api/client";
 }

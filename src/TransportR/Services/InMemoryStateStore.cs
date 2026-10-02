@@ -48,14 +48,15 @@ public class InMemoryStateStore : IStateStore
 
     public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
     {
-        if (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
-            _clients.TryGetValue(clientId, out var current) &&
-            current.ConnectionId == connectionId)
+        while (_connectionIndex.TryGetValue(connectionId, out var clientId) &&
+               _clients.TryGetValue(clientId, out var current) &&
+               current.ConnectionId == connectionId)
         {
-            // Compare-and-swap on the registration read above: a Connect that landed in between
-            // stored a different one, and this write is abandoned rather than reinstating the
-            // ConnectionId that just died.
-            _clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current);
+            // Compare-and-swap on the registration read above. A Connect that landed in between
+            // moved it to another connection, and the loop ends there rather than reinstating the
+            // ConnectionId that just died; a renewal changed it under the same connection, and the
+            // mark is still owed.
+            if (_clients.TryUpdate(clientId, current with { DisconnectedAtUtc = whenUtc }, current)) break;
         }
 
         return Task.CompletedTask;
@@ -111,13 +112,24 @@ public class InMemoryStateStore : IStateStore
         return Task.CompletedTask;
     }
 
-    public Task UpdateClientTokenExpiryAsync(Guid clientId, DateTime expiry)
+    public Task<ClientRegistration?> RenewClientAsync(
+        Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
     {
-        if (_clients.TryGetValue(clientId, out var existing))
+        while (_clients.TryGetValue(clientId, out var current) && !IsExpired(current))
         {
-            _clients[clientId] = existing with { TokenExpiry = expiry };
+            if (!string.Equals(current.Subject, expectedSubject, StringComparison.Ordinal))
+            {
+                return Task.FromResult<ClientRegistration?>(null);
+            }
+
+            var renewed = current with { Groups = groups.ToHashSet(), TokenExpiry = tokenExpiry };
+            if (_clients.TryUpdate(clientId, renewed, current))
+            {
+                return Task.FromResult<ClientRegistration?>(renewed);
+            }
         }
-        return Task.CompletedTask;
+
+        return Task.FromResult<ClientRegistration?>(null);
     }
 
     // ========== Transfers (HA Sessions) ==========

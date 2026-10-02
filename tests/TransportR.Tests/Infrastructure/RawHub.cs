@@ -28,4 +28,15 @@ public static class RawHub
         await connection.StartAsync();
         return connection;
     }
+
+    public static Task<HttpResponseMessage> RenewAsync(IHost host, Guid clientId, string? token)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Put, $"http://localhost{WireRoutes.ClientBase}/{clientId}/token");
+        if (token != null)
+        {
+            request.Headers.Add("Authorization", "Bearer " + token);
+        }
+
+        return host.GetTestClient().SendAsync(request);
+    }
 }

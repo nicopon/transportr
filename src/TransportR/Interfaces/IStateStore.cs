@@ -40,7 +40,8 @@ public interface IStateStore
     /// <see cref="SaveClientAsync"/> loses that race: the departing connection writes back the
     /// registration it read, reinstating its own dead ConnectionId over the live one. Marking is
     /// therefore the store's job, not the caller's — only the store can make the check and the
-    /// write one step.
+    /// write one step. A write that lost to <see cref="RenewClientAsync"/> reads again: the
+    /// connection is still the registration's, and still gone.
     /// </remarks>
     Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc);
 
@@ -50,9 +51,20 @@ public interface IStateStore
     Task DeleteClientAsync(Guid clientId);
     
     /// <summary>
-    /// Updates token expiry for a client.
+    /// Replaces the groups and the token expiry of a registration, and nothing else, provided it
+    /// still belongs to <paramref name="expectedSubject"/>.
     /// </summary>
-    Task UpdateClientTokenExpiryAsync(Guid clientId, DateTime expiry);
+    /// <returns>
+    /// The registration as written, or <c>null</c> when there is none or it belongs to another
+    /// subject. Two absent subjects are the same subject.
+    /// </returns>
+    /// <remarks>
+    /// The connection and the disconnection mark stay as they are: a renewal arrives over HTTP, not
+    /// over the connection, and says nothing of whether that is still up. Like
+    /// <see cref="MarkDisconnectedAsync"/> it must be one step with its check, or it writes back a
+    /// registration that a reconnect has replaced since it was read.
+    /// </remarks>
+    Task<ClientRegistration?> RenewClientAsync(Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry);
 
     // ========== Transfers (HA Sessions) ==========
 
