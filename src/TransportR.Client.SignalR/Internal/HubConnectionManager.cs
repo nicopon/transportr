@@ -35,7 +35,7 @@ internal class HubConnectionManager : IAsyncDisposable
     private bool _restarting;
     private bool _closedWhileRestarting;
     private bool _redirecting;
-    private int _disposed;
+    private bool _disposed;
 
     private static readonly TimeSpan FirstRestartDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxRestartDelay = TimeSpan.FromSeconds(30);
@@ -123,13 +123,17 @@ internal class HubConnectionManager : IAsyncDisposable
 
     private Task OnClosed(HubConnection connection, Exception? error)
     {
-        if (Volatile.Read(ref _disposed) != 0 || _redirecting || !ReferenceEquals(connection, _hubConnection))
+        if (_redirecting || !ReferenceEquals(connection, _hubConnection))
         {
             return Task.CompletedTask;
         }
 
         lock (_restartLock)
         {
+            // Read under the lock DisposeAsync raises the flag under: a closure that passed an
+            // earlier check must not take _lifetime.Token from a source disposal has since released.
+            if (_disposed) return Task.CompletedTask;
+
             // Closed again while still being brought back (a hub that closes what it just accepted):
             // the running restart goes round once more rather than leaving the client out.
             if (_restarting)
@@ -139,13 +143,14 @@ internal class HubConnectionManager : IAsyncDisposable
             }
 
             _restarting = true;
+
+            // Closed is awaited by SignalR, so the work is handed off. A clean close is the hub ending a
+            // connection on purpose (a token that ran out): automatic reconnection does not apply to it,
+            // and nothing would bring the client back.
+            _logger.LogWarning(error, "The connection to the hub was closed. Starting it again.");
+            _restart = RestartAsync(connection, _lifetime.Token);
         }
 
-        // Closed is awaited by SignalR, so the work is handed off. A clean close is the hub ending a
-        // connection on purpose (a token that ran out): automatic reconnection does not apply to it,
-        // and nothing would bring the client back.
-        _logger.LogWarning(error, "The connection to the hub was closed. Starting it again.");
-        _restart = RestartAsync(connection, _lifetime.Token);
         return Task.CompletedTask;
     }
 
@@ -302,13 +307,19 @@ internal class HubConnectionManager : IAsyncDisposable
         // Cancel() on the disposed source would throw. A second caller does not wait for the first.
         // The flag is up before the connection is disposed: its Closed event must not read as a
         // closure to restart from.
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Task? restart;
+        lock (_restartLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            restart = _restart;
+        }
 
         _lifetime.Cancel();
 
-        if (_restart != null)
+        if (restart != null)
         {
-            try { await _restart; } catch (Exception) { /* a restart that failed has said so already */ }
+            try { await restart; } catch (Exception) { /* a restart that failed has said so already */ }
         }
 
         if (_hubConnection != null)

@@ -272,7 +272,14 @@ internal sealed class TokenRenewer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        lock (_startLock) _stopped = true;
+        // The client drops its reference after disposing, but a second call on the same instance
+        // would Cancel() a source already disposed. A second caller does not wait for the first.
+        lock (_startLock)
+        {
+            if (_stopped) return;
+            _stopped = true;
+        }
+
         _stop.Cancel();
 
         if (_loop != null)

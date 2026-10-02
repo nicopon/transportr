@@ -22,6 +22,7 @@ internal class BatchAccumulator<T> : IDisposable
     private int _batchId;
     private readonly CancellationTokenSource _disposeCts = new();
     private Task? _flushIntervalTask;
+    private int _disposed;
 
     // Optional in-flight window. Held on the PRODUCER side deliberately: gating the serialization
     // worker instead would only move the backlog into _batchChannel, where items are not yet
@@ -204,6 +205,10 @@ internal class BatchAccumulator<T> : IDisposable
 
     public void Dispose()
     {
+        // CompleteSenderAsync disposes it and a session released meanwhile does too; the second
+        // Cancel() on the disposed source would throw.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         // Cancel first: a producer parked on the in-flight window unwinds through the finally that
         // releases _lock, so _lock must still be usable at that point. SemaphoreSlim only needs
         // disposing when AvailableWaitHandle has been touched, which it never is here, so leaving

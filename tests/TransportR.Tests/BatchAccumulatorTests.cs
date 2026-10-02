@@ -37,6 +37,15 @@ public class BatchAccumulatorTests
     }
 
     [Fact]
+    public void Dispose_CalledTwice_IsNotAnError()
+    {
+        var accumulator = new BatchAccumulator<int>(100, 1000);
+
+        accumulator.Dispose();
+        accumulator.Dispose();
+    }
+
+    [Fact]
     public async Task AddAsync_WhenBatchSizeReached_PublishesToChannel()
     {
         // Arrange
