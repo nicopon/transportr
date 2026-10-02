@@ -32,6 +32,7 @@ public class TransportRClientBuilder<T>
     private IBatchSerializer<T>? _serializer;
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
+    private TimeSpan? _tokenRefreshThreshold;
     private Action<HubConnection>? _controlConnectionCallback;
 
     /// <summary>
@@ -149,6 +150,25 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// How long before a token expires the client asks its provider for a new one and presents it to
+    /// the hub. Default: 5 minutes, and never more than half of what is left of the token, so a token
+    /// shorter than two thresholds is renewed once rather than continuously.
+    /// </summary>
+    /// <remarks>
+    /// The hub closes a connection whose token it has not been given a new one for, so this is how
+    /// long the identity provider may be out of reach before connections start to close. It also
+    /// governs when a transport asks the provider for a token as it connects. A provider that caches
+    /// (<c>WithClientCredentials</c> does, until its own <c>RefreshThreshold</c>) returns the same token
+    /// until then, and the renewal retries until it does not.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithTokenRefreshThreshold(TimeSpan threshold)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(threshold, TimeSpan.Zero, nameof(threshold));
+        _tokenRefreshThreshold = threshold;
+        return this;
+    }
+
+    /// <summary>
     /// Registers handlers on the single connection this client carries - the same one TransportR's
     /// own handshake uses - for a hub extended with the host's own vocabulary
     /// (<c>DataHubBuilder.UseHub&lt;THub&gt;</c>). Composes with TransportR's own registration
@@ -189,6 +209,7 @@ public class TransportRClientBuilder<T>
         };
 
         options.ReceiveBufferCapacity = _receiveCapacity;
+        if (_tokenRefreshThreshold is { } threshold) options.TokenRefreshThreshold = threshold;
 
         // Neither end bounded is a supported configuration and the right one for a consumer that
         // keeps up, so this is a warning and not a refusal. It is loud because the failure it
@@ -205,6 +226,7 @@ public class TransportRClientBuilder<T>
         var hubUrl = _url.TrimEnd('/');
         var controlUrl = hubUrl + WireRoutes.CommandHub;
         var dataUrl = hubUrl + WireRoutes.StreamBase;
+        var clientUrl = hubUrl + WireRoutes.ClientBase;
 
         // Create Internal Components
         var connectionManager = new HubConnectionManager(
@@ -250,6 +272,7 @@ public class TransportRClientBuilder<T>
             _batchSize,
             options,
             dataUrl,
+            clientUrl,
             httpClient,
             streamManager
         );

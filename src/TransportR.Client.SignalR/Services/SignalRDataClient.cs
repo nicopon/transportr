@@ -37,6 +37,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     // Configuration
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
+    private readonly string _clientUrl;
 
     // Infrastructure
     private readonly RecyclableMemoryStreamManager _streamManager;
@@ -60,6 +61,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         int defaultBatchSize,
         ClientOptions options,
         string dataUrl,
+        string clientUrl,
         HttpClient httpClient,
         RecyclableMemoryStreamManager streamManager)
     {
@@ -71,6 +73,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         _defaultBatchSize = defaultBatchSize;
         _options = options;
         _dataUrl = dataUrl;
+        _clientUrl = clientUrl;
         
         _streamManager = streamManager;
         _httpClient = httpClient;
@@ -94,12 +97,19 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             }
         );
         _signaling.Initialize();
+
+        // A connection the hub closed comes back as a stranger to it: registered again, and with the
+        // token held now presented.
+        _connectionManager.ConnectionRestarted = () => _registered
+            ? ReRegisterAsync("the connection was closed")
+            : Task.CompletedTask;
     }
 
 
     private IEnumerable<string>? _lastConnectGroups;
     private bool _registered;
     private Timer? _presenceTimer;
+    private TokenRenewer? _renewer;
 
     public async Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)
     {
@@ -114,6 +124,24 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         _registered = true;
 
         StartPresenceHeartbeat();
+        StartTokenRenewal();
+    }
+
+    private void StartTokenRenewal()
+    {
+        if (_connectionManager.HasTokenProvider)
+        {
+            _renewer ??= new TokenRenewer(_connectionManager, _httpClient, _clientUrl, ClientId, _options.TokenRefreshThreshold, _logger);
+            _renewer.Start();
+        }
+        else if (_connectionManager.TokenExpiry is { } expiry)
+        {
+            // Nothing here can get another token, and the hub holds a connection to the expiry it
+            // attested: it closes this one then, and a restart cannot get past authentication.
+            _logger.LogWarning(
+                "The access token is static and expires at {Expiry:u}. The hub closes this connection then. Configure a token provider to keep it.",
+                expiry);
+        }
     }
 
     /// <summary>
@@ -161,6 +189,10 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
                 ClientId, reason, groupsList != null ? string.Join(", ", groupsList) : "none");
 
             await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList);
+
+            // The registration was written from the principal of a connection that may be as old as
+            // the token it opened with, however long ago that was.
+            _renewer?.PushNow();
         }
         catch (Exception ex)
         {
@@ -177,6 +209,12 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         {
             await _presenceTimer.DisposeAsync();
             _presenceTimer = null;
+        }
+
+        if (_renewer != null)
+        {
+            await _renewer.DisposeAsync();
+            _renewer = null;
         }
 
         // Stop all sessions

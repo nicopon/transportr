@@ -65,8 +65,13 @@ public class ClientOptions
     public TimeSpan CompleteStallTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
-    /// Threshold before token expiry to trigger refresh. Default: 5 minutes.
+    /// How long before a token expires the client asks its provider for a new one and presents it to
+    /// the hub. Default: 5 minutes, and never more than half of what is left of the token.
     /// </summary>
+    /// <remarks>
+    /// Also the point from which a transport that connects asks the provider rather than reuse the
+    /// token it holds.
+    /// </remarks>
     public TimeSpan TokenRefreshThreshold { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>

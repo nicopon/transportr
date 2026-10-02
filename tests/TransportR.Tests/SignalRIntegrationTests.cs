@@ -789,6 +789,7 @@ public class SignalRIntegrationTests
             defaultBatchSize: 100,
             options,
             url + WireRoutes.StreamBase,
+            url + WireRoutes.ClientBase,
             httpClient,
             streamManager
         );

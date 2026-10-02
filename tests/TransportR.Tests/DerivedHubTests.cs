@@ -117,7 +117,7 @@ public class DerivedHubTests
 
         return new SignalRDataClient<string>(
             connectionManager, registry, serializer, logger, defaultBatchSize: 10, options,
-            url + WireRoutes.StreamBase, httpClient, streamManager);
+            url + WireRoutes.StreamBase, url + WireRoutes.ClientBase, httpClient, streamManager);
     }
 
     [Fact]
