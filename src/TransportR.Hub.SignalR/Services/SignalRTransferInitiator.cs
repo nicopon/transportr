@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Interfaces;
@@ -22,7 +23,7 @@ public class SignalRTransferInitiator : ITransferInitiator
     private readonly IHubContext<CommandHub> _hubContext;
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
-    private readonly IFlowControlService? _flowControlService;
+    private readonly AccessPolicy _policy;
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<SignalRTransferInitiator> _logger;
     private readonly TimeProvider _time;
@@ -31,18 +32,18 @@ public class SignalRTransferInitiator : ITransferInitiator
         IHubContext<CommandHub> hubContext,
         IStateStore stateStore,
         ITransferManager transferManager,
+        AccessPolicy policy,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<SignalRTransferInitiator> logger,
-        IFlowControlService? flowControlService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider timeProvider)
     {
-        _time = timeProvider ?? TimeProvider.System;
+        _time = timeProvider;
         _hubContext = hubContext;
         _stateStore = stateStore;
         _transferManager = transferManager;
+        _policy = policy;
         _affinityOptions = affinityOptions.Value;
         _logger = logger;
-        _flowControlService = flowControlService;
     }
 
     public async Task<string> InitTransferAsync(
@@ -90,36 +91,29 @@ public class SignalRTransferInitiator : ITransferInitiator
 
     internal void ValidateTransferRequest(ClientRegistration sourceClient, ClientRegistration targetClient)
     {
-        if (IsTokenExpired(sourceClient))
+        var verdict = _policy.Evaluate(sourceClient, targetClient);
+        if (verdict == AccessVerdict.Allowed)
         {
-            _logger.LogWarning("InitTransfer denied: Source client {SourceClientId} token has expired", sourceClient.ClientId);
-            throw new HubException("Source client token has expired. Please reconnect with a fresh token.");
-        }
-
-        if (IsTokenExpired(targetClient))
-        {
-            _logger.LogWarning("InitTransfer denied: Target client {TargetClientId} token has expired", targetClient.ClientId);
-            throw new HubException("Target client token has expired.");
-        }
-
-        if (_flowControlService == null) return;
-
-        if (sourceClient.Groups.Count == 0 || targetClient.Groups.Count == 0)
-        {
-            _logger.LogWarning("InitTransfer failed: Client groups not found. Source={SourceGroups}, Target={TargetGroups}",
+            _logger.LogInformation("Transfer authorized: [{SourceGroups}] -> [{TargetGroups}]",
                 string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
-            throw new HubException("Client groups not found.");
+            return;
         }
 
-        if (!_flowControlService.CanSendTo(sourceClient.Groups, targetClient.Groups))
+        // Who is at fault stays out of the verdict: only an expired token has two possible owners,
+        // and the caller is told which one it is.
+        var sourceAtFault = _policy.Evaluate(sourceClient) != AccessVerdict.Allowed;
+        _logger.LogWarning(
+            "InitTransfer denied ({Verdict}): Source {SourceClientId} [{SourceGroups}], Target {TargetClientId} [{TargetGroups}]",
+            verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups),
+            targetClient.ClientId, string.Join(", ", targetClient.Groups));
+
+        throw new HubException(verdict switch
         {
-            _logger.LogWarning("InitTransfer denied: Groups [{SourceGroups}] are not authorized to send to groups [{TargetGroups}]",
-                string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
-            throw new HubException("Transfer not authorized.");
-        }
-
-        _logger.LogInformation("Flow control authorized: [{SourceGroups}] -> [{TargetGroups}]",
-            string.Join(", ", sourceClient.Groups), string.Join(", ", targetClient.Groups));
+            AccessVerdict.TokenExpired when sourceAtFault => "Source client token has expired. Please reconnect with a fresh token.",
+            AccessVerdict.TokenExpired => "Target client token has expired.",
+            AccessVerdict.NoGroups => "Client groups not found.",
+            _ => "Transfer not authorized."
+        });
     }
 
     /// <summary>
@@ -221,10 +215,5 @@ public class SignalRTransferInitiator : ITransferInitiator
     {
         await _transferManager.UnregisterParticipantsAsync(transferId);
         await _hubContext.Clients.Client(receiver.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
-    }
-
-    private bool IsTokenExpired(ClientRegistration client)
-    {
-        return client.TokenExpiry.HasValue && _time.GetUtcNow().UtcDateTime > client.TokenExpiry.Value;
     }
 }

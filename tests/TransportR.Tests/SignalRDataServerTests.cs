@@ -301,14 +301,15 @@ public class SignalRDataServerTests
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Connection-Type"] = type.ToString();
 
-        // The identity provider and the state store are only read once a caller is authenticated,
-        // and this one is not: dev mode, where the data plane is open.
+        // The identity provider, the state store and the policy are only read once a caller is
+        // authenticated, and this one is not: dev mode, where the data plane is open.
         var controller = new StreamController(
             server,
             new KnownTransfer(),
             stateStore: null!,
             identityProvider: null!,
             hub.Bridges,
+            policy: null!,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -326,14 +327,15 @@ public class SignalRDataServerTests
         http.Request.Headers["X-Connection-Type"] = nameof(ConnectionType.Data);
         http.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
 
-        // The identity provider and the state store are only read once a caller is authenticated,
-        // and this one is not: dev mode, where the data plane is open.
+        // The identity provider, the state store and the policy are only read once a caller is
+        // authenticated, and this one is not: dev mode, where the data plane is open.
         var controller = new StreamController(
             new FailingServer(new IOException("destination gone")),
             new KnownTransfer(),
             stateStore: null!,
             identityProvider: null!,
             new BridgeManager(NullLoggerFactory.Instance),
+            policy: null!,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }

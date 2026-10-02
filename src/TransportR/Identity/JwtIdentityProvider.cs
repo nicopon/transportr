@@ -10,7 +10,8 @@ namespace TransportR.Identity;
 /// </summary>
 /// <remarks>
 /// Extracts client ID from 'sub' claim, groups from 'transportr:group:*' scopes,
-/// and token expiry from 'exp' claim.
+/// and token expiry from 'exp' claim. A token with no such scope resolves to an identity with
+/// no groups rather than to null.
 /// </remarks>
 public class JwtIdentityProvider : IClientIdentityProvider
 {
@@ -38,10 +39,12 @@ public class JwtIdentityProvider : IClientIdentityProvider
             .Select(c => c.Value.Replace("transportr:group:", ""))
             .ToHashSet();
 
+        // An empty set is an answer, not a failure: a valid token that grants nothing is how an
+        // identity provider withdraws every right, and only the caller knows whether that is a
+        // refusal (Connect) or the withdrawal itself (renewal).
         if (groups.Count == 0)
         {
             _logger?.LogWarning("JwtIdentityProvider: No TransportR group scopes found in token");
-            return null;
         }
 
         // ASP.NET Core's JwtBearer handler maps 'sub' onto NameIdentifier unless the host sets

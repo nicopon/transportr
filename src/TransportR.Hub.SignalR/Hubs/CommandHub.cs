@@ -1,6 +1,7 @@
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Configuration;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Exceptions;
 using TransportR.Hub.SignalR.Services;
@@ -18,7 +19,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 {
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
-    private readonly IFlowControlService? _flowControlService;
+    private readonly AccessPolicy _policy;
     private readonly IClientIdentityProvider _identityProvider;
     private readonly IBridgeManager _bridgeManager;
     private readonly SignalRTransferInitiator _initiator;
@@ -32,19 +33,19 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         IClientIdentityProvider identityProvider,
         IBridgeManager bridgeManager,
         SignalRTransferInitiator initiator,
+        AccessPolicy policy,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
-        IFlowControlService? flowControlService = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider timeProvider)
     {
-        _time = timeProvider ?? TimeProvider.System;
+        _time = timeProvider;
         _stateStore = stateStore;
         _transferManager = transferManager;
         _identityProvider = identityProvider;
         _bridgeManager = bridgeManager;
         _initiator = initiator;
+        _policy = policy;
         _affinityOptions = affinityOptions.Value;
-        _flowControlService = flowControlService;
         _logger = logger;
     }
 
@@ -78,13 +79,21 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
         }
 
+        // A token that grants nothing is a valid token and no registration. Renewal is the one place
+        // it means something else: there it withdraws what the client had.
+        if (_policy.Evaluate(identity) == AccessVerdict.NoGroups)
+        {
+            _logger.LogWarning("Connect failed: the identity of {ClientId} holds no group", identity.ClientId);
+            throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
+        }
+
         // The store overwrites on save, so without this a caller who learned another client's id
         // from GetReceivers takes over its registration: transfers aimed at it land here, and the
         // data plane checks streams against the subject just written. A registration still within
         // its disconnection grace is protected too, since its owner is expected to reclaim it.
         // Dev mode attests no subject, so both sides are null and nothing is refused there.
         var existing = await _stateStore.GetClientAsync(identity.ClientId);
-        if (existing != null && !string.Equals(existing.Subject, identity.Subject, StringComparison.Ordinal))
+        if (existing != null && AccessPolicy.SameIdentity(existing.Subject, identity.Subject) != AccessVerdict.Allowed)
         {
             _logger.LogWarning("Connect refused: ClientId {ClientId} is registered under subject {ExistingSubject}, caller attests {Subject}",
                 identity.ClientId, existing.Subject, identity.Subject);
@@ -117,26 +126,24 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     {
         var sourceClient = await GetClientByConnectionAsync(Context.ConnectionId);
         
-        if (sourceClient == null || sourceClient.Groups.Count == 0)
+        if (sourceClient == null)
         {
             _logger.LogWarning("GetReceivers called by unregistered client {ConnectionId}", Context.ConnectionId);
+            return [];
+        }
+
+        var verdict = _policy.Evaluate(sourceClient);
+        if (verdict != AccessVerdict.Allowed)
+        {
+            _logger.LogWarning("GetReceivers refused for client {ClientId}: {Verdict}", sourceClient.ClientId, verdict);
             return [];
         }
         
         var allClients = await _stateStore.GetAllClientsAsync();
         
-        // Exclude self
-        var otherClients = allClients.Where(c => c.ClientId != sourceClient.ClientId).ToList();
-        
-        // If no flow control service, return all other clients
-        if (_flowControlService == null)
-        {
-            return otherClients.Select(ToClientInfo).ToList();
-        }
-        
-        // Filter to only clients where ANY source group can send to ANY target group
-        var authorizedReceivers = otherClients
-            .Where(r => _flowControlService.CanSendTo(sourceClient.Groups, r.Groups))
+        // Self excluded, then only the targets the same decision as InitTransfer lets this caller reach.
+        var authorizedReceivers = allClients
+            .Where(c => c.ClientId != sourceClient.ClientId && _policy.MayReach(sourceClient, c) == AccessVerdict.Allowed)
             .Select(ToClientInfo)
             .ToList();
         

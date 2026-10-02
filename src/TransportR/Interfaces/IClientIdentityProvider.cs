@@ -18,7 +18,11 @@ public interface IClientIdentityProvider
     /// <param name="user">The claims principal from the connection context.</param>
     /// <param name="providedClientId">Optional client-provided ID (used in dev mode).</param>
     /// <param name="providedGroups">Optional client-provided groups (used in dev mode).</param>
-    /// <returns>The resolved client identity, or null if identity cannot be resolved.</returns>
+    /// <returns>
+    /// The resolved client identity, or null if identity cannot be resolved. An identity whose
+    /// groups are empty is a resolved identity that holds no right, and is not the same answer as
+    /// null: renewal applies it as a withdrawal, whereas registration refuses it.
+    /// </returns>
     ClientIdentity? ResolveIdentity(
         System.Security.Claims.ClaimsPrincipal? user,
         Guid? providedClientId,

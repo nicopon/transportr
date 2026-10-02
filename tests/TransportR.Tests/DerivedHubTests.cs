@@ -13,6 +13,7 @@ using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
 using TransportR.Hub.SignalR;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
@@ -42,10 +43,11 @@ public class DerivedHubTests
             IClientIdentityProvider identityProvider,
             IBridgeManager bridgeManager,
             SignalRTransferInitiator initiator,
+            AccessPolicy policy,
             IOptions<AffinityOptions> affinityOptions,
             ILogger<CommandHub> logger,
-            IFlowControlService? flowControlService = null)
-            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, affinityOptions, logger, flowControlService)
+            TimeProvider timeProvider)
+            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, affinityOptions, logger, timeProvider)
         {
         }
 

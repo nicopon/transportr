@@ -1,5 +1,6 @@
 using TransportR.Interfaces;
 using TransportR.Protocol;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
@@ -18,6 +19,7 @@ public class StreamController : ControllerBase
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;
     private readonly IBridgeManager _bridgeManager;
+    private readonly AccessPolicy _policy;
     private readonly ILogger<StreamController> _logger;
 
     public StreamController(
@@ -26,6 +28,7 @@ public class StreamController : ControllerBase
         IStateStore stateStore,
         IClientIdentityProvider identityProvider,
         IBridgeManager bridgeManager,
+        AccessPolicy policy,
         ILogger<StreamController> logger)
     {
         _brokerServer = brokerServer;
@@ -33,6 +36,7 @@ public class StreamController : ControllerBase
         _stateStore = stateStore;
         _identityProvider = identityProvider;
         _bridgeManager = bridgeManager;
+        _policy = policy;
         _logger = logger;
     }
 
@@ -65,11 +69,17 @@ public class StreamController : ControllerBase
         var expectedId = isSenderStream ? participants.SenderId : participants.ReceiverId;
 
         var expected = await _stateStore.GetClientAsync(expectedId);
-        var callerSubject = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null)?.Subject;
+        var caller = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null);
+        var callerSubject = caller?.Subject;
 
+        // Past this route an authenticated caller must have been attested: a registration or a token
+        // without a subject is refused here even though two absent subjects are equal elsewhere.
+        // Lifetime is the host's middleware's call, so only a token that grants nothing is refused.
         if (expected?.Subject == null
+            || caller == null
             || callerSubject == null
-            || !string.Equals(expected.Subject, callerSubject, StringComparison.Ordinal))
+            || _policy.Evaluate(caller) == AccessVerdict.NoGroups
+            || AccessPolicy.SameIdentity(expected.Subject, callerSubject) != AccessVerdict.Allowed)
         {
             _logger.LogWarning(
                 "Security: Stream access denied - caller '{CallerSubject}' is not the {Role} of transfer {TransferId} (expected '{ExpectedSubject}')",

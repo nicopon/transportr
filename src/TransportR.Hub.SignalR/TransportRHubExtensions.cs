@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using TransportR.Configuration;
+using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Controllers;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
@@ -137,6 +138,13 @@ public static class TransportRHubExtensions
         // Data plane configuration (bridge timeout)
         services.Configure<DataPlaneConfiguration>(_ => { });
         services.Configure<ClientRegistryConfiguration>(_ => { });
+
+        // The one decision on tokens, groups and identities. A negative margin would make a token
+        // outlive its expiry by a sign error, so it is refused when the host starts.
+        services.AddOptions<AccessOptions>()
+            .Validate(o => o.TokenExpiryMarginSeconds >= 0, "AccessOptions.TokenExpiryMarginSeconds cannot be negative.")
+            .ValidateOnStart();
+        services.AddSingleton<AccessPolicy>();
         
         // HttpContextAccessor needed for affinity token extraction
         services.AddHttpContextAccessor();
