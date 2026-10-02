@@ -56,6 +56,9 @@ You can provide a static token or a custom dynamic provider:
 // OR
 .WithTokenProvider(async () => await GetMyTokenAsync())
 ```
+Only a provider is renewed (see "Token Renewal" in `SecurityArchitecture.md`): the hub closes the
+connection of a client whose token it was not given a new one for, and a static token's client is closed
+when it expires. `WithTokenRefreshThreshold` sets how far ahead of the expiry the renewal starts.
 
 ### Serialization
 We recommend MessagePack for performance, but you can implement `IBatchSerializer<T>` for any

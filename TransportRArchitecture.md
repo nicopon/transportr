@@ -93,6 +93,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`) | Hub → Receiver |
 | **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
+| **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
 
 ### Data Plane Transport: HTTP/1.1
 

@@ -162,7 +162,8 @@ bridges entirely**; `TransferCleanupService` terminates a transfer with no activ
 `TransferInactivityTimeoutSeconds` (60s), and — only if `StalledProgressTimeoutSeconds` is set,
 off by default — one that is alive but making no progress. Heartbeats refresh activity but not
 progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
-stall from the hub). This is the *only* place the hub unilaterally kills a transfer.
+stall from the hub). The other place the hub unilaterally ends a transfer is `AccessSweepService`/
+`AccessReconciler`, which judge a participant's right to act, not its liveness (see "Auth").
 
 ### Backpressure
 
@@ -192,6 +193,13 @@ IdP issuing those scopes. `EnableAuth=false` (default) is dev mode: the hub trus
 client claims — never conflate this with production. `TransportR.Auth.SimpleIdp` /
 `samples/TestIdp` exist purely so a scenario can exercise the real JWT path without an external IdP;
 they are not meant to be production identity providers.
+
+Whether a token is still good, whether a client holds any right, whether it may send to another and
+whether two identities are one is decided once, by `AccessPolicy`, for `Connect`, `InitTransfer`,
+`GetReceivers`, the data plane, renewal and the sweep — a new surface asks it rather than keeping a
+copy. A client renews its token ahead of the expiry (`PUT /api/client/{id}/token`) and the hub closes
+a connection, and ends its transfers, when that does not happen: see "Token Renewal" in
+`SecurityArchitecture.md`.
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 

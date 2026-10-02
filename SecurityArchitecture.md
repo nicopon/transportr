@@ -41,7 +41,7 @@ Both planes are stated separately, because they are armed separately.
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | FlowControl validates permissions |
 | Token tampering | Signature verified against IDP |
-| Expired tokens | `exp` claim validated |
+| Expired tokens | `exp` validated by the host when a connection or a stream opens; judged by the hub for as long as it runs (see Token Renewal) |
 
 In dev mode the data plane serves anyone who knows a transfer id: there is no attested identity to
 compare, so the participant check does not run. That is the same trust as the rest of dev mode,
@@ -55,19 +55,45 @@ they cannot take the other role's place. Issue one IdP client per participant to
 
 ## Token Renewal
 
-- The hub records a token's `exp` claim when the client registers (`Connect`).
-- `InitTransfer()` refuses a client whose recorded expiry has passed, and so does a transfer the host
-  opens.
-- The client gets a fresh token when something asks it for one (a new connection, a stream request),
-  and only renews it within 5 minutes of expiry (`TokenRefreshThreshold`). A client that is connected
-  and idle asks for none.
+A client keeps the hub holding a token that has not run out, and the hub closes what is not renewed.
 
-**Known limitation.** A client that stays connected past its token's lifetime without opening a
-transfer is refused by `InitTransfer()` ("Source client token has expired") until it reconnects, which
-registers it again with a fresh token. The client sends no token over an established connection, so
-nothing renews the recorded expiry there, and nothing closes a connection whose token has expired: its
-streams and its registration stay up, and only new transfers are refused. Keep the token lifetime
-longer than the time a client can sit idle, or have an idle client reconnect.
+- **What the hub holds.** `Connect` records the token's `exp`, its groups and its subject. A connection's
+  principal is fixed when it opens, so nothing sent over an open connection can carry a newer token.
+- **The client renews ahead of the expiry**, on its own clock: `min(TokenRefreshThreshold, half of what is left)`
+  before it (5 minutes by default; `WithTokenRefreshThreshold`). It asks its token provider for a new token and
+  presents it with `PUT /api/client/{clientId}/token` (`Authorization: Bearer`). The host's authentication
+  validates it as it does a data stream; the hub records the groups and the expiry it carries and answers with the
+  expiry it recorded, which is what the next renewal is armed on when the client cannot read its own token
+  (an encrypted or opaque one). A failed attempt keeps the old token and is retried, with growing and jittered
+  delays, until the expiry; a provider that hands back the token it gave before (a caching one) is asked again.
+- **Refusals are 404**, as on the data plane: no such registration, a token of another subject, a token already
+  past its expiry on the hub's clock. A valid token of the registered subject that carries no
+  `transportr:group:*` scope is not a refusal: it withdraws every right, and is applied.
+- **Fail closed.** `AccessSweepService` re-judges every registered client every `AccessSweepIntervalSeconds`
+  (5). A client whose token has run out (plus `TokenExpiryMarginSeconds`, 0 by default) has its transfers ended,
+  so that it and its peer are told, and then its connection closed, with a warning that no renewal was received.
+  A transfer whose groups the flow control service no longer lets reach each other ends too. The same pass runs
+  after each renewal, so groups follow the token, and when the host calls `IAccessReconciler`, which is how a host
+  that changes its own policy applies a withdrawal to what is already running without waiting for anyone.
+- **The client comes back.** A connection the hub closes is started again by the client, with jittered, capped
+  delays and no limit, and registers on it again. Starting it asks the provider for a token, so while the
+  identity provider is down the client stays out.
+- **Dev mode** has no token: nothing expires and nothing is closed.
+
+For a deployment:
+
+- Update the hub and its clients together. A client without renewal (0.2.0) is closed at its token's expiry and
+  does not come back.
+- A reverse proxy that filters by path must let `/api/client/*` through as it does `/api/stream/*`. Blocked, every
+  connection closes at its token's expiry.
+- A static token (`WithAccessToken`) cannot be renewed: its client is closed at the expiry, and says so when it connects.
+- The identity provider may be out of reach for as long as the renewal advance without any effect. Past that,
+  connections close as their tokens expire, and a client cannot start again until the provider answers.
+- The margin governs the hub's own decisions. Opening a connection or a stream is judged by the host's JwtBearer
+  middleware against its own `ClockSkew`, so a margin beyond that keeps open what is open and admits nothing new.
+- A token is a bearer token: an older one that has not expired can be presented again, and a right withdrawn at the
+  identity provider reaches the hub as fast as tokens are renewed. A withdrawal decided by the host does not wait:
+  see `IAccessReconciler`.
 
 ---
 

@@ -86,22 +86,26 @@ app.Run();
 
 ## Testability
 
-Hub components use interfaces for easy mocking:
+Hub components take their collaborators through interfaces and a `TimeProvider`, so a test can
+build one by hand and move the clock instead of waiting:
 
 ```csharp
-// In tests
-var stateStore = new Mock<IStateStore>();
-var transferManager = new Mock<ITransferManager>();
-var identityProvider = new Mock<IClientIdentityProvider>();
-var affinityOptions = Options.Create(new AffinityOptions());
-var logger = new Mock<ILogger<CommandHub>>();
+var clock = new FakeTimeProvider();
+var stateStore = new InMemoryStateStore(timeProvider: clock);
+var transferManager = new TransferManager(stateStore, clock);
+var policy = new AccessPolicy(Options.Create(new AccessOptions()), clock);   // IFlowControlService is optional
 
 var hub = new CommandHub(
-    stateStore.Object,
-    transferManager.Object,
-    identityProvider.Object,
-    affinityOptions,
-    logger.Object);
+    stateStore,
+    transferManager,
+    identityProvider,        // IClientIdentityProvider
+    bridgeManager,           // IBridgeManager
+    initiator,               // SignalRTransferInitiator
+    policy,
+    new ConnectionRegistry(),
+    Options.Create(new AffinityOptions()),
+    logger,                  // ILogger<CommandHub>
+    clock);
 ```
 
 ## Dumb Pipe Design
