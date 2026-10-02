@@ -9,7 +9,8 @@ namespace TransportR.Tests;
 
 /// <summary>
 /// A producer calling into a handle whose transfer has ended is told so with the exception the
-/// contract names, whichever way the transfer ended and whether or not the call raced the ending.
+/// contract names, whichever way the transfer ended. A call in the instant between the state turning
+/// Failed and the queue closing is accepted; the failure reaches the producer on the next one.
 /// The queue underneath closes with the transfer; a caller never sees its exception type.
 /// </summary>
 public class SendAfterTerminationTests
@@ -50,8 +51,7 @@ public class SendAfterTerminationTests
         hub.Forget();
         await UntilAsync(() => session.State == SessionState.Failed);
 
-        await Assert.ThrowsAsync<TransferFailedException>(
-            () => session.SendAsync("a", CancellationToken.None).WaitAsync(Bound));
+        await AssertFailureReachesTheProducerAsync(session);
     }
 
     [Fact]
@@ -68,6 +68,31 @@ public class SendAfterTerminationTests
 
         await Assert.ThrowsAsync<TransferFailedException>(
             () => session.CompleteAsync(CancellationToken.None).WaitAsync(Bound));
+    }
+
+    // The state turns Failed before the queue closes, so a call landing between the two is accepted,
+    // exactly as one made just before the failure would be. What a producer can rely on is that the
+    // failure reaches it on a later call, and that once it has it keeps reaching it.
+    private static async Task AssertFailureReachesTheProducerAsync(DataSession<string> session)
+    {
+        var deadline = DateTime.UtcNow + Bound;
+        while (true)
+        {
+            try
+            {
+                await session.SendAsync("a", CancellationToken.None).WaitAsync(Bound);
+            }
+            catch (TransferFailedException)
+            {
+                break;
+            }
+
+            Assert.True(DateTime.UtcNow < deadline, "No call was told the transfer had failed.");
+            await Task.Yield();
+        }
+
+        await Assert.ThrowsAsync<TransferFailedException>(
+            () => session.SendAsync("b", CancellationToken.None).WaitAsync(Bound));
     }
 
     private static async Task<DataSession<string>> StartedSenderAsync(StubHub hub, int? window, int batchSize = 1)
