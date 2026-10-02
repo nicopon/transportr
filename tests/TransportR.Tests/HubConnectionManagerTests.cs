@@ -104,4 +104,34 @@ public class HubConnectionManagerTests
         Assert.Equal("token_2", token);
         Assert.Equal(2, callCount);
     }
+
+    [Fact]
+    public async Task DisposeAsync_CalledTwice_IsNotAnError()
+    {
+        var manager = new HubConnectionManager("http://unused", new ClientOptions(), NullLogger.Instance);
+
+        await manager.DisposeAsync();
+
+        // The convention is the sessions' (SessionDisposalTests): a second release is a defensive
+        // call, not a caller error. The second Cancel() on the disposed lifetime source threw.
+        await manager.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DisposeAsync_AfterConnecting_CalledTwice_IsNotAnError()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        var manager = new HubConnectionManager(
+            TestHubServerFactory.HubUrl,
+            new ClientOptions(),
+            NullLogger.Instance,
+            configureHttpConnection: o => o.HttpMessageHandlerFactory = _ => handler);
+        manager.Initialize(_ => { });
+        await manager.Connection.StartAsync();
+
+        await manager.DisposeAsync();
+        await manager.DisposeAsync();
+    }
 }

@@ -35,7 +35,7 @@ internal class HubConnectionManager : IAsyncDisposable
     private bool _restarting;
     private bool _closedWhileRestarting;
     private bool _redirecting;
-    private bool _disposed;
+    private int _disposed;
 
     private static readonly TimeSpan FirstRestartDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxRestartDelay = TimeSpan.FromSeconds(30);
@@ -123,7 +123,7 @@ internal class HubConnectionManager : IAsyncDisposable
 
     private Task OnClosed(HubConnection connection, Exception? error)
     {
-        if (_disposed || _redirecting || !ReferenceEquals(connection, _hubConnection))
+        if (Volatile.Read(ref _disposed) != 0 || _redirecting || !ReferenceEquals(connection, _hubConnection))
         {
             return Task.CompletedTask;
         }
@@ -298,7 +298,12 @@ internal class HubConnectionManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _disposed = true;
+        // A host that disconnects its client and then disposes it reaches this twice, and the second
+        // Cancel() on the disposed source would throw. A second caller does not wait for the first.
+        // The flag is up before the connection is disposed: its Closed event must not read as a
+        // closure to restart from.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         _lifetime.Cancel();
 
         if (_restart != null)
