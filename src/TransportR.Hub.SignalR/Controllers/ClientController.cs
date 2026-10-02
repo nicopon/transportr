@@ -18,17 +18,20 @@ public class ClientController : ControllerBase
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;
     private readonly AccessPolicy _policy;
+    private readonly IAccessReconciler _reconciler;
     private readonly ILogger<ClientController> _logger;
 
     public ClientController(
         IStateStore stateStore,
         IClientIdentityProvider identityProvider,
         AccessPolicy policy,
+        IAccessReconciler reconciler,
         ILogger<ClientController> logger)
     {
         _stateStore = stateStore;
         _identityProvider = identityProvider;
         _policy = policy;
+        _reconciler = reconciler;
         _logger = logger;
     }
 
@@ -69,6 +72,9 @@ public class ClientController : ControllerBase
 
         _logger.LogInformation("Token renewed for client {ClientId}, groups [{Groups}], new expiry: {Expiry}",
             clientId, string.Join(", ", renewed.Groups), renewed.TokenExpiry?.ToString("u") ?? "N/A");
+
+        // What the new token no longer grants applies now, to what this client has running.
+        await _reconciler.ReconcileAsync(clientId, HttpContext.RequestAborted);
 
         return Ok(new TokenRenewalResponse(renewed.TokenExpiry));
     }

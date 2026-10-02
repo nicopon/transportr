@@ -401,6 +401,7 @@ public class SignalRDataServerTests
         public TransferState? GetTransfer(string transferId) => throw new NotSupportedException();
         public Task RemoveTransferAsync(string transferId) => throw new NotSupportedException();
         public IEnumerable<TransferState> GetAllTransfers() => throw new NotSupportedException();
+        public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants() => throw new NotSupportedException();
         public Task KeepAliveAsync(string transferId) => throw new NotSupportedException();
     }
 

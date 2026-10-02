@@ -20,6 +20,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
     private readonly AccessPolicy _policy;
+    private readonly ConnectionRegistry _connections;
     private readonly IClientIdentityProvider _identityProvider;
     private readonly IBridgeManager _bridgeManager;
     private readonly SignalRTransferInitiator _initiator;
@@ -34,6 +35,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         IBridgeManager bridgeManager,
         SignalRTransferInitiator initiator,
         AccessPolicy policy,
+        ConnectionRegistry connections,
         IOptions<AffinityOptions> affinityOptions,
         ILogger<CommandHub> logger,
         TimeProvider timeProvider)
@@ -45,6 +47,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         _bridgeManager = bridgeManager;
         _initiator = initiator;
         _policy = policy;
+        _connections = connections;
         _affinityOptions = affinityOptions.Value;
         _logger = logger;
     }
@@ -63,6 +66,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         // The store decides whether the mark still applies: a reconnect can overtake this
         // callback, and writing back a registration read before it would resurrect the dead
         // ConnectionId over the live one.
+        _connections.Remove(Context.ConnectionId);
         await _stateStore.MarkDisconnectedAsync(Context.ConnectionId, _time.GetUtcNow().UtcDateTime);
 
         _logger.LogInformation("Client disconnected: {ConnectionId}", Context.ConnectionId);
@@ -107,6 +111,11 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             affinityToken = ExtractAffinityToken();
         }
         
+        // Registered before the registration, and held for as long as the connection is: this is what
+        // lets a token that is not renewed close it. An expired principal is no reason to refuse it
+        // here; the next sweep closes it like any other.
+        _connections.Add(Context);
+
         var registration = new ClientRegistration(
             identity.ClientId,
             Context.ConnectionId,

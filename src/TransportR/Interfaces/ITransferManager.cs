@@ -31,6 +31,16 @@ public interface ITransferManager
     Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent);
     
     /// <summary>
+    /// A snapshot of every transfer this instance knows the participants of, by transfer id.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="GetAllTransfers"/> this includes a transfer still in its handshake, which has
+    /// participants but no statistics yet: whoever needs to find every transfer a client takes part in
+    /// has to start here.
+    /// </remarks>
+    IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants();
+
+    /// <summary>
     /// Gets the state of a transfer.
     /// </summary>
     TransferState? GetTransfer(string transferId);

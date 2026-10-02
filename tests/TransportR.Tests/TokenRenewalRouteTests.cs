@@ -181,10 +181,12 @@ public class TokenRenewalRouteTests
             clientId, "conn", [Group], null, clock.GetUtcNow().UtcDateTime.AddMinutes(1), clock.GetUtcNow().UtcDateTime, Subject: Owner));
 
         var expiry = clock.GetUtcNow().UtcDateTime.AddMinutes(10);
+        var reconciler = new RecordingReconciler();
         var controller = new ClientController(
             store,
             new JwtIdentityProvider(),
             new AccessPolicy(Options.Create(new AccessOptions()), clock),
+            reconciler,
             NullLogger<ClientController>.Instance)
         {
             ControllerContext = new ControllerContext
@@ -202,9 +204,23 @@ public class TokenRenewalRouteTests
         };
 
         Assert.IsType<OkObjectResult>(await controller.Renew(clientId));
+        Assert.Equal([clientId], reconciler.Reconciled);
 
         clock.Advance(TimeSpan.FromMinutes(11));
         Assert.IsType<NotFoundResult>(await controller.Renew(clientId));
+        Assert.Single(reconciler.Reconciled);
     }
 
+    private sealed class RecordingReconciler : IAccessReconciler
+    {
+        public List<Guid> Reconciled { get; } = [];
+
+        public Task ReconcileAsync(Guid clientId, CancellationToken cancellationToken = default)
+        {
+            Reconciled.Add(clientId);
+            return Task.CompletedTask;
+        }
+
+        public Task ReconcileAllAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }

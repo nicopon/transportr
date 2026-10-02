@@ -91,6 +91,11 @@ public class TransferManager : ITransferManager
         }
     }
     
+    public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants()
+    {
+        return new Dictionary<string, TransferParticipants>(_participants);
+    }
+
     public TransferState? GetTransfer(string transferId)
     {
         return _transfers.TryGetValue(transferId, out var state) ? state : null;

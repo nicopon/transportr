@@ -143,8 +143,15 @@ public static class TransportRHubExtensions
         // outlive its expiry by a sign error, so it is refused when the host starts.
         services.AddOptions<AccessOptions>()
             .Validate(o => o.TokenExpiryMarginSeconds >= 0, "AccessOptions.TokenExpiryMarginSeconds cannot be negative.")
+            .Validate(o => o.AccessSweepIntervalSeconds > 0, "AccessOptions.AccessSweepIntervalSeconds must be positive.")
             .ValidateOnStart();
         services.AddSingleton<AccessPolicy>();
+        services.AddSingleton<ConnectionRegistry>();
+
+        // Applies the policy to what is running: on the schedule below, after a renewal, and whenever
+        // the host calls it.
+        services.AddSingleton<IAccessReconciler, AccessReconciler>();
+        services.AddHostedService<AccessSweepService>();
         
         // HttpContextAccessor needed for affinity token extraction
         services.AddHttpContextAccessor();

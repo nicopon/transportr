@@ -47,11 +47,12 @@ public class ClosedConnectionTests
             IBridgeManager bridgeManager,
             SignalRTransferInitiator initiator,
             AccessPolicy policy,
+            ConnectionRegistry connections,
             IOptions<AffinityOptions> affinityOptions,
             ILogger<CommandHub> logger,
             TimeProvider timeProvider,
             ConnectionCounter counter)
-            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, affinityOptions, logger, timeProvider)
+            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, connections, affinityOptions, logger, timeProvider)
         {
             _counter = counter;
         }

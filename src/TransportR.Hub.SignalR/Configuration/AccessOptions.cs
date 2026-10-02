@@ -15,4 +15,16 @@ public class AccessOptions
     /// beyond that one keeps open what is already open and nothing new.
     /// </remarks>
     public int TokenExpiryMarginSeconds { get; set; }
+
+    /// <summary>
+    /// Seconds between two passes that judge every registered client again: a token that ran out
+    /// closes its connection and ends its transfers, and a transfer whose groups may no longer
+    /// reach each other ends. Default: 5. Zero or less is refused at startup.
+    /// </summary>
+    /// <remarks>
+    /// A client is closed at most this long after its expiry plus
+    /// <see cref="TokenExpiryMarginSeconds"/>. Each instance judges the connections it holds and the
+    /// transfers it runs, against the registrations of the shared store.
+    /// </remarks>
+    public int AccessSweepIntervalSeconds { get; set; } = 5;
 }

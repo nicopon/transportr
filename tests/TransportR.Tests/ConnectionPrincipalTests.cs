@@ -33,10 +33,11 @@ public class ConnectionPrincipalTests
             IBridgeManager bridgeManager,
             SignalRTransferInitiator initiator,
             AccessPolicy policy,
+            ConnectionRegistry connections,
             IOptions<AffinityOptions> affinityOptions,
             ILogger<CommandHub> logger,
             TimeProvider timeProvider)
-            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, affinityOptions, logger, timeProvider)
+            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, connections, affinityOptions, logger, timeProvider)
         {
         }
 
