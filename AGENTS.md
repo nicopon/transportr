@@ -31,10 +31,10 @@ dotnet test --collect:"XPlat Code Coverage"
 prefer it when you need the sample/test binaries under `bin/Release/net10.0/` for a benchmark run,
 since `run-benchmark.sh --no-build` execs those directly.
 
-Redis-backed tests (`RedisStateStoreTests`) use Testcontainers and are decorated with
-`[DockerAvailableFact]` (`tests/TransportR.Tests/DockerAvailableAttribute.cs`) — they auto-skip
-(not fail) when the Docker daemon isn't reachable, so a green run without Docker is expected, not a
-gap.
+Redis-backed tests (`RedisStateStoreTests`) run on a Testcontainers `redis:7.0` when Docker answers,
+and otherwise on a `redis-server` already on the machine (`tools/`, `PATH`, `/opt/homebrew/bin`),
+started on a free port per test (`tests/TransportR.Tests/RedisServer.cs`). They are decorated with
+`[RedisAvailableFact]` and auto-skip (not fail) only when neither exists. Nothing installs Redis for you.
 
 ### End-to-end / benchmark scenarios
 

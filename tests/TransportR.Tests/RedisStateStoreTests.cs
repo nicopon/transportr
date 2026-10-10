@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using StackExchange.Redis;
-using Testcontainers.Redis;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Storage.Redis;
@@ -10,29 +9,36 @@ using TransportR.Storage.Redis;
 namespace TransportR.Tests;
 
 /// <summary>
-/// Integration tests for RedisStateStore using Testcontainers.
-/// Tests are automatically skipped if Docker is not available.
+/// Integration tests for RedisStateStore, on a container or a local redis-server (see <see cref="RedisServer"/>).
+/// Tests are automatically skipped if neither is available.
 /// </summary>
 [Trait("Category", "Integration")]
 public class RedisStateStoreTests : IAsyncLifetime
 {
-    private readonly RedisContainer _redis = new RedisBuilder("redis:7.0")
-        .Build();
-
+    private RedisServer _redis = null!;
     private RedisStateStore _store = null!;
     private IConnectionMultiplexer _multiplexer = null!;
     private readonly ILogger<RedisStateStore> _logger = new LoggerFactory().CreateLogger<RedisStateStore>();
 
     public async Task InitializeAsync()
     {
-        await _redis.StartAsync();
-        _multiplexer = await ConnectWhenPublishedAsync(_redis.GetConnectionString());
+        _redis = await RedisServer.StartAsync();
+        try
+        {
+            _multiplexer = await ConnectWhenPublishedAsync(_redis.ConnectionString);
+        }
+        catch
+        {
+            // xUnit does not dispose a test whose initialization failed, and the server would outlive the run.
+            await _redis.DisposeAsync();
+            throw;
+        }
+
         _store = new RedisStateStore(_multiplexer, _logger);
     }
 
-    // StartAsync returns once the container answers from the inside; the port it publishes on the
-    // host can lag a few milliseconds behind, and a connect in that gap is refused at once rather
-    // than timing out.
+    // A container answers from the inside before the port it publishes on the host does, and a
+    // connect in that gap is refused at once rather than timing out.
     private static async Task<IConnectionMultiplexer> ConnectWhenPublishedAsync(string connectionString)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
@@ -52,12 +58,12 @@ public class RedisStateStoreTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _multiplexer?.Dispose();
-        await _redis.DisposeAsync();
+        if (_redis != null) await _redis.DisposeAsync();
     }
 
     // ========== Client Tests ==========
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task SaveClient_ThenGetClient_ReturnsClient()
     {
         var clientId = Guid.NewGuid();
@@ -71,7 +77,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Equal("conn-1", result.ConnectionId);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task GetClientByConnectionId_ReturnsClient()
     {
         var clientId = Guid.NewGuid();
@@ -85,14 +91,14 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Equal(clientId, result.ClientId);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task GetClientByConnectionId_NotFound_ReturnsNull()
     {
         var result = await _store.GetClientByConnectionIdAsync($"non-existent-{Guid.NewGuid()}");
         Assert.Null(result);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task GetAllClients_ReturnsAllClients()
     {
         var client1 = CreateClient(Guid.NewGuid(), $"conn-{Guid.NewGuid()}");
@@ -105,7 +111,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.True(all.Count >= 2); // May have clients from other tests
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task DeleteClient_RemovesFromBothIndexes()
     {
         var clientId = Guid.NewGuid();
@@ -119,7 +125,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Null(await _store.GetClientByConnectionIdAsync(connectionId));
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task RenewClient_ReplacesTheGroupsAndTheExpiry_AndNothingElse()
     {
         var clientId = Guid.NewGuid();
@@ -145,7 +151,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.True(ttlAfter <= ttlBefore);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task RenewClient_UnderAnotherSubject_ChangesNothing()
     {
         var clientId = Guid.NewGuid();
@@ -158,13 +164,13 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Equal(new[] { "test-group" }, stored!.Groups);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task RenewClient_OfAnUnknownClient_ReturnsNull()
     {
         Assert.Null(await _store.RenewClientAsync(Guid.NewGuid(), "subject", new HashSet<string> { "g" }, null));
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task MarkDisconnected_RacingARenewal_IsNotLost()
     {
         const int rounds = 200;
@@ -188,7 +194,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Equal(0, lost);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task MarkDisconnected_MarksTheRegistrationOfThatConnection()
     {
         var clientId = Guid.NewGuid();
@@ -202,7 +208,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.NotNull(stored.DisconnectedAtUtc);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task MarkDisconnected_AfterTheClientReconnected_LeavesTheLiveRegistrationAlone()
     {
         // Same race as in memory, and the one this store used to lose outright: it keeps the
@@ -224,7 +230,7 @@ public class RedisStateStoreTests : IAsyncLifetime
 
     // ========== Session Tests (HA) ==========
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task SaveSession_ThenGetSession_ReturnsSession()
     {
         var transferId = $"transfer-{Guid.NewGuid()}";
@@ -237,7 +243,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Equal(session.SenderId, result.SenderId);
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task GetSession_Expired_ReturnsNull()
     {
         // Expired 5 minutes ago
@@ -252,7 +258,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Null(result);
     }
     
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task ExtendSessionExpiry_UpdatesTTL()
     {
         var transferId = $"transfer-extend-{Guid.NewGuid()}";
@@ -280,7 +286,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.NotNull(resultAfterOriginalTTL); // Should still be alive due to extension
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task DeleteSession_RemovesSession()
     {
         var transferId = $"transfer-del-{Guid.NewGuid()}";
@@ -314,7 +320,7 @@ public class RedisStateStoreTests : IAsyncLifetime
             DisconnectedGraceSeconds = graceSeconds
         }));
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task SaveClient_UsesTheConnectedTtl_WhenStillConnected()
     {
         // Arrange
@@ -332,7 +338,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.True(ttl > TimeSpan.FromMinutes(30), $"Expected the connected TTL, got {ttl}");
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task SaveClient_UsesTheGrace_OnceDisconnected()
     {
         // Arrange
@@ -349,7 +355,7 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.True(ttl <= TimeSpan.FromSeconds(60), $"Expected the grace TTL, got {ttl}");
     }
 
-    [DockerAvailableFact]
+    [RedisAvailableFact]
     public async Task GetClientByConnectionId_PushesTheExpiryBack_ForAConnectedClient()
     {
         // Arrange: a registration already close to expiring.

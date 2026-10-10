@@ -18,8 +18,8 @@ TransportR.Tests/
 ├── FlowControlServiceTests.cs     # Authorization tests
 ├── InMemoryStateStoreTests.cs     # State store tests (HA)
 ├── TransferManagerTests.cs        # Transfer management tests (HA)
-├── RedisStateStoreTests.cs        # Redis integration (Testcontainers)
-├── DockerAvailableAttribute.cs    # Auto-skip when Docker unavailable
+├── RedisStateStoreTests.cs        # Redis integration (container, or a local redis-server)
+├── RedisServer.cs                 # Picks the Redis; auto-skip when there is none
 └── TransportR.Tests.csproj
 ```
 
@@ -51,7 +51,7 @@ dotnet test --collect:"XPlat Code Coverage"
 | `FlowControlService` | 7 | Group permissions, wildcards |
 | `InMemoryStateStore` | 9 | Clients, checkpoints, connection index |
 | `TransferManager` | 8 | Participants, stats, checkpoints |
-| `RedisStateStore` | 9 | Clients, checkpoints (Testcontainers) |
+| `RedisStateStore` | 9 | Clients, checkpoints (container or local redis-server) |
 
 > **Note:** Redis tests require Docker. They are automatically skipped if Docker is unavailable.
 
