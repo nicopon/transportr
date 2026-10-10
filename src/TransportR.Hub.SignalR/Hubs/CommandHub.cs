@@ -83,9 +83,30 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
             throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
         }
 
+        var existing = await _stateStore.GetClientAsync(identity.ClientId);
+
+        // The principal is that of the token this connection opened with, however long ago, and the
+        // registration it holds may have been renewed since: the renewal spoke after the principal did,
+        // about the groups as much as about the expiry. Registering again over the same connection
+        // keeps what the renewal recorded, and judges only the refusal below on what the identity
+        // provider says now. Taking the expiry back would have the verdict read an identity with no
+        // group as expired and let it register, and the next sweep end the client's transfers; taking
+        // the groups back would bring back a scope the identity provider has withdrawn. A new
+        // connection is registered from its own principal, as it always was.
+        var groupsToRecord = identity.Groups;
+        var expiryToRecord = identity.TokenExpiry;
+        if (existing is { } held
+            && held.ConnectionId == Context.ConnectionId
+            && AccessPolicy.SameIdentity(held.Subject, identity.Subject) == AccessVerdict.Allowed
+            && held.TokenExpiry > expiryToRecord)
+        {
+            groupsToRecord = held.Groups;
+            expiryToRecord = held.TokenExpiry;
+        }
+
         // A token that grants nothing is a valid token and no registration. Renewal is the one place
         // it means something else: there it withdraws what the client had.
-        if (_policy.Evaluate(identity) == AccessVerdict.NoGroups)
+        if (_policy.Evaluate(identity with { TokenExpiry = expiryToRecord }) == AccessVerdict.NoGroups)
         {
             _logger.LogWarning("Connect failed: the identity of {ClientId} holds no group", identity.ClientId);
             throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
@@ -96,7 +117,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         // data plane checks streams against the subject just written. A registration still within
         // its disconnection grace is protected too, since its owner is expected to reclaim it.
         // Dev mode attests no subject, so both sides are null and nothing is refused there.
-        var existing = await _stateStore.GetClientAsync(identity.ClientId);
         if (existing != null && AccessPolicy.SameIdentity(existing.Subject, identity.Subject) != AccessVerdict.Allowed)
         {
             _logger.LogWarning("Connect refused: ClientId {ClientId} is registered under subject {ExistingSubject}, caller attests {Subject}",
@@ -119,16 +139,16 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         var registration = new ClientRegistration(
             identity.ClientId,
             Context.ConnectionId,
-            identity.Groups.ToHashSet(),
+            groupsToRecord.ToHashSet(),
             affinityToken,
-            identity.TokenExpiry,
+            expiryToRecord,
             _time.GetUtcNow().UtcDateTime,
             Subject: identity.Subject);
         
         await _stateStore.SaveClientAsync(registration);
         
         _logger.LogInformation("Client {ClientId} connected with groups [{Groups}] (expires: {Expiry})",
-            identity.ClientId, string.Join(", ", identity.Groups), identity.TokenExpiry?.ToString("u") ?? "N/A");
+            identity.ClientId, string.Join(", ", groupsToRecord), expiryToRecord?.ToString("u") ?? "N/A");
     }
 
     public async Task<List<ClientInfo>> GetReceivers()

@@ -66,6 +66,14 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   expiry it recorded, which is what the next renewal is armed on when the client cannot read its own token
   (an encrypted or opaque one). A failed attempt keeps the old token and is retried, with growing and jittered
   delays, until the expiry; a provider that hands back the token it gave before (a caching one) is asked again.
+- **A host can ask for it now.** `RefreshRegistrationAsync()` registers the client again with the groups its
+  identity holds at that moment and a token the provider gives now, and returns once the hub has recorded both. It
+  is for a host whose own `IClientIdentityProvider` reads rights that change: the hub writes a client's groups when
+  it registers and when it renews, and a client that does neither keeps the groups it had. The connection and the
+  transfers stay up; the renewal's reconciliation ends those the new groups no longer allow. `Connect` over the
+  connection that already holds the registration keeps its groups and its expiry when the expiry is later than the
+  principal's (the principal is the token the connection opened with, and says nothing of a renewal since), and
+  refuses an identity that holds no group as it does anywhere else.
 - **Refusals are 404**, as on the data plane: no such registration, a token of another subject, a token already
   past its expiry on the hub's clock. A valid token of the registered subject that carries no
   `transportr:group:*` scope is not a refusal: it withdraws every right, and is applied.

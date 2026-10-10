@@ -111,20 +111,104 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     private Timer? _presenceTimer;
     private TokenRenewer? _renewer;
 
+    // Held by whoever registers this client with the hub, so that two registrations do not overlap;
+    // a refresh holds it across the token push it waits for. Never disposed: a caller still waiting
+    // on it when the client goes must not meet an ObjectDisposedException.
+    private readonly SemaphoreSlim _registration = new(1, 1);
+
     public async Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)
     {
         _lastConnectGroups = groups;
         await _connectionManager.StartAsync(cancellationToken);
-        
-        var groupsList = groups?.ToList();
-        _logger.LogInformation("Registering Client (ClientId={ClientId}, Groups=[{Groups}])...", 
-            ClientId, groupsList != null ? string.Join(", ", groupsList) : "none");
 
-        await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, cancellationToken);
-        _registered = true;
+        await _registration.WaitAsync(cancellationToken);
+        try
+        {
+            await InvokeConnectAsync("Registering Client", cancellationToken);
+            _registered = true;
 
-        StartPresenceHeartbeat();
-        StartTokenRenewal();
+            StartPresenceHeartbeat();
+            StartTokenRenewal();
+        }
+        finally
+        {
+            _registration.Release();
+        }
+    }
+
+    /// <summary>
+    /// Registers this client with the hub again, now: the groups its identity holds at this instant,
+    /// and the token its provider gives now, under the same <see cref="ClientId"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a host that owns the rights of its clients and changes them while they run. The hub writes a
+    /// client's groups when it registers and when it renews its token, so until one of those a client
+    /// keeps the groups it had; this is the third occasion, at the host's choosing.
+    /// </para>
+    /// <para>
+    /// Transfers in flight are not interrupted: the connection stays up and nothing restarts. The hub
+    /// judges them again against the new groups, as it does at every renewal, and ends those the new
+    /// groups no longer let reach each other. A client with no token provider (dev mode, a static token)
+    /// registers again with the groups it was given, and presents no token.
+    /// </para>
+    /// <para>
+    /// It returns once the hub has recorded both the registration and the token. Nothing has been
+    /// written when the token provider fails (its exception is raised) or when the identity holds no
+    /// group (a <see cref="Microsoft.AspNetCore.SignalR.HubException"/>): the registration the hub had
+    /// stays. A hub that turns the token away after the registration is raised as an
+    /// <see cref="HttpRequestException"/>, and the client keeps presenting the token it holds, as it does
+    /// after a restart. Refreshes, the registration a restart, a reconnection or a redirect makes, and
+    /// the presence heartbeat take turns (a beat that finds one under way is skipped); the renewal is
+    /// ordered against the push by the renewer, which makes one attempt at a time.
+    /// </para>
+    /// <para>
+    /// Needs a hub of the same release. An older one writes the older expiry of the connection's
+    /// principal between the two steps, and its sweep ends the transfers of a client it finds expired.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The client is not connected: it has not connected, has disconnected, or its connection is being
+    /// started again. Whether to wait and call again is the caller's.
+    /// </exception>
+    public async Task RefreshRegistrationAsync(CancellationToken cancellationToken = default)
+    {
+        await _registration.WaitAsync(cancellationToken);
+        try
+        {
+            // Read once the turn is ours: the one before it may have been a restart.
+            if (!_registered || _connectionManager.Connection.State != HubConnectionState.Connected)
+            {
+                throw new InvalidOperationException(
+                    "The registration can only be refreshed while the client is connected to the hub.");
+            }
+
+            // Asked of the provider first, so that a provider that is down costs nothing: once the
+            // hub has registered the client it has the older expiry of the connection until a token
+            // reaches it.
+            var token = _renewer != null ? await _connectionManager.AcquireTokenAsync() : null;
+
+            await InvokeConnectAsync("Refreshing the registration of Client", cancellationToken);
+
+            if (token != null)
+            {
+                await _renewer!.PushNowAsync(token, cancellationToken);
+            }
+        }
+        finally
+        {
+            _registration.Release();
+        }
+    }
+
+    // The caller holds _registration.
+    private Task InvokeConnectAsync(string what, CancellationToken cancellationToken = default)
+    {
+        var groupsList = _lastConnectGroups?.ToList();
+        _logger.LogInformation("{What} (ClientId={ClientId}, Groups=[{Groups}])...",
+            what, ClientId, groupsList != null ? string.Join(", ", groupsList) : "none");
+
+        return _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, cancellationToken);
     }
 
     private void StartTokenRenewal()
@@ -162,6 +246,9 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     private async Task SendPresenceHeartbeatAsync()
     {
+        // A registration being written tells the hub this client is there as well as a beat does, and
+        // a beat that read "unknown" before it would register the client a second time over it.
+        if (!await _registration.WaitAsync(0)) return;
         try
         {
             if (_connectionManager.Connection.State != HubConnectionState.Connected) return;
@@ -169,7 +256,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             var known = await _connectionManager.Connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat));
             if (!known)
             {
-                await ReRegisterAsync("the hub no longer knows this connection");
+                await ReRegisterHeldAsync("the hub no longer knows this connection");
             }
         }
         catch (Exception ex)
@@ -178,17 +265,31 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             // SignalR's problem, not this timer's.
             _logger.LogDebug(ex, "Presence heartbeat failed for {ClientId}", ClientId);
         }
+        finally
+        {
+            _registration.Release();
+        }
     }
 
     private async Task ReRegisterAsync(string reason)
     {
+        await _registration.WaitAsync();
         try
         {
-            var groupsList = _lastConnectGroups?.ToList();
-            _logger.LogInformation("Re-registering Client {ClientId} ({Reason}, Groups=[{Groups}])",
-                ClientId, reason, groupsList != null ? string.Join(", ", groupsList) : "none");
+            await ReRegisterHeldAsync(reason);
+        }
+        finally
+        {
+            _registration.Release();
+        }
+    }
 
-            await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList);
+    // The caller holds _registration.
+    private async Task ReRegisterHeldAsync(string reason)
+    {
+        try
+        {
+            await InvokeConnectAsync($"Re-registering Client ({reason})");
 
             // The registration was written from the principal of a connection that may be as old as
             // the token it opened with, however long ago that was.
@@ -250,12 +351,15 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             
             await _connectionManager.HandleAffinityRedirectAsync(cookieName, affinityToken, async () => 
             {
-                // Re-register Client
-                var groupsList = _lastConnectGroups?.ToList();
-                _logger.LogInformation("Re-registering Client after redirect (ClientId={ClientId}, Groups=[{Groups}])...", 
-                     ClientId, groupsList != null ? string.Join(", ", groupsList) : "none");
-
-                await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, CancellationToken.None);
+                await _registration.WaitAsync();
+                try
+                {
+                    await InvokeConnectAsync("Re-registering Client after redirect");
+                }
+                finally
+                {
+                    _registration.Release();
+                }
             });
             
             // Re-invoke Connect is handled by the callback above.

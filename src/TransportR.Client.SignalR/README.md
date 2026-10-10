@@ -60,6 +60,17 @@ Only a provider is renewed (see "Token Renewal" in `SecurityArchitecture.md`): t
 connection of a client whose token it was not given a new one for, and a static token's client is closed
 when it expires. `WithTokenRefreshThreshold` sets how far ahead of the expiry the renewal starts.
 
+A host that owns the rights of its clients (its own `IClientIdentityProvider` on the hub) and changes
+them while they run applies the change without waiting for a renewal:
+```csharp
+await client.RefreshRegistrationAsync();
+```
+The client registers again under the same id, with the groups its identity holds now and a token from its
+provider, and returns once the hub has recorded both. Its connection and its transfers are not interrupted;
+the hub ends those the new groups no longer allow. It raises `InvalidOperationException` when the client is
+not connected, and the hub's refusal when the identity holds no group (the registration stays as it was).
+The hub must be of the same release.
+
 ### Serialization
 We recommend MessagePack for performance, but you can implement `IBatchSerializer<T>` for any
 format (e.g. JSON, Protobuf).

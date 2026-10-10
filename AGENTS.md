@@ -197,9 +197,9 @@ they are not meant to be production identity providers.
 Whether a token is still good, whether a client holds any right, whether it may send to another and
 whether two identities are one is decided once, by `AccessPolicy`, for `Connect`, `InitTransfer`,
 `GetReceivers`, the data plane, renewal and the sweep — a new surface asks it rather than keeping a
-copy. A client renews its token ahead of the expiry (`PUT /api/client/{id}/token`) and the hub closes
-a connection, and ends its transfers, when that does not happen: see "Token Renewal" in
-`SecurityArchitecture.md`.
+copy. A client renews its token ahead of the expiry (`PUT /api/client/{id}/token`), or when its host asks
+(`RefreshRegistrationAsync`), and the hub closes a connection, and ends its transfers, when that does not
+happen: see "Token Renewal" in `SecurityArchitecture.md`.
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 

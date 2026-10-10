@@ -33,19 +33,27 @@ public static class AuthenticatedHubServerFactory
     /// <summary>The group the one-argument <c>Stub &lt;subject&gt;</c> form attests.</summary>
     public const string DefaultGroup = "test";
 
-    /// <summary>An in-memory host: SignalR runs over the transports a test handler can carry.</summary>
-    public static IHost CreateHost(Action<DataHubBuilder>? configureHub = null)
+    /// <summary>
+    /// An in-memory host: SignalR runs over the transports a test handler can carry.
+    /// <paramref name="configureServices"/> runs once the hub is built, so what it registers replaces
+    /// the hub's own (the identity provider, the state store).
+    /// </summary>
+    public static IHost CreateHost(Action<DataHubBuilder>? configureHub = null, Action<IServiceCollection>? configureServices = null)
     {
         return new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub, configureServices))
             .Start();
     }
 
-    /// <summary>A Kestrel host on the loopback interface, so WebSockets is a transport a client can use.</summary>
-    public static async Task<LoopbackHost> StartLoopbackAsync(Action<DataHubBuilder>? configureHub = null)
+    /// <summary>
+    /// A Kestrel host on the loopback interface, so WebSockets is a transport a client can use, and a
+    /// connection keeps the principal it was opened with. <paramref name="configureServices"/> is as
+    /// for <see cref="CreateHost"/>.
+    /// </summary>
+    public static async Task<LoopbackHost> StartLoopbackAsync(Action<DataHubBuilder>? configureHub = null, Action<IServiceCollection>? configureServices = null)
     {
         var host = new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseKestrel().UseUrls("http://127.0.0.1:0"), configureHub))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseKestrel().UseUrls("http://127.0.0.1:0"), configureHub, configureServices))
             .Build();
 
         await host.StartAsync();
@@ -55,7 +63,7 @@ public static class AuthenticatedHubServerFactory
         return new LoopbackHost(host, baseUrl);
     }
 
-    private static void Configure(IWebHostBuilder webBuilder, Action<DataHubBuilder>? configureHub)
+    private static void Configure(IWebHostBuilder webBuilder, Action<DataHubBuilder>? configureHub, Action<IServiceCollection>? configureServices = null)
     {
         webBuilder
             .ConfigureServices(services =>
@@ -69,6 +77,7 @@ public static class AuthenticatedHubServerFactory
                 var builder = services.AddDataHub();
                 configureHub?.Invoke(builder);
                 builder.Build();
+                configureServices?.Invoke(services);
             })
             .Configure(app =>
             {
