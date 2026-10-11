@@ -21,7 +21,7 @@ Unified scripts for building, initializing, and benchmarking TransportR.
 
 ### `build_release.sh`
 
-Builds the entire solution in Release mode.
+Builds each project of the solution in Release mode, libraries first, then samples and tests.
 
 ```bash
 ./scripts/build_release.sh
@@ -65,8 +65,11 @@ Unified benchmark runner with scenario support.
 |----------|-------------|
 | `default` | Dev mode without authentication |
 | `oidc` | OIDC authentication with TestIdp |
+| `embedded-idp` | OIDC authentication against the SimpleIdp embedded in DataHub |
 | `data-plane-probe` | OIDC run that asks the live hub to refuse anonymous and wrong-role stream requests |
 | `chaos` | Network chaos simulation |
+| `chaos-bounded` | Chaos simulation with a bounded send window (`MAX_IN_FLIGHT_BATCHES=8`) |
+| `fast-chaos` | Chaos simulation on 200 000 items, for quick iterations |
 | `chaos-cut-sender` | Holds the sender's link silent (nothing passes, nothing is refused), then closes its connections; the transfer must resume and deliver every line |
 | `chaos-cut-receiver` | The same cut on the receiver's link |
 | `ha-no-shared-state` | HA mode (2 Hubs + TestProxy) with sticky sessions and no shared state store |
@@ -129,24 +132,3 @@ So the runner also requires each sender to have logged `[SENDER][STATS] Transfer
 which only happens on the path where `CompleteAsync` returned. That line is the sender's own word
 that the receiver acknowledged everything, and it is the only check here that distinguishes a
 delivered transfer from a delivered file.
-
----
-
-## Architecture
-
-```
-scripts/
-├── build_release.sh     # Build solution
-├── init.sh              # Generate test data
-├── run-benchmark.sh     # Unified benchmark runner
-├── README.md
-├── lib/
-│   ├── common.sh        # Utilities, logging
-│   ├── process.sh       # Process management
-│   ├── memory.sh        # RSS sampling and peak assertions
-│   └── idp.sh           # TestIdp for OIDC
-└── scenarios/
-    ├── default.env
-    ├── oidc.env
-    └── chaos.env
-```

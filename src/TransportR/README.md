@@ -6,33 +6,6 @@ Core library containing interfaces, protocols, and abstractions for the Transpor
 
 This project defines the foundational contracts and binary protocols without implementing any network transport logic. It serves as the backbone for client and server implementations.
 
-## Structure
-
-```
-TransportR/
-├── Abstractions/              # Base classes for transfer handles
-│   ├── Transfer.cs            # Base class with TransferId
-│   ├── Send.cs                # Send<T> abstract class
-│   └── Receive.cs             # Receive<T> abstract class
-├── Interfaces/
-│   ├── IBatchSerializer.cs    # Serialization contract
-│   ├── ITransportRClient.cs   # Client interfaces (IDataSender, IDataReceiver)
-│   ├── ITransportRServer.cs   # Server interface
-│   ├── ICommandClient.cs      # Client callback interface
-│   ├── ICommandHub.cs         # Hub methods interface
-│   ├── ITransferManager.cs    # Transfer lifecycle abstraction
-│   └── IHubProgressMonitor.cs  # Hub-side progress monitoring interface
-├── Models/
-│   ├── ClientInfo.cs          # Connected client information
-│   ├── ClientIdentity.cs      # Client identity from JWT
-│   └── TransferInfo.cs        # Transfer statistics
-└── Protocol/
-    ├── ChunkType.cs           # The six chunk types
-    ├── ChunkHeader.cs         # 30-byte binary header
-    ├── ChunkIO.cs             # Async read/write operations
-    └── WireRoutes.cs          # The endpoints both ends agree on
-```
-
 ## Key Interfaces
 
 ### IBatchSerializer<T>
@@ -75,9 +48,12 @@ public interface ITransferManager { ... }
 
 ## Protocols
 
-### Binary Header (v1)
+The chunk types and the protocol flow are described in [TransportRArchitecture.md](../../TransportRArchitecture.md).
 
-30-byte fixed header using `BinaryPrimitives` (zero external dependencies):
+### Binary Header (v2)
+
+30-byte fixed header using `BinaryPrimitives` (zero external dependencies). The version byte is 2
+(`ChunkHeader.CurrentVersion`); a reader rejects any other value.
 
 ```
 │ Version │ Type │ PayloadLen │ BatchId │ Count │ TransferId │ [Payload] │
@@ -86,6 +62,5 @@ public interface ITransferManager { ... }
 
 ## Dependencies
 
-- `Microsoft.IO.RecyclableMemoryStream` - Memory-efficient streams
-- `System.Diagnostics.DiagnosticSource` - OpenTelemetry metrics
+- `Microsoft.Extensions.Hosting.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` - abstractions only
 

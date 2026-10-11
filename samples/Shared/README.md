@@ -36,7 +36,7 @@ public class Order
     public decimal TotalAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal DiscountAmount { get; set; }
-    public string Currency { get; set; } = "USD";
+    public string Currency { get; set; } = "EUR";
     public string PaymentMethod { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public string ShippingPriority { get; set; } = string.Empty;

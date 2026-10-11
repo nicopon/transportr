@@ -19,6 +19,7 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 | **Reconnect probe interval** | 2 s | Wait between connectivity probes while a session is `Reconnecting` (hard-coded) |
 | **Pong Wait** | 10 s timeout | HTTP stream Ping/Pong Handshake |
 | **SignalR connect backoff** | 500 ms → 5 s | Exponential over 5 attempts, on the initial hub connection only (hard-coded). Restarting a data stream is not backed off. |
+| **SignalR restart backoff** | 1 s → 30 s | After a closed hub connection: exponential with jitter (half to full delay), no limit (hard-coded) |
 | **Bridge Timeout** | 300 s | Hub cancels a non-active bridge waiting for a peer (`BridgeTimeoutSeconds`) |
 | **Transfer Inactivity** | 60 s | Hub terminates a transfer gone fully silent (`TransferInactivityTimeoutSeconds`) |
 | **Stalled Progress** | disabled | Opt-in: alive but not advancing (`StalledProgressTimeoutSeconds`) |
@@ -289,7 +290,7 @@ stateDiagram-v2
     
     Streaming --> Reconnecting: IOException
     Reconnecting --> Streaming: Reconnected + Pong
-    Reconnecting --> Failed: Max retries
+    Streaming --> Failed: Fatal stream failure, or no acknowledgement for CompleteStallTimeout
     
     state "Sender Completion" as SenderCompletion {
         Streaming --> SenderCompleteSent: Send Complete
@@ -315,11 +316,15 @@ stateDiagram-v2
 | `Idle` | Initial state before starting |
 | `Starting` | Establishing HTTP streams |
 | `Streaming` | Normal data transfer |
-| `Reconnecting` | Stream broken, attempting recovery |
+| `Reconnecting` | Stream broken: probes the hub every 2 s until it answers. No retry limit |
 | `SenderCompleteSent` | Sender: Complete sent, awaiting ACK |
 | `SenderAckReceived` | Sender: Got CompleteAck |
 | `ReceiverCompleteReceived` | Receiver: Got Complete chunk |
 | `ReceiverAckSent` | Receiver: Sent CompleteAck |
+| `SenderTerminatingDataPost` | [Sender] Step 5: closing the POST (data) stream |
+| `SenderAwaitingControlGetEOF` | [Sender] Step 8: waiting for the GET (control) stream to end |
+| `ReceiverAwaitingDataGetEOF` | [Receiver] Step 6: waiting for the GET (data) stream to end |
+| `ReceiverTerminatingControlPost` | [Receiver] Step 7: closing the POST (control) stream |
 | `Completed` | Transfer finished successfully |
 | `Failed` | Unrecoverable error |
 | `Disposed` | Session disposed |

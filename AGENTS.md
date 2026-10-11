@@ -46,7 +46,7 @@ via the scripts, which double as both benchmark and non-regression check (they a
 counts in the output CSVs):
 
 ```bash
-./scripts/init.sh                    # one-time: downloads Toxiproxy/Redis, generates data/orders.bin (2M orders)
+./scripts/init.sh                    # one-time: downloads Toxiproxy (and Redis on linux-amd64), generates data/orders.bin (2M orders)
 ./scripts/run-benchmark.sh           # scenario "default": no auth
 ./scripts/run-benchmark.sh oidc      # external TestIdp + OIDC
 ./scripts/run-benchmark.sh chaos     # Toxiproxy-injected network faults mid-transfer
@@ -117,7 +117,7 @@ src/TransportR.Storage.Redis                # IStateStore backed by Redis, for H
 `IStateStore` (`src/TransportR/Interfaces/IStateStore.cs`) is the abstraction that makes HA possible:
 client registrations and `TransferSession`s go through it, with three implementations —
 `InMemoryStateStore` (default, single hub), `RedisStateStore` (HA, shared across hub instances), and
-`ProxyStateStore` in `TransportR.TestProxy` (the reference HA test harness, not a product feature).
+`TestProxyStateStore`, the hub-side adapter of the reference HA harness, which forwards to `ProxyStateStore` in `TransportR.TestProxy` (not a product feature).
 A new state-carrying concept for HA needs a home in this interface, not a hub-local field.
 
 Client registrations outlive their connection on purpose (a reconnect reclaims them), so they are
@@ -220,7 +220,7 @@ happen: see "Token Renewal" in `SecurityArchitecture.md`.
   of the build.
 - **A doc comment outlives nothing.** When a member goes, its `///` block goes with it.
 - **Prose has a budget, and it is spent.** The transfer lifecycle is already described in this
-  file, three `*Architecture.md` files, seven package READMEs and the XML docs. Before describing
+  file, three `*Architecture.md` files, six package READMEs and the XML docs. Before describing
   a mechanism in a fifth place, delete one of the four — two sources for one subject are two
   sources that will diverge. A new document needs the same justification as a new interface.
 - **Say what you did not check.** A `Verified:` line names what was run; when a change or a review

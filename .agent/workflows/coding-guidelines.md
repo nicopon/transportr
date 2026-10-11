@@ -46,7 +46,7 @@ TransportR occupies a **specific niche**: hub-mediated bulk transfer for network
 
 - **Multi-language SDKs**: Not excluded, but approach with caution:
   - The protocol is simple enough (30-byte header + opaque payload) to port
-  - However, the resilience logic (reconnection, Ping/Pong, checkpoint recovery) is subtle
+  - However, the resilience logic (reconnection, Ping/Pong, resumption from the receiver's position) is subtle
   - Maintenance burden multiplies with each language (bug parity, cross-language testing)
   - **Ideal path**: Leave for external contributors if the project gains adoption
   - If proposing a new SDK, flag the long-term maintenance implications

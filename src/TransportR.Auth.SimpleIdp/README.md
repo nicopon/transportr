@@ -2,65 +2,60 @@
 
 Embeddable Identity Provider for TransportR authentication testing and development.
 
+This project is not published to NuGet (`IsPackable=false`): reference it from the solution.
+
 ## Purpose
 
 Provides a lightweight OpenIddict-based IDP that can be:
 1. **Embedded** in an ASP.NET Core application for testing
-2. **Standalone** for local development
+2. **Standalone** for local development: `samples/TestIdp` is a host built this way
 
 ## Usage
-
-### Embedded in Tests or Demos
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// Add SimpleIdp with preconfigured clients
-builder.AddSimpleIdp(options =>
+builder.Services.AddSimpleIdp(options =>
 {
-    options.Port = 5100;
-    options.AddClient("sender", "sender-secret", "transportr:group:senders");
-    options.AddClient("receiver", "receiver-secret", "transportr:group:receivers");
+    // Groups: the scope `transportr:group:<name>` is derived from each name.
+    options.AddClient("sender", "sender-secret", "senders");
+    options.AddClient("receiver", "receiver-secret", "receivers");
 });
 
 var app = builder.Build();
-app.UseSimpleIdp();
+app.MapSimpleIdp();
 app.Run();
 ```
 
-### Pre-configured Clients
-
-| ClientId | Secret | Scope |
-|----------|--------|-------|
-| `sender` | `sender-secret` | `transportr:group:senders` |
-| `receiver` | `receiver-secret` | `transportr:group:receivers` |
-| `test-client` | `secret-test` | `transportr:group:test` |
+To grant raw scopes instead of groups, use `AddClientWithScopes(clientId, secret, scopes)`.
 
 ## Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/connect/token` | Token endpoint (client_credentials) |
-| `/health` | Health check |
-| `/` | Service info |
+| `/connect/token` | Token endpoint (client_credentials), mapped by `MapSimpleIdp()` |
+
+`samples/TestIdp` adds `/health` and `/` on top of it.
 
 ## Token Acquisition
 
 ```bash
-curl -X POST http://localhost:5100/connect/token \
+curl -X POST <idp-url>/connect/token \
   -d "grant_type=client_credentials" \
   -d "client_id=sender" \
   -d "client_secret=sender-secret" \
   -d "scope=transportr:group:senders"
 ```
 
+## Clients
+
+The package holds no clients of its own. `samples/TestIdp` seeds `sender`, `receiver` and `test-client` from its `appsettings.json`.
+
 ## Configuration
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `Port` | 5100 | Listening port |
 | `TokenLifetime` | 1 hour | JWT expiration |
-| `IssuerName` | auto | Token issuer |
 
 ## Dependencies
 

@@ -24,13 +24,13 @@ dotnet run
 |----------|---------|-------------|
 | `Sender__HubUrl` | http://localhost:5252 | Hub URL |
 | `Sender__BatchSize` | 5000 | Items per batch |
-| `Sender__BatchTimeoutMs` | 1000 | Batch flush timeout |
+| `Sender__BatchTimeoutMs` | 500 | Batch flush timeout |
 | `Sender__SourceFilePath` | data/orders.bin | Data source file |
 
 ## Data Flow
 
 1. Read orders from binary file
-2. Connect to hub (canSend=true)
+2. Connect to hub (`ConnectAsync`, group `senders` by default)
 3. Wait for receiver to connect
 4. Initiate transfer
 5. Stream items through batches

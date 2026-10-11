@@ -5,20 +5,22 @@ The official SignalR client implementation for [TransportR](https://github.com/n
 ## Features
 
 - **Efficient Streaming**: Stream large datasets in chunks with minimal memory overhead.
-- **Resilience**: Automatic reconnection, checkpoint recovery, and chaos-tested stability.
+- **Resilience**: Automatic reconnection, resumption from the receiver's last batch, and chaos-tested stability.
 - **Flexibility**: Protocol-agnostic transport layer.
-- **Internalized Batteries**: Built-in support for Client Credentials Auth and MessagePack serialization.
+- **Built-in auth**: OAuth2 client credentials. MessagePack serialization ships in its own package, `TransportR.Serialization.MessagePack`.
 
 ## Installation
 
 ```bash
 dotnet add package TransportR.Client.SignalR
+dotnet add package TransportR.Serialization.MessagePack   # or another serializer package
 ```
 
 ## Quick Start (Fluent API)
 
 ```csharp
 using TransportR.Client.SignalR;
+using TransportR.Serialization.MessagePack;
 using Microsoft.Extensions.Logging;
 
 // 1. Configure the Client
@@ -40,8 +42,10 @@ var client = new TransportRClientBuilder<Order>()
 await client.ConnectAsync(new[] { "my-group" });
 
 // 3. Send Data
-await client.InitTransferAsync("receiver-id");
-// ... send items ...
+var receivers = await client.GetReceiversAsync();
+var transfer = await client.InitTransferAsync(receivers[0].ClientId);
+// ... send each item with transfer.SendAsync(item) ...
+await transfer.CompleteAsync();
 
 // 4. Dispose
 await client.DisposeAsync();

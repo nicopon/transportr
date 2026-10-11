@@ -26,16 +26,16 @@ DatabaseInitializer/
 ### Command Line
 
 ```bash
-cd samples/DatabaseInitializer
-ITEM_COUNT=2000000 dotnet run
+# From the repository root, so that the file lands in data/
+ITEM_COUNT=2000000 dotnet run --project samples/DatabaseInitializer
 ```
 
 ### Via Initialization Script
 
 ```bash
-./init.sh
+./scripts/init.sh
 # Or with custom count
-ITEM_COUNT=500000 ./init.sh
+ITEM_COUNT=500000 ./scripts/init.sh
 ```
 
 ---
@@ -46,13 +46,7 @@ ITEM_COUNT=500000 ./init.sh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ITEM_COUNT` | Number of orders to generate | `2000000` |
-
-### CLI Arguments
-
-```bash
-dotnet run -- 500000  # Generates 500k orders
-```
+| `ITEM_COUNT` | Number of orders to generate | `100000` (`scripts/init.sh` sets 2000000) |
 
 ---
 
@@ -62,9 +56,9 @@ dotnet run -- 500000  # Generates 500k orders
 
 ```
 ┌────────────────────────────────────────────┐
-│ [Size: Int32] [FlatBuffer: byte[]]         │ Order 1
+│ [Size: Int32] [MessagePack: byte[]]         │ Order 1
 ├────────────────────────────────────────────┤
-│ [Size: Int32] [FlatBuffer: byte[]]         │ Order 2
+│ [Size: Int32] [MessagePack: byte[]]         │ Order 2
 ├────────────────────────────────────────────┤
 │ ...                                        │
 └────────────────────────────────────────────┘
@@ -153,7 +147,7 @@ Completed in 42.5s. Average speed: 47,000 items/s
 |---------|---------|-------|
 | `Bogus` | 35.x | Fake data generation |
 
-| `Shared` | local | Order model + Extensions |
+| `Shared` | local | Order model |
 
 ---
 

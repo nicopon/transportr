@@ -182,7 +182,7 @@ on top of the first — copy it rather than expect one from the package.
 
 ## Binary Protocol
 
-### Wire Format (v1)
+### Wire Format (v2)
 
 The transport protocol uses a **30-byte fixed header** followed by an **opaque binary payload**. The payload serialization is completely decoupled via `IBatchSerializer<T>`.
 
@@ -216,7 +216,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 
 ## Integration
 
-See [README.md](./README.md#quick-start) for code examples (Server, Sender, Receiver).
+See [README.md](./README.md) for code examples (Server, Sender, Receiver).
 
 ---
 
@@ -228,7 +228,7 @@ Unit and integration tests cover the critical components:
 - `ReceiverState` — Ordering, duplicates
 - `ChunkIO` — Binary protocol read/write
 - `FlowControlService` — Group permissions, wildcards
-- `StateStore` — InMemory + Redis (Docker)
+- `StateStore` — InMemory + Redis (a container, or a local `redis-server`)
 - `TransferManager` — Lifecycle (No persistence)
 
 Run: `dotnet test`

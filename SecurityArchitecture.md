@@ -122,6 +122,8 @@ flowchart LR
     end
 ```
 
+`EnableAuth` is read by `samples/DataHub`, not by the library. Its effect:
+
 | Variable | Effect |
 |----------|--------|
 | `EnableAuth=false` | Dev mode (default) |
@@ -146,7 +148,7 @@ Run: `dotnet run --project samples/TestIdp`
 
 1. Register scopes: `transportr:group:senders`, `transportr:group:receivers`
 2. Create clients with appropriate scopes
-3. Configure:
+3. Configure `samples/DataHub` with:
    ```bash
    export EnableAuth=true
    export Oidc__Authority=https://your-idp.example.com

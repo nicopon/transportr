@@ -134,7 +134,7 @@ TransportR integrates seamlessly with standard .NET authentication:
 - **Bearer token authentication** — Clients authenticate with JWT tokens
 - **Group-based access control** — Restrict which senders can reach which receivers
 
-**Quick start option:** For development or testing, use the included **SimpleIdp** package (`TransportR.Auth.SimpleIdp`) — a lightweight embedded identity provider based on OpenIddict. No external IdP required.
+**Quick start option:** For development or testing, use the included **SimpleIdp** project (`TransportR.Auth.SimpleIdp`, not published to NuGet) — a lightweight embedded identity provider based on OpenIddict. No external IdP required.
 
 📖 See the [Security Architecture Guide](./SecurityArchitecture.md) for detailed configuration.
 
@@ -215,6 +215,8 @@ TransportR/
 │   └── Shared/                         # Shared sample code
 │
 └── tests/
+    ├── TransportR.DocSnippets/       # Compiles the Quick Start snippets above
+    ├── TransportR.TestProxy/         # YARP reverse proxy for the HA scenarios
     └── TransportR.Tests/
 ```
 

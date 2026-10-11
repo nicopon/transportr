@@ -4,7 +4,7 @@ Redis state store implementation for TransportR High Availability deployments.
 
 ## Purpose
 
-Provides `RedisStateStore`, an `IStateStore` implementation that stores client registrations and transfer checkpoints in Redis, enabling horizontal scaling of DataHub instances.
+Provides `RedisStateStore`, an `IStateStore` implementation that stores client registrations and transfer sessions in Redis, so that several DataHub instances can share them.
 
 ## Usage
 
@@ -16,22 +16,24 @@ builder.Services.AddDataHub()
 
 ## Features
 
-- **Client registrations**: Stored with 5-minute TTL (auto-renewed on activity)
-- **Transfer checkpoints**: Stored with 24-hour TTL for session recovery
-- **Secondary indexes**: O(1) lookup by connectionId
+- **Client registrations**: kept for `ConnectedTtlSeconds` (3600 s by default) while the client is connected, and for `DisconnectedGraceSeconds` (300 s by default) once its connection drops. Each `Heartbeat()` pushes the expiry back.
+- **Transfer sessions**: expire at the session's `ExpiresAtUtc`; heartbeats extend them.
+- **Secondary index**: connection id → client id, with the same expiry as the registration.
 
 ## Key Structure
 
-| Key | Purpose | TTL |
-|-----|---------|-----|
-| `transportr:clients:{clientId}` | Client registration | 5 min |
-| `transportr:conn:{connectionId}` | ConnectionId → ClientId index | 5 min |
-| `transportr:checkpoints:{transferId}` | Transfer checkpoint | 24 h |
+| Key | Purpose | Expiry |
+|-----|---------|--------|
+| `transportr:clients:{clientId}` | Client registration | connected TTL, or the grace period once disconnected |
+| `transportr:conn:{connectionId}` | ConnectionId → ClientId index | same as the registration |
+| `transportr:client_ids` | Set of known client ids, read by discovery | none; members whose registration expired are removed on read |
+| `transportr:sessions:{transferId}` | Transfer session (HA routing) | session `ExpiresAtUtc` |
 
 ## Requirements
 
-- Redis 6.0+
-- Sticky sessions at load balancer level (for SignalR connections)
+- Tested against Redis 7.0: the test suite runs on a `redis:7.0` container.
+- Sticky sessions at the load balancer level (for SignalR connections).
+- The per-transfer progress counters are not stored here; see "High Availability" in `TransportRArchitecture.md`.
 
 ## Dependencies
 

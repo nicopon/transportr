@@ -24,10 +24,13 @@ dotnet run
 |----------|---------|-------------|
 | `Receiver__HubUrl` | http://localhost:5252 | Hub URL |
 | `Receiver__OutputDirectory` | output | Output directory |
+| `Receiver__ReceiveMaxItems` | unbounded | Receive buffer bound, in items |
+| `Receiver__ReceiveMaxBytes` | unbounded | Receive buffer bound, in wire bytes |
+| `Receiver__ConsumeItemsPerSecond` | 0 (no pacing) | Throttles the consumer |
 
 ## Data Flow
 
-1. Connect to hub (canReceive=true)
+1. Connect to hub (`ConnectAsync`, group `receivers` by default)
 2. Register `OnTransferStarted` handler
 3. Wait for sender to initiate transfer
 4. Receive items via async enumerable

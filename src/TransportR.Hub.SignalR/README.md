@@ -14,52 +14,27 @@ Provides the hub services that:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      DataHub Server                          │
+│                      DataHub Server                         │
 ├─────────────────────────────────────────────────────────────┤
 │  CommandHub (SignalR)                                       │
 │  ├── /hub/command                                           │
 │  │   ├── Connect(clientId, groups)                          │
 │  │   ├── GetReceivers() → List<ClientInfo>                  │
-│  │   ├── InitTransfer(targetId, batchSize)                  │
-│  │   └── Heartbeat(transferId, metrics)                     │
+│  │   ├── InitTransfer(targetId, batchSize, timeoutMs)       │
+│  │   └── Heartbeat() → bool                                 │
 │                                                             │
 │  StreamController (HTTP)                                    │
 │  ├── POST /api/stream/{id}/send                             │
 │  └── GET /api/stream/{id}/receive                           │
+│                                                             │
+│  ClientController (HTTP)                                    │
+│  └── PUT /api/client/{id}/token                             │
 ├─────────────────────────────────────────────────────────────┤
 │  Services (via interfaces for testability)                  │
 │  ├── IStateStore → InMemory/Redis/TestProxy                 │
 │  ├── ITransferManager → TransferManager                     │
-│  └── SignalRDataServer (dumb pipe bridge)                  │
+│  └── SignalRDataServer (dumb pipe bridge)                   │
 └─────────────────────────────────────────────────────────────┘
-```
-
-## Structure
-
-```
-TransportR.Hub.SignalR/
-├── Configuration/
-│   ├── AffinityOptions.cs          # HA sticky session config
-│   ├── DataPlaneConfiguration.cs   # Bridge timeout config
-
-├── Controllers/
-│   └── StreamController.cs         # HTTP streaming endpoints
-├── Exceptions/
-│   └── AffinityRedirectException.cs # HA redirect signal
-├── Hubs/
-│   └── CommandHub.cs               # SignalR hub (orchestration)
-├── Models/
-│   ├── BridgeState.cs              # Bridge state enum
-│   └── ConnectionBridge.cs         # Stream bridge manager
-├── Services/
-│   ├── BridgeCleanupService.cs     # Background cleanup
-│   ├── DevIdentityProvider.cs      # Dev mode identity
-│   ├── InMemoryStateStore.cs       # Default state store
-│   ├── JwtIdentityProvider.cs      # JWT identity extraction
-│   ├── SignalRDataServer.cs        # Dumb pipe bridge
-│   ├── TestProxyStateStore.cs      # HA test proxy store
-│   └── TransferManager.cs          # Transfer state + checkpoints
-└── TransportRHubExtensions.cs      # DI registration
 ```
 
 ## Integration
@@ -119,5 +94,3 @@ The hub never deserializes batch payloads:
 
 - `TransportR` - Core interfaces
 - `Microsoft.AspNetCore.App` - ASP.NET Core framework
-- `OpenTelemetry` - Metrics support
-

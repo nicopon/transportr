@@ -1,27 +1,13 @@
 # TransportR.Tests
 
-> Unit tests for the TransportR solution.
+> Unit and component tests for the TransportR solution.
 
 ## Purpose
 
-This project contains unit tests to validate the correct functioning of the solution components.
-
----
-
-## Project Structure
-
-```
-TransportR.Tests/
-├── BatchAccumulatorTests.cs       # Batch accumulation tests
-├── ReceiverStateTests.cs          # Reordering logic tests
-├── ChunkIOTests.cs                # Binary header IO tests
-├── FlowControlServiceTests.cs     # Authorization tests
-├── InMemoryStateStoreTests.cs     # State store tests (HA)
-├── TransferManagerTests.cs        # Transfer management tests (HA)
-├── RedisStateStoreTests.cs        # Redis integration (container, or a local redis-server)
-├── RedisServer.cs                 # Picks the Redis; auto-skip when there is none
-└── TransportR.Tests.csproj
-```
+Unit tests for the components, and component tests for the hub's state and access logic.
+End-to-end transfers are covered in two places: `SignalRIntegrationTests` carries one transfer in
+process over `TestServer`, and the scenarios of `./scripts/run-benchmark.sh` run real processes
+for faults, volume, HA and authentication.
 
 ---
 
@@ -41,19 +27,25 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ---
 
+## Redis Tests
+
+`RedisStateStoreTests` run on a Testcontainers `redis:7.0` when Docker answers. Otherwise they run on a
+`redis-server` already on the machine (`tools/`, `PATH`, `/opt/homebrew/bin`), started on a free port per
+test. They are skipped only when neither exists (`RedisServer.cs`).
+
+---
+
 ## Test Coverage
 
-| Component | Tests | Coverage |
-|-----------|-------|----------|
-| `BatchAccumulator` | 9 | Validation, flush by size/timeout, batch IDs |
-| `ReceiverState` | 6 | In-order, out-of-order, duplicates |
-| `ChunkIO` | 10 | Binary header read/write, buffer management |
-| `FlowControlService` | 7 | Group permissions, wildcards |
-| `InMemoryStateStore` | 9 | Clients, checkpoints, connection index |
-| `TransferManager` | 8 | Participants, stats, checkpoints |
-| `RedisStateStore` | 9 | Clients, checkpoints (container or local redis-server) |
-
-> **Note:** Redis tests require Docker. They are automatically skipped if Docker is unavailable.
+| Component | Covers |
+|-----------|--------|
+| `BatchAccumulator` | Validation, flush by size and by timeout, batch IDs |
+| `ReceiverState` | In-order, out-of-order and duplicate batches |
+| `ChunkIO` | Binary header read and write, buffer management |
+| `FlowControlService` | Group permissions, wildcards |
+| `InMemoryStateStore` | Clients, connection index, disconnection grace, renewal, sessions |
+| `TransferManager` | Participants, transfer statistics, state removal |
+| `RedisStateStore` | Clients, connection index, TTLs, renewal, sessions |
 
 ---
 
@@ -69,5 +61,4 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ## Notes
 
-- Integration tests (requiring Hub + Client) are not covered here.
-- For end-to-end tests, use `./scripts/run-benchmark.sh`
+- For end-to-end runs with real processes, use `./scripts/run-benchmark.sh`.
