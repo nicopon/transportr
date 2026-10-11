@@ -30,16 +30,15 @@ public class TransferManager : ITransferManager
     public async Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId)
     {
         _participants[transferId] = new TransferParticipants(senderId, receiverId);
+
+        // Known to the inactivity sweep from the start. The first statistics report comes a heartbeat
+        // after the transfer starts, and one that ends or dies sooner would otherwise have no state
+        // for the sweep to find.
+        _transfers[transferId] = new TransferState(transferId, _time);
         
         var now = Now;
         var session = new TransferSession(transferId, senderId, receiverId, now, now.Add(_sessionTtl));
         await _stateStore.SaveSessionAsync(session).ConfigureAwait(false);
-    }
-
-    public async Task UnregisterParticipantsAsync(string transferId)
-    {
-        _participants.TryRemove(transferId, out _);
-        await _stateStore.DeleteSessionAsync(transferId).ConfigureAwait(false);
     }
 
     public async Task<TransferParticipants?> GetParticipantsAsync(string transferId)
@@ -102,8 +101,8 @@ public class TransferManager : ITransferManager
     }
 
     // Completion is cleanup, and that is the design rather than a shortcut: the hub keeps no
-    // transfer history to move a finished transfer into, so a success and a timeout leave by the
-    // same door.
+    // transfer history to move a finished transfer into, so a success, a timeout and a handshake
+    // that failed leave by the same door.
     public async Task RemoveTransferAsync(string transferId)
     {
         _transfers.TryRemove(transferId, out _);

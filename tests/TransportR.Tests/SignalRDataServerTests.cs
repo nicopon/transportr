@@ -26,6 +26,7 @@ public class SignalRDataServerTests
     private sealed class Harness
     {
         public BridgeManager Bridges { get; } = new(NullLoggerFactory.Instance);
+        public RecordingTerminator Terminator { get; } = new();
         public SignalRDataServer Server { get; }
 
         public Harness()
@@ -35,11 +36,87 @@ public class SignalRDataServerTests
                 new IgnoredProgress(),
                 new UnusedHubContext(),
                 new KnownTransfer(),
-                Bridges);
+                Bridges,
+                Terminator);
         }
 
         public ConnectionBridge BridgeFor(ConnectionType type) =>
             Bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, type));
+    }
+
+    [Fact]
+    public async Task SendEndingCleanly_OnTheDataStream_CompletesTheBridgeAndRetiresTheTransfer()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.End();
+        await EndsAsync(send);
+
+        Assert.Equal(BridgeState.Completed, bridge.State);
+        Assert.Equal([TransferId], hub.Terminator.Retired);
+    }
+
+    [Fact]
+    public async Task SendEndingCleanly_OnTheControlStream_RetiresNothing()
+    {
+        // The receiver ends its control POST right after the acknowledgement, before the sender is
+        // known to have read it: only the sender's data stream says the transfer is over.
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Control);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Control, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.End();
+        await EndsAsync(send);
+
+        Assert.Empty(hub.Terminator.Retired);
+        Assert.NotEqual(BridgeState.Completed, bridge.State);
+    }
+
+    [Fact]
+    public async Task SendCutByARupture_RetiresNothing()
+    {
+        // A connection that fails mid-stream is a transfer that may resume, not one that ended.
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.Cut(new IOException("connection reset"));
+        await EndsAsync(send);
+
+        Assert.Empty(hub.Terminator.Retired);
+        Assert.NotEqual(BridgeState.Completed, bridge.State);
+    }
+
+    [Fact]
+    public async Task SendCancelled_RetiresNothing()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        using var request = new CancellationTokenSource();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, request.Token);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        request.Cancel();
+        await EndsAsync(send);
+
+        Assert.Empty(hub.Terminator.Retired);
     }
 
     [Fact]
@@ -382,6 +459,19 @@ public class SignalRDataServerTests
         public void CompleteTransfer(string transferId) { }
     }
 
+    private sealed class RecordingTerminator : ITransferTerminator
+    {
+        public List<string> Retired { get; } = [];
+
+        public Task TerminateAsync(string transferId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task RetireAsync(string transferId)
+        {
+            Retired.Add(transferId);
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class UnusedHubContext : IHubContext<CommandHub>
     {
         public IHubClients Clients => throw new NotSupportedException();
@@ -394,7 +484,6 @@ public class SignalRDataServerTests
             Task.FromResult<TransferParticipants?>(new TransferParticipants(Guid.NewGuid(), Guid.NewGuid()));
 
         public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => throw new NotSupportedException();
-        public Task UnregisterParticipantsAsync(string transferId) => throw new NotSupportedException();
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => throw new NotSupportedException();
         public Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent) => throw new NotSupportedException();
         public TransferState? GetTransfer(string transferId) => throw new NotSupportedException();
@@ -448,6 +537,12 @@ public class SignalRDataServerTests
         private int _offset;
 
         public void Push(byte[] chunk) => _chunks.Writer.TryWrite(chunk);
+
+        /// <summary>The client closes its request body: a clean end of the stream.</summary>
+        public void End() => _chunks.Writer.TryComplete();
+
+        /// <summary>The client's connection fails: the read throws, which the hub calls a rupture.</summary>
+        public void Cut(Exception failure) => _chunks.Writer.TryComplete(failure);
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {

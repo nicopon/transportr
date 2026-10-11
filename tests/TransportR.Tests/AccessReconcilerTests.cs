@@ -37,6 +37,8 @@ public class AccessReconcilerTests
             journal.Events.Add("terminate " + transferId);
             return Task.CompletedTask;
         }
+
+        public Task RetireAsync(string transferId) => throw new NotSupportedException();
     }
 
     private sealed class FakeContext(string connectionId, Journal journal) : HubCallerContext

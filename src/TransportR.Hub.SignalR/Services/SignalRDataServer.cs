@@ -17,19 +17,22 @@ public class SignalRDataServer : ITransportRServer
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly IBridgeManager _bridgeManager;
+    private readonly ITransferTerminator _terminator;
 
     public SignalRDataServer(
         ILogger<SignalRDataServer> logger, 
         IHubProgressMonitor progressMonitor,
         IHubContext<CommandHub> hubContext,
         ITransferManager transferManager,
-        IBridgeManager bridgeManager)
+        IBridgeManager bridgeManager,
+        ITransferTerminator terminator)
     {
         _logger = logger;
         _progressMonitor = progressMonitor;
         _hubContext = hubContext;
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
+        _terminator = terminator;
     }
 
     public async Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
@@ -103,7 +106,13 @@ public class SignalRDataServer : ITransportRServer
                     if (type == ConnectionType.Data)
                     {
                         _logger.LogInformation("BRIDGE: Data stream for {TransferId} finished cleanly. Signaling Bridge Completion (Step 5).", transferId);
-                        bridge.Complete();
+
+                        // A clean end of the sender's data POST comes after the CompleteAck, or after an
+                        // Abort that was written, so both ends are done with the transfer.
+                        if (bridge.Complete())
+                        {
+                            await _terminator.RetireAsync(transferId).ConfigureAwait(false);
+                        }
                     }
                 }
                 else if (endReason == StreamEndReason.Rupture)
@@ -137,10 +146,6 @@ public class SignalRDataServer : ITransportRServer
                 throw;
             }
             
-            // Do NOT remove the bridge here. We leave it active so that:
-            // 1. Reconnecting clients can still find it (and see the completion signal).
-            // 2. CommandHub.TransferComplete will explicitly clean it up when the lifecycle is fully done.
-
             _logger.LogInformation("BRIDGE: Completed normally {BridgeKey}", bridgeKey);
         }
         catch (OperationCanceledException)

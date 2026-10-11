@@ -162,14 +162,14 @@ public class SignalRTransferInitiator : ITransferInitiator
                 // Detail stays in the hub log; the client gets something it can act on.
                 _logger.LogWarning(ex, "Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}. Registration is likely stale.",
                     receiver.ClientId, receiver.ConnectionId, transferId);
-                await _transferManager.UnregisterParticipantsAsync(transferId);
+                await _transferManager.RemoveTransferAsync(transferId);
                 throw new HubException($"Target client {receiver.ClientId} is not reachable.");
             }
 
             if (!receiverReady)
             {
                 _logger.LogWarning("Receiver {TargetClientId} refused {TransferId}.", receiver.ClientId, transferId);
-                await _transferManager.UnregisterParticipantsAsync(transferId);
+                await _transferManager.RemoveTransferAsync(transferId);
                 throw new HubException($"Target client {receiver.ClientId} refused the transfer.");
             }
 
@@ -213,7 +213,7 @@ public class SignalRTransferInitiator : ITransferInitiator
 
     private async Task AbandonAsync(string transferId, ClientRegistration receiver)
     {
-        await _transferManager.UnregisterParticipantsAsync(transferId);
+        await _transferManager.RemoveTransferAsync(transferId);
         await _hubContext.Clients.Client(receiver.ConnectionId).SendAsync(nameof(ICommandClient.CancelTransfer), transferId);
     }
 }

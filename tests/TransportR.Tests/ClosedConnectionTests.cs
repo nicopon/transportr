@@ -42,7 +42,6 @@ public class ClosedConnectionTests
             IStateStore stateStore,
             ITransferManager transferManager,
             IClientIdentityProvider identityProvider,
-            IBridgeManager bridgeManager,
             SignalRTransferInitiator initiator,
             AccessPolicy policy,
             ConnectionRegistry connections,
@@ -50,7 +49,7 @@ public class ClosedConnectionTests
             ILogger<CommandHub> logger,
             TimeProvider timeProvider,
             ConnectionCounter counter)
-            : base(stateStore, transferManager, identityProvider, bridgeManager, initiator, policy, connections, affinityOptions, logger, timeProvider)
+            : base(stateStore, transferManager, identityProvider, initiator, policy, connections, affinityOptions, logger, timeProvider)
         {
             _counter = counter;
         }

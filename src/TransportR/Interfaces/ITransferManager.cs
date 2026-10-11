@@ -6,14 +6,10 @@ namespace TransportR.Interfaces;
 public interface ITransferManager
 {
     /// <summary>
-    /// Registers sender and receiver for a transfer.
+    /// Registers sender and receiver for a transfer, and starts its state: from here on the
+    /// inactivity sweep knows the transfer, whether or not a heartbeat ever reports on it.
     /// </summary>
     Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId);
-
-    /// <summary>
-    /// Unregisters participants for a transfer (used on handshake failure).
-    /// </summary>
-    Task UnregisterParticipantsAsync(string transferId);
 
     /// <summary>
     /// Gets the participants for a transfer.
@@ -34,9 +30,8 @@ public interface ITransferManager
     /// A snapshot of every transfer this instance knows the participants of, by transfer id.
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="GetAllTransfers"/> this includes a transfer still in its handshake, which has
-    /// participants but no statistics yet: whoever needs to find every transfer a client takes part in
-    /// has to start here.
+    /// Lists the same transfers as <see cref="GetAllTransfers"/>, but by transfer id with their
+    /// participants: whoever needs to find every transfer a client takes part in has to start here.
     /// </remarks>
     IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants();
 
@@ -47,8 +42,8 @@ public interface ITransferManager
 
     /// <summary>
     /// Drops the transfer state and its participants. This is the only way a transfer leaves the
-    /// hub, whether it succeeded or timed out: the hub keeps no transfer history to move a
-    /// finished one into, so there is no outcome for the caller to name here.
+    /// hub, whether it succeeded, timed out or never got past its handshake: the hub keeps no
+    /// transfer history to move a finished one into, so there is no outcome for the caller to name here.
     /// </summary>
     /// <param name="transferId">The transfer identifier.</param>
     Task RemoveTransferAsync(string transferId);

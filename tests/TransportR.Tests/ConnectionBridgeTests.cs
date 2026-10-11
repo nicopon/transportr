@@ -180,6 +180,54 @@ public class ConnectionBridgeTests
         Assert.Equal(BridgeState.Cancelled, bridge.State);
     }
 
+    [Fact]
+    public async Task Complete_IsTrueOnce_EndsTheCompletionTask_AndRefusesLaterRegistrations()
+    {
+        var bridge = NewBridge();
+        var senderId = Guid.NewGuid();
+
+        var receiverTask = bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid());
+        Assert.True(await bridge.RegisterSenderAsync(Stream.Null, senderId));
+        Assert.True(await receiverTask);
+        Assert.False(bridge.CompletionTask.IsCompleted);
+
+        Assert.True(bridge.Complete());
+        Assert.False(bridge.Complete());
+
+        Assert.Equal(BridgeState.Completed, bridge.State);
+        Assert.True(bridge.CompletionTask.IsCompletedSuccessfully);
+        Assert.False(await bridge.RegisterSenderAsync(Stream.Null, Guid.NewGuid()));
+        Assert.False(await bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid()));
+
+        // The source's request ending after the end it reported is not a loss to answer for.
+        bridge.OnDisconnected(senderId);
+        Assert.Equal(BridgeState.Completed, bridge.State);
+    }
+
+    [Fact]
+    public void Complete_OnACancelledBridge_IsFalse_AndTheCompletionStaysCancelled()
+    {
+        var bridge = NewBridge();
+        bridge.Cancel();
+
+        Assert.False(bridge.Complete());
+
+        Assert.True(bridge.CompletionTask.IsCanceled);
+        Assert.Equal(BridgeState.Cancelled, bridge.State);
+    }
+
+    [Fact]
+    public void Cancel_OnACompletedBridge_LeavesItCompleted()
+    {
+        var bridge = NewBridge();
+        bridge.Complete();
+
+        bridge.Cancel();
+
+        Assert.Equal(BridgeState.Completed, bridge.State);
+        Assert.True(bridge.CompletionTask.IsCompletedSuccessfully);
+    }
+
     /// <summary>
     /// The hub reads SenderToken off the data path while another thread may be resetting the
     /// sender. A reset disposes the running source before replacing it, so an unsynchronised read

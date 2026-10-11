@@ -93,14 +93,5 @@ public interface ICommandHub
     /// <param name="transferId">The transfer identifier for context.</param>
     /// <returns>The hub responds with Pong callback to confirm connectivity.</returns>
     Task Ping(string transferId);
-
-
-
-    /// <summary>
-    /// Notifies the hub that a transfer has completed successfully.
-    /// The hub will clean up resources and notify the other party to close streams.
-    /// </summary>
-    /// <param name="transferId">The transfer identifier.</param>
-    Task TransferComplete(string transferId);
 }
 

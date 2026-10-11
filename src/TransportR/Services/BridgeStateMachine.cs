@@ -20,6 +20,10 @@ public class BridgeStateMachine
 
     public BridgeState CurrentState => _currentState;
 
+    /// <summary>True once the bridge is in a state nothing leaves: cancelled, or completed.</summary>
+    public bool IsEnded =>
+        _currentState is BridgeState.Cancelled or BridgeState.Completed;
+
     /// <summary>True while a sender stream is registered on this bridge.</summary>
     public bool SenderConnected =>
         _currentState is BridgeState.WaitingForReceiver or BridgeState.Active;
@@ -46,6 +50,7 @@ public class BridgeStateMachine
                 case BridgeState.WaitingForSender:
                     return MoveTo(BridgeState.Active);
                 case BridgeState.Cancelled:
+                case BridgeState.Completed:
                     return false;
                 default:
                     // The caller is expected to drop the previous sender first, so arriving with one
@@ -70,6 +75,7 @@ public class BridgeStateMachine
                 case BridgeState.WaitingForReceiver:
                     return MoveTo(BridgeState.Active);
                 case BridgeState.Cancelled:
+                case BridgeState.Completed:
                     return false;
                 default:
                     _logger.LogError(
@@ -116,14 +122,29 @@ public class BridgeStateMachine
     }
 
     /// <summary>
-    /// Moves the bridge to its terminal state. Every later event is ignored.
+    /// Reports that the source ended its stream cleanly, which is how a transfer ends well. A
+    /// bridge already cancelled stays cancelled: whoever cancelled it has already dealt with the
+    /// transfer.
+    /// </summary>
+    /// <returns>True if the state changed, which is true for the first caller only.</returns>
+    public bool OnCompleted()
+    {
+        lock (_lock)
+        {
+            return !IsEnded && MoveTo(BridgeState.Completed);
+        }
+    }
+
+    /// <summary>
+    /// Moves the bridge to its terminal state. Every later event is ignored, and a bridge that
+    /// already completed keeps saying so.
     /// </summary>
     /// <returns>True if the state changed.</returns>
     public bool OnCancelled()
     {
         lock (_lock)
         {
-            return MoveTo(BridgeState.Cancelled);
+            return _currentState != BridgeState.Completed && MoveTo(BridgeState.Cancelled);
         }
     }
 

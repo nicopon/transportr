@@ -21,6 +21,8 @@ public class ClientOptions
     /// <remarks>
     /// This reports transfer statistics and only runs while a transfer does. It does not keep the
     /// client's registration alive — see <see cref="PresenceHeartbeatInterval"/>.
+    /// Keep it well below the hub's <c>TransferInactivityTimeoutSeconds</c> (60 s): the hub judges a
+    /// transfer from its registration, and one that stays silent for that long is terminated.
     /// </remarks>
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(1);
 

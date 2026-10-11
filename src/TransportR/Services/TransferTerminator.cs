@@ -29,17 +29,11 @@ public class TransferTerminator : ITransferTerminator
     {
         try
         {
-            // 1. Get participants
+            // Participants are read first: removing the transfer takes them with it.
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
-            // 2. Clear state in TransferManager (in-memory state and its store copy)
-            await _transferManager.RemoveTransferAsync(transferId);
+            await RemoveAsync(transferId);
 
-            // 3. Remove bridges
-            _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
-            _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
-
-            // 4. Notify Participants via Notifier
             if (participants != null)
             {
                 await NotifyClientAsync(participants.SenderId, transferId, cancellationToken);
@@ -50,6 +44,29 @@ public class TransferTerminator : ITransferTerminator
         {
             _logger.LogError(ex, "Failed to terminate transfer {TransferId}", transferId);
         }
+    }
+
+    public async Task RetireAsync(string transferId)
+    {
+        try
+        {
+            await RemoveAsync(transferId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retire transfer {TransferId}", transferId);
+        }
+    }
+
+    // The state goes before the bridges: a stream that reopens in between then meets a transfer that
+    // is gone (404, which a client in its closing phase reads as the end) instead of a fresh bridge
+    // that waits for a peer that will not come.
+    private async Task RemoveAsync(string transferId)
+    {
+        await _transferManager.RemoveTransferAsync(transferId);
+
+        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
+        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
     }
 
     private async Task NotifyClientAsync(Guid clientId, string transferId, CancellationToken ct)

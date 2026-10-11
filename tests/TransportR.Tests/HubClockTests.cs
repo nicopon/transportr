@@ -52,7 +52,16 @@ public class HubClockTests
     }
 
     [Fact]
-    public async Task InactiveTransfer_IsTerminatedWhenTheClockPassesTheTimeout()
+    public Task InactiveTransfer_IsTerminatedWhenTheClockPassesTheTimeout() =>
+        AssertTerminatedOnTheClockAsync(transfers =>
+            transfers.UpdateSenderStatsAsync("transfer-1", itemsSent: 1, acksReceived: 0));
+
+    [Fact]
+    public Task ATransferThatNeverReported_IsTerminatedWhenTheClockPassesTheTimeout() =>
+        AssertTerminatedOnTheClockAsync(transfers =>
+            transfers.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid()));
+
+    private static async Task AssertTerminatedOnTheClockAsync(Func<TransferManager, Task> startTheTransfer)
     {
         var clock = new FakeTimeProvider();
         var config = new DataPlaneConfiguration();
@@ -61,7 +70,7 @@ public class HubClockTests
         using var cleanup = new TransferCleanupService(
             transfers, terminator, Options.Create(config), NullLogger<TransferCleanupService>.Instance, clock);
 
-        await transfers.UpdateSenderStatsAsync("transfer-1", itemsSent: 1, acksReceived: 0);
+        await startTheTransfer(transfers);
         await cleanup.StartAsync(CancellationToken.None);
 
         // The service creates its timer on a background thread, at a moment the test cannot see, so the
@@ -89,5 +98,7 @@ public class HubClockTests
             Terminated.TrySetResult(transferId);
             return Task.CompletedTask;
         }
+
+        public Task RetireAsync(string transferId) => throw new NotSupportedException();
     }
 }

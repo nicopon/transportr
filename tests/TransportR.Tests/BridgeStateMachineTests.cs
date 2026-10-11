@@ -115,6 +115,67 @@ public class BridgeStateMachineTests
 
     #endregion
 
+    #region Completion Tests
+
+    [Theory]
+    [InlineData(BridgeState.Idle)]
+    [InlineData(BridgeState.WaitingForSender)]
+    [InlineData(BridgeState.WaitingForReceiver)]
+    [InlineData(BridgeState.Active)]
+    public void CanComplete_FromEveryLiveState(BridgeState from)
+    {
+        Reach(from);
+
+        Assert.True(_fsm.OnCompleted());
+        Assert.Equal(BridgeState.Completed, _fsm.CurrentState);
+        Assert.True(_fsm.IsEnded);
+    }
+
+    [Fact]
+    public void OnCompleted_IsTrueTheFirstTimeOnly()
+    {
+        Assert.True(_fsm.OnCompleted());
+        Assert.False(_fsm.OnCompleted());
+    }
+
+    [Fact]
+    public void Completed_IsTerminal_IgnoresEveryEvent()
+    {
+        _fsm.OnSenderRegistered();
+        _fsm.OnReceiverRegistered();
+        _fsm.OnCompleted();
+
+        Assert.False(_fsm.OnSenderRegistered());
+        Assert.False(_fsm.OnReceiverRegistered());
+        Assert.False(_fsm.OnSenderLost());
+        Assert.False(_fsm.OnReceiverLost());
+        Assert.False(_fsm.OnCancelled());
+        Assert.Equal(BridgeState.Completed, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void ACancelledBridge_CannotComplete()
+    {
+        _fsm.OnCancelled();
+
+        Assert.False(_fsm.OnCompleted());
+        Assert.Equal(BridgeState.Cancelled, _fsm.CurrentState);
+    }
+
+    private void Reach(BridgeState state)
+    {
+        switch (state)
+        {
+            case BridgeState.WaitingForSender: _fsm.OnReceiverRegistered(); break;
+            case BridgeState.WaitingForReceiver: _fsm.OnSenderRegistered(); break;
+            case BridgeState.Active: _fsm.OnSenderRegistered(); _fsm.OnReceiverRegistered(); break;
+        }
+
+        Assert.Equal(state, _fsm.CurrentState);
+    }
+
+    #endregion
+
     #region Reconnection Tests
 
     [Fact]
@@ -221,7 +282,9 @@ public class BridgeStateMachineTests
             ("SenderRegistered", m => m.OnSenderRegistered()),
             ("ReceiverRegistered", m => m.OnReceiverRegistered()),
             ("SenderLost", m => m.OnSenderLost()),
-            ("ReceiverLost", m => m.OnReceiverLost())
+            ("ReceiverLost", m => m.OnReceiverLost()),
+            ("Completed", m => m.OnCompleted()),
+            ("Cancelled", m => m.OnCancelled())
         };
 
         // Four events deep covers every reachable state and every event out of it.
@@ -240,6 +303,7 @@ public class BridgeStateMachineTests
 
                 Assert.Equal(expectedSender, fsm.SenderConnected);
                 Assert.Equal(expectedReceiver, fsm.ReceiverConnected);
+                Assert.Equal(fsm.CurrentState is BridgeState.Cancelled or BridgeState.Completed, fsm.IsEnded);
                 Assert.True(
                     Enum.IsDefined(fsm.CurrentState),
                     $"{a.Name},{b.Name},{c.Name},{d.Name} reached an undefined state");

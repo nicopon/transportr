@@ -124,20 +124,33 @@ public class TransferManagerTests
     }
     
     [Fact]
-    public async Task UnregisterParticipants_ClearsMemoryAndStore()
+    public async Task RemoveTransfer_OfATransferThatNeverReported_ClearsMemoryAndStore()
     {
-        // Arrange
+        // The state a handshake that failed leaves behind: participants and the state registered with
+        // them, and no statistics.
         var stateStore = new InMemoryStateStore();
         var manager = new TransferManager(stateStore);
         var id = "transfer-unreg";
-        
+
         await manager.RegisterParticipantsAsync(id, Guid.NewGuid(), Guid.NewGuid());
 
-        // Act
-        await manager.UnregisterParticipantsAsync(id);
+        await manager.RemoveTransferAsync(id);
 
-        // Assert
         Assert.Null(await manager.GetParticipantsAsync(id));
+        Assert.Null(manager.GetTransfer(id));
         Assert.Null(await stateStore.GetSessionAsync(id));
+    }
+
+    [Fact]
+    public async Task RegisterParticipants_StartsTheTransferState()
+    {
+        // The inactivity sweep walks the states. One that appears only with the first statistics
+        // report leaves a transfer that ends sooner with nothing for the sweep to find.
+        var manager = new TransferManager(new InMemoryStateStore());
+
+        await manager.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid());
+
+        Assert.NotNull(manager.GetTransfer("transfer-1"));
+        Assert.Single(manager.GetAllTransfers());
     }
 }

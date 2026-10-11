@@ -20,7 +20,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private readonly AccessPolicy _policy;
     private readonly ConnectionRegistry _connections;
     private readonly IClientIdentityProvider _identityProvider;
-    private readonly IBridgeManager _bridgeManager;
     private readonly SignalRTransferInitiator _initiator;
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<CommandHub> _logger;
@@ -30,7 +29,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         IStateStore stateStore,
         ITransferManager transferManager, 
         IClientIdentityProvider identityProvider,
-        IBridgeManager bridgeManager,
         SignalRTransferInitiator initiator,
         AccessPolicy policy,
         ConnectionRegistry connections,
@@ -42,7 +40,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         _stateStore = stateStore;
         _transferManager = transferManager;
         _identityProvider = identityProvider;
-        _bridgeManager = bridgeManager;
         _initiator = initiator;
         _policy = policy;
         _connections = connections;
@@ -255,20 +252,6 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         
         // Respond with Pong to confirm connectivity
         await Clients.Caller.SendAsync(nameof(ICommandClient.Pong), transferId);
-    }
-
-
-
-
-    public async Task TransferComplete(string transferId)
-    {
-        _logger.LogInformation("TransferComplete received for Transfer={TransferId}", transferId);
-        
-        // Clear the transfer state and remove bridges
-        // Note: Clients detect completion via dataplane EOF - no SignalR notification needed
-        await _transferManager.RemoveTransferAsync(transferId);
-        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
-        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
     }
 
     // ========== Helpers ==========

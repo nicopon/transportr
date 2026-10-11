@@ -1,4 +1,5 @@
 using TransportR.Interfaces;
+using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Hub.SignalR.Access;
 using Microsoft.AspNetCore.Mvc;
@@ -160,7 +161,7 @@ public class StreamController : ControllerBase
     
     private bool DataStreamFinished(string transferId) =>
         _bridgeManager.Bridges.TryGetValue(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
-        && bridge.CompletionTask.IsCompletedSuccessfully;
+        && bridge.State == BridgeState.Completed;
 
     private ConnectionType ParseConnectionType(HttpRequest request)
     {

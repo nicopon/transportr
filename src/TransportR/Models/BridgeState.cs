@@ -15,5 +15,7 @@ public enum BridgeState
     /// <summary>Both sender and receiver are connected.</summary>
     Active,
     /// <summary>Bridge has been cancelled due to timeout or explicit cancellation.</summary>
-    Cancelled
+    Cancelled,
+    /// <summary>The source ended its stream cleanly: the transfer is over, and nothing registers on the bridge any more.</summary>
+    Completed
 }

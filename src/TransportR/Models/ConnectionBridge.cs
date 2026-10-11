@@ -68,7 +68,7 @@ public class ConnectionBridge
     {
         lock (_lock)
         {
-            if (State == BridgeState.Cancelled) return false;
+            if (_fsm.IsEnded) return false;
 
             if (_fsm.ReceiverConnected)
             {
@@ -108,7 +108,7 @@ public class ConnectionBridge
     {
         lock (_lock)
         {
-            if (State == BridgeState.Cancelled) return false;
+            if (_fsm.IsEnded) return false;
 
             if (_fsm.SenderConnected)
             {
@@ -157,7 +157,7 @@ public class ConnectionBridge
     {
         lock (_lock)
         {
-            if (State == BridgeState.Cancelled) return;
+            if (_fsm.IsEnded) return;
 
             if (_currentSenderId == connectionId)
             {
@@ -223,14 +223,22 @@ public class ConnectionBridge
     }
 
     /// <summary>
-    /// Signals that the sender has finished transmitting data cleanly.
-    /// This allows the receiver stream to exit its wait loop.
+    /// Signals that the source has finished its stream cleanly, which lets the destination's stream
+    /// end.
     /// </summary>
-    public void Complete()
+    /// <returns>
+    /// True for the first call on a bridge that was not already cancelled. That caller is the one
+    /// that saw the transfer end, and the only one to retire it.
+    /// </returns>
+    public bool Complete()
     {
-         // Sender finished Data stream - Receiver should close cleanly.
-         // Completing the TCS allows HandleReceiveAsync to exit its wait loop.
-         _completionTcs.TrySetResult();
+        lock (_lock)
+        {
+            if (!_fsm.OnCompleted()) return false;
+
+            _completionTcs.TrySetResult();
+            return true;
+        }
     }
 
     public Task<Stream> WaitForSenderStream() => _senderStreamTcs.Task;
