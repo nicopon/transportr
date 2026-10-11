@@ -1,5 +1,6 @@
 namespace Shared.Models;
 
+using System.ComponentModel;
 using MessagePack;
 using ProtoBuf;
 
@@ -39,6 +40,7 @@ public class Order
     public decimal DiscountAmount { get; set; }
     [Key(9)]
     [ProtoMember(10)]
+    [DefaultValue("EUR")]
     public string Currency { get; set; } = "EUR";
     [Key(10)]
     [ProtoMember(11)]

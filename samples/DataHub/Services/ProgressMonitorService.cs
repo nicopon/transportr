@@ -56,14 +56,14 @@ public class ProgressMonitorService
             {
                 if ((now - tracker.LastLogTime).TotalMilliseconds >= 1000)
                 {
-                    LogProgress("Global", tracker);
+                    LogProgress(tracker);
                     tracker.LastLogTime = now;
                 }
             }
         }
     }
 
-    private void LogProgress(string transferId, TransferProgress tracker)
+    private void LogProgress(TransferProgress tracker)
     {
         var duration = (DateTime.UtcNow - tracker.StartTime).TotalSeconds;
         var totalMb = tracker.TotalCompressedBytes / 1024.0 / 1024.0;

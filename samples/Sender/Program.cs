@@ -4,7 +4,6 @@ using Shared.Models;
 using Serilog;
 using Sender.Configuration;
 using Sender.Services;
-using TransportR;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR.Services;
 using TransportR.Interfaces;

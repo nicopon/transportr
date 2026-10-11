@@ -7,7 +7,7 @@ namespace DatabaseInitializer;
 
 class Program
 {
-    static void Main(string[] args)
+    static void Main()
     {
         var linesEnv = Environment.GetEnvironmentVariable("ITEM_COUNT");
         var orderCount = 100000; // Default
