@@ -156,10 +156,14 @@ are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.c
 `DataSessionStateMachineTests.cs`, `DominoStateTransitionTests.cs` for the completion sequence) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
 `ConnectionBridge`/`TransferManager`.
+A transfer ends well when the sender's data POST ends cleanly: the bridge takes `OnCompleted` and
+`ITransferTerminator.RetireAsync` removes the state and both bridges, telling nobody. Only that
+signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s) and **skips `Active`
 bridges entirely**; `TransferCleanupService` terminates a transfer with no activity at all for
-`TransferInactivityTimeoutSeconds` (60s), and — only if `StalledProgressTimeoutSeconds` is set,
+`TransferInactivityTimeoutSeconds` (60s) — it knows a transfer from its registration, not from its first
+heartbeat — and, only if `StalledProgressTimeoutSeconds` is set,
 off by default — one that is alive but making no progress. Heartbeats refresh activity but not
 progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
 stall from the hub). The other place the hub unilaterally ends a transfer is `AccessSweepService`/

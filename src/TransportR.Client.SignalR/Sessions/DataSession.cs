@@ -310,7 +310,8 @@ internal class DataSession<T> : IDataSession<T>
                 // Allow WriteLoop to exit
                 _batchProcessor.CompleteSenderChannel();
 
-                // No need to call TransferComplete - hub detects completion via dataplane EOF
+                // The hub learns the transfer is over from the end of the data POST, which the
+                // completed channel above lets the write loop produce.
                 return;
             }
 
@@ -469,7 +470,12 @@ internal class DataSession<T> : IDataSession<T>
         // local flush: the server does not see clean EOF until it has read the request to
         // completion, and cancelling the streams before that turns the clean close into a rupture
         // the peer never receives Abort from.
-        if (_abortQueued)
+        //
+        // A session that completed waits too. CompleteAsync returns on the acknowledgement, and the
+        // clean end of the data POST, which is how the hub learns the transfer is over and forgets
+        // it, only starts then; a release straight after loses that race most of the time on a
+        // loaded machine.
+        if (_abortQueued || _fsm.CurrentState == SessionState.Completed)
         {
             try
             {

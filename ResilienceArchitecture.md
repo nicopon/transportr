@@ -161,7 +161,7 @@ The Hub employs a **TransferCleanupService** that monitors all active transfers.
 
 -   **LastActivityUtc**: Updates on Heartbeat (SignalR) or HTTP activity.
 -   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
--   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — not even a heartbeat — is terminated. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
+-   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — not even a heartbeat — is terminated, whether or not it ever reported: the hub knows a transfer from its registration. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
 -   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the deployment has to name the longest outage it intends to survive before enabling it.
 -   **Not a liveness check**: a transfer whose participant's token ran out, or whose groups may no longer reach each other, is ended by the access sweep instead (see "Token Renewal" in `SecurityArchitecture.md`).
@@ -238,7 +238,7 @@ sequenceDiagram
     
     Note over S,R: Dataplane EOF (HTTP stream close)
     S->>H: 5. POST Data: Close stream (EOF)
-    Note over H: Detects EOF → Complete()
+    Note over H: Detects EOF → Complete(), forgets the transfer
     H->>R: 6. GET Data: Close stream (EOF)
     Note over R: Detects EOF → Confirms completion
     R->>H: 7. POST Control: Close stream (EOF)
@@ -252,11 +252,15 @@ The Hub detects completion via `CopyAndFlushAsync()` which returns `StreamEndRea
 
 ```csharp
 var endReason = await CopyAndFlushAsync(inputStream, receiverOutput, bufferSize, token);
-if (endReason == StreamEndReason.CleanEOF)
+if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Triggers Step 6
 {
-    bridge.Complete(); // Triggers Step 6
+    await terminator.RetireAsync(transferId); // state, session and both bridges; nobody is told
 }
 ```
+
+That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control POST ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a client in its closing phase reads as the end.
+
+The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep below.
 
 ### Client State Transitions
 

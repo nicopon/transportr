@@ -39,6 +39,27 @@ public class FinishedTransferTests
         await AssertForgottenAsync(host, transferId);
     }
 
+    [Fact]
+    public async Task ATransferWhoseSenderIsReleasedAtOnce_IsNoLongerHeldByTheHub()
+    {
+        // What `await using` around the sender does: release it the moment CompleteAsync returns. The
+        // end of the data POST then races the cancellation of the streams, and a POST that loses is a
+        // rupture or a cancelled request at the hub, never a clean end. Measured on a loopback socket
+        // that is 11-17% of transfers on an idle machine and about nine in ten on a loaded one, so
+        // 60 of them leave a clean run with a chance of (1 - 0.11)^60 < 0.1%. A few run at once because
+        // load raises the rate.
+        await using var host = await TestHubServerFactory.StartLoopbackAsync();
+
+        var transferIds = new List<string>();
+        foreach (var batch in Enumerable.Range(0, 60).Chunk(6))
+        {
+            transferIds.AddRange(await Task.WhenAll(batch.Select(_ =>
+                TransferToTheEndAsync(host, configure: null, lasting: TimeSpan.Zero, releaseSenderAtOnce: true))));
+        }
+
+        await AssertForgottenAsync(host, transferIds.ToArray());
+    }
+
     private static async Task AssertForgottenAsync(LoopbackHost host, params string[] transferIds)
     {
         var transfers = host.Services.GetRequiredService<ITransferManager>();
@@ -70,8 +91,13 @@ public class FinishedTransferTests
     private static IEnumerable<KeyValuePair<string, ConnectionBridge>> HeldBridges(IBridgeManager bridges, string transferId) =>
         bridges.Bridges.Where(b => b.Key.StartsWith(transferId + ":", StringComparison.Ordinal));
 
+    /// <param name="releaseSenderAtOnce">
+    /// Release the sender as soon as CompleteAsync returns, instead of after the receiver has seen the
+    /// transfer end.
+    /// </param>
     /// <returns>The id of a transfer both ends have carried to completion and released.</returns>
-    private static async Task<string> TransferToTheEndAsync(LoopbackHost host, Action<ClientOptions>? configure, TimeSpan lasting)
+    private static async Task<string> TransferToTheEndAsync(
+        LoopbackHost host, Action<ClientOptions>? configure, TimeSpan lasting, bool releaseSenderAtOnce = false)
     {
         await using var sender = TestClients.Create(null, host.BaseUrl, configure: configure);
         await using var receiver = TestClients.Create(null, host.BaseUrl, configure: configure);
@@ -97,10 +123,19 @@ public class FinishedTransferTests
         await send.SendAsync(expected.Skip(10).ToList());
         await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(15));
 
+        var transferId = send.TransferId;
+        if (releaseSenderAtOnce)
+        {
+            await send.DisposeAsync();
+        }
+
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(15)));
 
-        var transferId = send.TransferId;
-        await send.DisposeAsync();
+        if (!releaseSenderAtOnce)
+        {
+            await send.DisposeAsync();
+        }
+
         await receive.DisposeAsync();
         return transferId;
     }
