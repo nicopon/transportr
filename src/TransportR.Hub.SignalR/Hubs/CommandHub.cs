@@ -107,7 +107,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         if (_policy.Evaluate(identity with { TokenExpiry = expiryToRecord }) == AccessVerdict.NoGroups)
         {
             _logger.LogWarning("Connect failed: the identity of {ClientId} holds no group", identity.ClientId);
-            throw new HubException("Unable to resolve client identity. Ensure authentication is configured or use dev mode.");
+            throw new HubException("The identity holds no group.");
         }
 
         // The store overwrites on save, so without this a caller who learned another client's id
