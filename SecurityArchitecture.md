@@ -82,7 +82,11 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   so that it and its peer are told, and then its connection closed, with a warning that no renewal was received.
   A transfer whose groups the flow control service no longer lets reach each other ends too. The same pass runs
   after each renewal, so groups follow the token, and when the host calls `IAccessReconciler`, which is how a host
-  that changes its own policy applies a withdrawal to what is already running without waiting for anyone.
+  that changes its own policy applies a withdrawal to what is already running without waiting for anyone. A host
+  that owns the groups of its clients and runs the hub writes them first, for each registration of the subject
+  (`IStateStore.RenewClientAsync`, which leaves the connection alone), then reconciles that client: a group the
+  flow control no longer lets through ends the transfers it carried and keeps the connection; none left ends all
+  of them and closes the connection, and the client that comes back is refused while its identity holds none.
 - **The client comes back.** A connection the hub closes is started again by the client, with jittered, capped
   delays and no limit, and registers on it again. Starting it asks the provider for a token, so while the
   identity provider is down the client stays out.
