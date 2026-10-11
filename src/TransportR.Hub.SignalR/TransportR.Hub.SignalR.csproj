@@ -9,8 +9,6 @@
   </ItemGroup>
   
   <ItemGroup>
-    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
   </ItemGroup>
 
   <PropertyGroup>

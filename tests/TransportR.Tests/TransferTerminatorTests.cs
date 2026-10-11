@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
-using Xunit;
 
 namespace TransportR.Tests;
 

@@ -1,7 +1,6 @@
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using TransportR.Hub.SignalR.Access;
-using TransportR.Hub.SignalR.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;

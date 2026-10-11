@@ -1,5 +1,4 @@
 using TransportR.Client.SignalR.Batching;
-using TransportR.Protocol;
 using Xunit;
 
 namespace POC_DataProxy.Tests;

@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using StackExchange.Redis;
-using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Storage.Redis;
 

@@ -1,11 +1,8 @@
 using System.Net;
-using System.Security.Cryptography.X509Certificates;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
-using TransportR.Interfaces;
 using TransportR.Protocol;
-using Xunit;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.IO;

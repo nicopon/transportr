@@ -1,4 +1,3 @@
-using Xunit;
 using Microsoft.AspNetCore.TestHost;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Configuration;

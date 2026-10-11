@@ -1,4 +1,3 @@
-using System.Net.Http;
 
 namespace TransportR.Client.SignalR.Sessions;
 

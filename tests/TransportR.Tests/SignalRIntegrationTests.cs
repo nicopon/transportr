@@ -13,11 +13,9 @@ using TransportR.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
-using TransportR.Client.SignalR.Sessions;
 using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 using Xunit.Abstractions;
 
 
@@ -43,8 +41,8 @@ public class SignalRIntegrationTests
         var handler = server.CreateHandler();
 
         // 2. Create Clients
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         // 3. Connect clients
         // Note: In dev mode (TestHubServerFactory), groups are auto-assigned to ["test"]
@@ -76,8 +74,8 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -125,8 +123,8 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -205,8 +203,8 @@ public class SignalRIntegrationTests
         using var host = CreateHostWithoutProgressMonitor();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -276,8 +274,8 @@ public class SignalRIntegrationTests
 
         // A window of one batch: SendAsync has nowhere to go once the first batch goes
         // unacknowledged, which is what "parked on the window" means here.
-        await using var sender = CreateClient(handler, "http://localhost", "sender", o => o.MaxInFlightBatches = 1);
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost", o => o.MaxInFlightBatches = 1);
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -312,7 +310,7 @@ public class SignalRIntegrationTests
 
         // A window of one batch and a short bound: the sender gives up as soon as the receiver stops
         // acknowledging, which is what the bound is for.
-        await using var sender = CreateClient(handler, "http://localhost", "sender", o =>
+        await using var sender = CreateClient(handler, "http://localhost", o =>
         {
             o.MaxInFlightBatches = 1;
             o.CompleteStallTimeout = TimeSpan.FromMilliseconds(500);
@@ -320,8 +318,7 @@ public class SignalRIntegrationTests
 
         // A batch is acknowledged only once it lands in the receive buffer. With room for one item
         // and nobody consuming, the second batch is delivered but never acknowledged.
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver",
-            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
+        await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -365,8 +362,8 @@ public class SignalRIntegrationTests
         // there never waited.
         await using var host = await TestHubServerFactory.StartLoopbackAsync();
 
-        await using var sender = CreateClient(null, host.BaseUrl, "sender");
-        await using var receiver = CreateClient(null, host.BaseUrl, "receiver");
+        await using var sender = CreateClient(null, host.BaseUrl);
+        await using var receiver = CreateClient(null, host.BaseUrl);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -415,13 +412,12 @@ public class SignalRIntegrationTests
         // machine's ephemeral ports while this test reports it.
         var opens = new DataStreamOpenCounter(limit: 50);
 
-        await using var sender = CreateClient(null, host.BaseUrl, "sender", o =>
+        await using var sender = CreateClient(null, host.BaseUrl, o =>
         {
             o.MaxInFlightBatches = 1;
             o.CompleteStallTimeout = TimeSpan.FromSeconds(1);
         });
-        await using var receiver = CreateClient(null, host.BaseUrl, "receiver",
-            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
+        await using var receiver = CreateClient(null, host.BaseUrl, o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -468,9 +464,8 @@ public class SignalRIntegrationTests
         // A window of one batch and a receive buffer of one item that nobody drains: the receiver
         // admits the first item and acknowledges it, then holds the acknowledgement of the second
         // until there is room, so the window stays full for as long as the test needs it to.
-        await using var sender = CreateClient(handler, "http://localhost", "sender", o => o.MaxInFlightBatches = 1);
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver",
-            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
+        await using var sender = CreateClient(handler, "http://localhost", o => o.MaxInFlightBatches = 1);
+        await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -524,8 +519,8 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
@@ -562,8 +557,8 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
         receiver.OnTransferStarted += _ => Task.CompletedTask;
 
         await sender.ConnectAsync();
@@ -587,8 +582,8 @@ public class SignalRIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        await using var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
         sender.OnSendRequested += _ => throw new InvalidOperationException("no room for another transfer");
         receiver.OnTransferStarted += _ => Task.CompletedTask;
 
@@ -623,8 +618,8 @@ public class SignalRIntegrationTests
         var server = host.GetTestServer();
         var handler = server.CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        var receiver = CreateClient(handler, "http://localhost");
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -655,8 +650,8 @@ public class SignalRIntegrationTests
         var server = host.GetTestServer();
         var handler = server.CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
-        var receiver = CreateClient(handler, "http://localhost", "receiver");
+        await using var sender = CreateClient(handler, "http://localhost");
+        var receiver = CreateClient(handler, "http://localhost");
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -713,10 +708,9 @@ public class SignalRIntegrationTests
         var server = host.GetTestServer();
         var handler = server.CreateHandler();
 
-        await using var sender = CreateClient(handler, "http://localhost", "sender");
+        await using var sender = CreateClient(handler, "http://localhost");
         await using var receiver = CreateClient(
-            handler, "http://localhost", "receiver",
-            o => o.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(300));
+            handler, "http://localhost", o => o.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(300));
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -747,7 +741,7 @@ public class SignalRIntegrationTests
     /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>
     /// <param name="networkHandler">What carries the data streams over the network; the default socket handler if null.</param>
     private SignalRDataClient<string> CreateClient(
-        HttpMessageHandler? handler, string url, string logPrefix, Action<ClientOptions>? configure = null,
+        HttpMessageHandler? handler, string url, Action<ClientOptions>? configure = null,
         HttpMessageHandler? networkHandler = null)
     {
         // Custom Connection Manager that uses TestServer's HttpMessageHandler

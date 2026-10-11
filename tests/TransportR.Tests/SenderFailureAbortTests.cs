@@ -4,7 +4,6 @@ using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
-using Xunit;
 
 namespace TransportR.Tests;
 

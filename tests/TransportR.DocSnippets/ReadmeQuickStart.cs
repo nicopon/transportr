@@ -1,6 +1,5 @@
 using MessagePack;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client.SignalR;
 using TransportR.Hub.SignalR;
 using TransportR.Serialization.MessagePack;

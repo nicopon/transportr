@@ -1,7 +1,6 @@
 using TransportR.Interfaces;
 using ProtoBuf;
 using ZstdSharp;
-using System.IO;
 
 namespace TransportR.Serialization.Protobuf.Services;
 

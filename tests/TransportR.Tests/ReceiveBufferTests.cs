@@ -1,7 +1,6 @@
 using System.Threading.Channels;
 using TransportR.Client.SignalR.Batching;
 using TransportR.Client.SignalR.Configuration;
-using Xunit;
 
 namespace TransportR.Tests;
 

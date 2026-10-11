@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.SignalR;
-using TransportR.Client.SignalR.Configuration;
 
 namespace TransportR.Auth.ClientCredentials;
 

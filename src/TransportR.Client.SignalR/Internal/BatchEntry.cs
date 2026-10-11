@@ -9,17 +9,13 @@ namespace TransportR.Client.SignalR.Internal;
 internal class BatchEntry
 {
     private IMemoryOwner<byte>? _payload;
-    private readonly long _timestamp;
     private int _refCount = 1; // 1 reference from the Dictionary / Creator
     private readonly object _lock = new();
 
-    public BatchEntry(IMemoryOwner<byte> payload, long timestamp)
+    public BatchEntry(IMemoryOwner<byte> payload)
     {
         _payload = payload;
-        _timestamp = timestamp;
     }
-
-    public long Timestamp => _timestamp;
 
     /// <summary>
     /// Tries to obtain a reference for usage (e.g. resending).

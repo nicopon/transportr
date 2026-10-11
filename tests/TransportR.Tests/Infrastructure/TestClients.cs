@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
-using TransportR.Client.SignalR.Sessions;
 using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
 

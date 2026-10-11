@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Services;
@@ -16,7 +15,6 @@ using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Services;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

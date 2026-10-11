@@ -6,7 +6,6 @@ using Microsoft.Extensions.Hosting;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

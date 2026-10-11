@@ -1,7 +1,5 @@
-using TransportR.Hub.SignalR.Services;
 using TransportR.Models;
 using TransportR.Services;
-using TransportR.Interfaces;
 
 namespace TransportR.Tests;
 

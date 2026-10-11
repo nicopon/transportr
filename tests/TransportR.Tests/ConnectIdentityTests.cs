@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

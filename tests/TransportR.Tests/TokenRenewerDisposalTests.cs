@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
-using Xunit;
 
 namespace TransportR.Tests;
 

@@ -7,7 +7,7 @@ namespace TransportR.Services;
 
 /// <summary>
 /// Manages active transfers and their statistics.
-/// Delegates checkpoint persistence to injected IStateStore.
+/// Keeps participants in the injected IStateStore and transfer statistics in memory.
 /// </summary>
 public class TransferManager : ITransferManager
 {

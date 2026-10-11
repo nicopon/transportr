@@ -1,9 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.IO.Pipelines;
 using System.Threading.Channels;
 using System.Text;
-using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Client.SignalR.Configuration;
 using TransportR.Interfaces;
@@ -11,7 +9,6 @@ using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using Microsoft.AspNetCore.SignalR.Client;
-using Xunit;
 
 namespace TransportR.Tests;
 
@@ -144,7 +141,7 @@ public class BatchProcessorTests
     {
         // Arrange
         await using var processor = CreateProcessor();
-        await processor.SendCompleteSignalAsync(CancellationToken.None);
+        await processor.SendCompleteSignalAsync();
         
         var completeTask = processor.WaitForCompleteAckAsync(CancellationToken.None);
         

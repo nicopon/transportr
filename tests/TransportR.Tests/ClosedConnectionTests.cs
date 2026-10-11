@@ -4,14 +4,12 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Hub.SignalR;
 using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

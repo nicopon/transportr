@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
-using TransportR.Models;
 
 namespace TransportR.Services;
 
@@ -33,7 +32,7 @@ public class TransferTerminator : ITransferTerminator
             // 1. Get participants
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
-            // 2. Clear state in TransferManager (Checkpoints, InMemory State)
+            // 2. Clear state in TransferManager (in-memory state and its store copy)
             await _transferManager.RemoveTransferAsync(transferId);
 
             // 3. Remove bridges

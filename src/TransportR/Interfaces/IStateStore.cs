@@ -3,7 +3,7 @@ using TransportR.Models;
 namespace TransportR.Interfaces;
 
 /// <summary>
-/// Interface for persisting hub state (clients, checkpoints).
+/// Interface for persisting hub state (clients, transfer sessions).
 /// Implementations: InMemory, TestProxy, Redis.
 /// </summary>
 public interface IStateStore

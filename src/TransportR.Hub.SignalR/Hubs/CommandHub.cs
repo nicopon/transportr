@@ -1,11 +1,9 @@
 using TransportR.Interfaces;
 using TransportR.Models;
-using TransportR.Configuration;
 using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Exceptions;
 using TransportR.Hub.SignalR.Services;
-using TransportR.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -266,7 +264,7 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     {
         _logger.LogInformation("TransferComplete received for Transfer={TransferId}", transferId);
         
-        // Clear checkpoint and remove bridges
+        // Clear the transfer state and remove bridges
         // Note: Clients detect completion via dataplane EOF - no SignalR notification needed
         await _transferManager.RemoveTransferAsync(transferId);
         _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));

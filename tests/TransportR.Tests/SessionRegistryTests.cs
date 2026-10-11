@@ -1,4 +1,3 @@
-using Xunit;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Tests.TestHelpers;

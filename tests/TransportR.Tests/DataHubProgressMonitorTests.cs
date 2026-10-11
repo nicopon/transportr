@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
-using Xunit;
 
 namespace TransportR.Tests;
 

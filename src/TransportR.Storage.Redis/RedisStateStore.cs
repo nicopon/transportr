@@ -10,7 +10,7 @@ namespace TransportR.Storage.Redis;
 
 /// <summary>
 /// IStateStore implementation using Redis.
-/// Handles distributed state with TTL for clients and checkpoints.
+/// Handles distributed state with TTL for clients and transfer sessions.
 /// </summary>
 public class RedisStateStore : IStateStore
 {
@@ -20,7 +20,6 @@ public class RedisStateStore : IStateStore
 
     // Keys and TTLs
     private const string KeyPrefix = "transportr:";
-    private static readonly TimeSpan CheckpointTtl = TimeSpan.FromHours(24);
 
     // A conditional write that keeps losing to a concurrent one is not the store's to settle: it
     // says so, and the caller's own retry (a client's next renewal) decides.
@@ -201,7 +200,6 @@ public class RedisStateStore : IStateStore
         var ids = await _db.SetMembersAsync($"{KeyPrefix}client_ids");
         if (ids.Length == 0) return Array.Empty<ClientRegistration>();
 
-        var tasks = new List<Task<RedisValue>>();
         var keys = new RedisKey[ids.Length];
         
         for (int i = 0; i < ids.Length; i++)

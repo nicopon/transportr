@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client.SignalR;
 using TransportR.Serialization.Protobuf.Services;
 

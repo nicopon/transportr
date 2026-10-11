@@ -19,7 +19,6 @@ using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
 using TransportR.Interfaces;
 using TransportR.Protocol;
-using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 using Xunit;
 

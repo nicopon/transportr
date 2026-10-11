@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
@@ -263,7 +262,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         var owner = new PooledMemoryOwner(memoryStream.GetBuffer().AsMemory(0, totalLen));
         
         // Wrap in BatchEntry
-        var entry = new BatchEntry(owner, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var entry = new BatchEntry(owner);
         
         // 1 reference for _unackedBatches (initial ref = 1)
         _unackedBatches[batchId] = entry;
@@ -370,7 +369,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         OnPongReceived?.Invoke(nextExpectedBatchId);
     }
     
-    public async Task SendCompleteSignalAsync(CancellationToken token)
+    public async Task SendCompleteSignalAsync()
     {
         _completeAckReceived = new TaskCompletionSource();
         // Send the Last Batch ID so receiver can verify if it missed anything

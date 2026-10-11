@@ -23,7 +23,6 @@ using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Services;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

@@ -49,47 +49,6 @@ public static partial class JwtHelper
         return null;
     }
 
-    /// <summary>
-    /// Extracts a specific claim value from a JWT token.
-    /// </summary>
-    /// <param name="token">The JWT token string.</param>
-    /// <param name="claimName">The name of the claim to extract.</param>
-    /// <returns>The claim value as string, or null if not found.</returns>
-    public static string? ExtractClaim(string? token, string claimName)
-    {
-        if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(claimName)) return null;
-        
-        try
-        {
-            var parts = token.Split('.');
-            if (parts.Length != 3) return null;
-            
-            var payload = parts[1];
-            switch (payload.Length % 4)
-            {
-                case 2: payload += "=="; break;
-                case 3: payload += "="; break;
-            }
-            payload = payload.Replace('-', '+').Replace('_', '/');
-            
-            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
-            
-            // Match "claimName": "value" or "claimName": value (for numbers)
-            var pattern = $"\"{Regex.Escape(claimName)}\"\\s*:\\s*\"?([^,\"}}]+)\"?";
-            var match = Regex.Match(json, pattern);
-            if (match.Success)
-            {
-                return match.Groups[1].Value;
-            }
-        }
-        catch
-        {
-            // Ignore parsing errors
-        }
-        
-        return null;
-    }
-
     [GeneratedRegex(@"""exp""\s*:\s*(\d+)")]
     private static partial Regex ExpClaimRegex();
 }

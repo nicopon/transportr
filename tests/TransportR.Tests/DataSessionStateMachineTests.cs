@@ -1,7 +1,5 @@
-using TransportR.Client.SignalR.Sessions;
 using TransportR.Services;
 using TransportR.Models;
-using Xunit;
 using Microsoft.Extensions.Logging;
 
 namespace TransportR.Tests;

@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,7 +9,6 @@ using TransportR.Hub.SignalR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
-using Xunit;
 
 namespace TransportR.Tests;
 

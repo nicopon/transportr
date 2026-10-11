@@ -1,17 +1,13 @@
-using System.Buffers;
 using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Net;
 using System.Threading.Channels;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Batching;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
 using TransportR.Client.SignalR.Internal;
-using TransportR.Client.SignalR.Sessions;
 using TransportR.Models;
 using TransportR.Services;
 
@@ -293,7 +289,7 @@ internal class DataSession<T> : IDataSession<T>
         {
             cancellationToken.ThrowIfCancellationRequested();
             
-            await _batchProcessor.SendCompleteSignalAsync(cancellationToken);
+            await _batchProcessor.SendCompleteSignalAsync();
             
             // Wait for CompleteAck
             var ackTask = _batchProcessor.WaitForCompleteAckAsync(cancellationToken);

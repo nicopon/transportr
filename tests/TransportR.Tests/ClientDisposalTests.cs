@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.TestHost;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.SignalR.Sessions;
-using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Client.SignalR.Internal;

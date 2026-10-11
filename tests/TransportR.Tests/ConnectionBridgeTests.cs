@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Models;
-using Xunit;
 
 namespace TransportR.Tests;
 

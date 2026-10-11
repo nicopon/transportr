@@ -7,7 +7,6 @@ using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
-using Xunit;
 
 namespace TransportR.Tests;
 

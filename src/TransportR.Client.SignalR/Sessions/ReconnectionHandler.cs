@@ -6,7 +6,7 @@ namespace TransportR.Client.SignalR.Sessions;
 
 /// <summary>
 /// Encapsulates logic for handling disconnection, probing connectivity via SignalR,
-/// fetching checkpoints, and performing the reconnection handshake (Ping/Pong).
+/// and performing the reconnection handshake (Ping/Pong).
 /// </summary>
 internal class ReconnectionHandler : IDisposable
 {

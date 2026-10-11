@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using TransportR.Services;
-using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Tests;

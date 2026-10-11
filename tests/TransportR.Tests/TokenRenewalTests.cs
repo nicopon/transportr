@@ -1,22 +1,18 @@
-using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR;
 using TransportR.Client.SignalR.Internal;
-using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Configuration;
 using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
 using TransportR.Interfaces;
 using TransportR.Serialization.MessagePack.Services;
 using TransportR.Tests.Infrastructure;
-using Xunit;
 
 namespace TransportR.Tests;
 

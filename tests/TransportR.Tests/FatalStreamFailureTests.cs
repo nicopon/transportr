@@ -1,9 +1,7 @@
 using System.Net;
 using TransportR.Abstractions;
 using TransportR.Client.SignalR.Sessions;
-using TransportR.Models;
 using TransportR.Tests.TestHelpers;
-using Xunit;
 
 namespace TransportR.Tests;
 

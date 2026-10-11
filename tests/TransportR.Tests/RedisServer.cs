@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using StackExchange.Redis;
 using Testcontainers.Redis;
 
 namespace TransportR.Tests;

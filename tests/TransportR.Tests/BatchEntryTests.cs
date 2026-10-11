@@ -1,6 +1,5 @@
 using System.Buffers;
 using TransportR.Client.SignalR.Internal;
-using Xunit;
 
 namespace TransportR.Tests;
 
@@ -24,7 +23,7 @@ public class BatchEntryTests
     public void Release_DisposesThePayloadOnce()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner, 0);
+        var entry = new BatchEntry(owner);
 
         entry.Release();
 
@@ -35,7 +34,7 @@ public class BatchEntryTests
     public void Release_PastZero_DoesNotDisposeAgain()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner, 0);
+        var entry = new BatchEntry(owner);
 
         entry.Release();
         entry.Release();
@@ -48,7 +47,7 @@ public class BatchEntryTests
     public void TryRetain_AfterRelease_ReturnsNull()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner, 0);
+        var entry = new BatchEntry(owner);
 
         entry.Release();
 
@@ -60,7 +59,7 @@ public class BatchEntryTests
     public void Retain_ThenRelease_KeepsThePayloadUntilTheLastReference()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner, 0);
+        var entry = new BatchEntry(owner);
 
         Assert.NotNull(entry.TryRetain());
         entry.Release();
@@ -79,12 +78,12 @@ public class BatchEntryTests
     /// failure whether or not this run happened to interleave.
     /// </remarks>
     [Fact]
-    public void Release_FromTwoThreadsAtOnce_DisposesAtMostOnce()
+    public async Task Release_FromTwoThreadsAtOnce_DisposesAtMostOnce()
     {
         for (var i = 0; i < 2_000; i++)
         {
             var owner = new CountingOwner();
-            var entry = new BatchEntry(owner, 0);
+            var entry = new BatchEntry(owner);
 
             using var barrier = new Barrier(2);
             var releases = new[]
@@ -93,7 +92,7 @@ public class BatchEntryTests
                 Task.Run(() => { barrier.SignalAndWait(); entry.Release(); })
             };
 
-            Task.WaitAll(releases);
+            await Task.WhenAll(releases);
 
             Assert.Equal(1, owner.DisposeCount);
         }
