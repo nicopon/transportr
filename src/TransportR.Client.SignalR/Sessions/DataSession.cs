@@ -834,7 +834,10 @@ internal class DataSession<T> : IDataSession<T>
         }
         catch (Exception ex)
         {
-            if (!_cts.IsCancellationRequested)
+            // A session that has stopped is being torn down, and what its loop raises then belongs to the
+            // teardown: failing it releases a loop parked on the receive buffer before the disposal has
+            // cancelled the streams, and a stream of a transfer that is over has nothing to retry.
+            if (!_cts.IsCancellationRequested && !IsStopped)
             {
                 _config.Logger.LogDebug(ex, "ReadLoop interrupted for Transfer={TransferId}. Rethrowing for retry.", TransferId);
                 throw; // Propagate to HttpStreamManager to trigger retry
