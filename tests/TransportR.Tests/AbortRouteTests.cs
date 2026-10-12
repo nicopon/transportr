@@ -81,6 +81,28 @@ public class AbortRouteTests
     }
 
     [Fact]
+    public async Task ATokenThatHoldsNoGroup_IsRefusedAsNotFound_EvenWithAParticipantsSubject()
+    {
+        // What keeps a person's token off the data plane: it carries no transportr:group scope, and a
+        // token that grants nothing is refused before its subject is compared. The subject is the
+        // sender's here, so the group is the only thing that differs from the token admitted below.
+        var notifier = new RecordingNotifier();
+        using var host = await CreateHostWithTransferAsync(notifier);
+        using var client = host.GetTestClient();
+        var expiry = DateTime.UtcNow.AddHours(1);
+
+        using var refused = await AbortWithTokenAsync(client, StubJwt.Create(SenderSubject, expiry));
+
+        Assert.Equal(HttpStatusCode.NotFound, refused.StatusCode);
+        Assert.NotNull(await host.Services.GetRequiredService<ITransferManager>().GetParticipantsAsync(TransferId));
+        Assert.Empty(notifier.NotifiedConnectionIds);
+
+        using var admitted = await AbortWithTokenAsync(client, StubJwt.Create(SenderSubject, expiry, "test"));
+
+        Assert.Equal(HttpStatusCode.NoContent, admitted.StatusCode);
+    }
+
+    [Fact]
     public async Task AReplicaThatHoldsNoBridgeOfTheTransfer_RefusesIt_AndLeavesTheTransferAlone()
     {
         // Behind a proxy with affinity, a request that lost its cookie reaches a replica that knows the
@@ -132,6 +154,14 @@ public class AbortRouteTests
         }
 
         return host;
+    }
+
+    private static Task<HttpResponseMessage> AbortWithTokenAsync(HttpClient client, string token)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Post, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/{WireRoutes.AbortSegment}");
+        request.Headers.Add("Authorization", $"Bearer {token}");
+        return client.SendAsync(request);
     }
 
     private static Task<HttpResponseMessage> AbortAsync(HttpClient client, string transferId, string? subject)
