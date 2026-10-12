@@ -81,6 +81,23 @@ public class AbortRouteTests
     }
 
     [Fact]
+    public async Task AReplicaThatHoldsNoBridgeOfTheTransfer_RefusesIt_AndLeavesTheTransferAlone()
+    {
+        // Behind a proxy with affinity, a request that lost its cookie reaches a replica that knows the
+        // transfer from the shared state but never carried its streams. Acting there would delete the
+        // shared state and tell nobody, because the participants' connections are on the other replica.
+        var notifier = new RecordingNotifier();
+        using var host = await CreateHostWithTransferAsync(notifier, holdsTheBridges: false);
+        using var client = host.GetTestClient();
+
+        using var response = await AbortAsync(client, TransferId, SenderSubject);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.NotNull(await host.Services.GetRequiredService<ITransferManager>().GetParticipantsAsync(TransferId));
+        Assert.Empty(notifier.NotifiedConnectionIds);
+    }
+
+    [Fact]
     public async Task ATransferThatEndedWell_CannotBeAborted()
     {
         // A sender whose Abort did reach the wire a moment after the timeout, or whose transfer was
@@ -97,7 +114,7 @@ public class AbortRouteTests
         Assert.Empty(notifier.NotifiedConnectionIds);
     }
 
-    private static async Task<IHost> CreateHostWithTransferAsync(RecordingNotifier notifier)
+    private static async Task<IHost> CreateHostWithTransferAsync(RecordingNotifier notifier, bool holdsTheBridges = true)
     {
         var host = AuthenticatedHubServerFactory.CreateHost(configureServices: services =>
             services.AddSingleton<ITransferNotifier>(notifier));
@@ -106,6 +123,13 @@ public class AbortRouteTests
         await store.SaveClientAsync(new ClientRegistration(SenderId, "conn-sender", ["test"], null, null, DateTime.UtcNow, Subject: SenderSubject));
         await store.SaveClientAsync(new ClientRegistration(ReceiverId, "conn-receiver", ["test"], null, null, DateTime.UtcNow, Subject: ReceiverSubject));
         await host.Services.GetRequiredService<ITransferManager>().RegisterParticipantsAsync(TransferId, SenderId, ReceiverId);
+
+        if (holdsTheBridges)
+        {
+            var bridges = host.Services.GetRequiredService<IBridgeManager>();
+            bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, ConnectionType.Data));
+            bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, ConnectionType.Control));
+        }
 
         return host;
     }

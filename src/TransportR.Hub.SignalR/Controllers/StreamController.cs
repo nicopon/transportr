@@ -161,6 +161,17 @@ public class StreamController : ControllerBase
             return NotFound();
         }
 
+        // Only the replica that carried the transfer's streams can end it: it holds the bridges, and the
+        // participants' connections that are to be told are on it. Behind a proxy with affinity, a request
+        // that lost its cookie reaches another replica, which knows the transfer from the shared state
+        // alone; acting there would delete that state and tell nobody.
+        if (!_bridgeManager.Bridges.ContainsKey(IBridgeManager.KeyFor(transferId, ConnectionType.Data))
+            && !_bridgeManager.Bridges.ContainsKey(IBridgeManager.KeyFor(transferId, ConnectionType.Control)))
+        {
+            _logger.LogWarning("Abort request for transfer {TransferId} refused: this hub holds none of its bridges, so the request did not follow its streams", transferId);
+            return NotFound();
+        }
+
         _logger.LogInformation("Transfer {TransferId} ended at the request of one of its participants", transferId);
         await _terminator.TerminateAsync(transferId);
         return NoContent();
