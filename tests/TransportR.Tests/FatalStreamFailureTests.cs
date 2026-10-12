@@ -50,6 +50,26 @@ public class FatalStreamFailureTests
         await Assert.ThrowsAsync<TransferFailedException>(() => parked.WaitAsync(Bound));
     }
 
+    [Fact]
+    public async Task CompleteAsync_WaitingForTheAck_ThrowsAtOnceWithTheStreamsReasonWhenTheHubNoLongerKnowsTheTransfer()
+    {
+        var hub = new ForgetfulHub();
+        await using var session = NewSession(hub);
+        await session.StartSenderAsync();
+        await session.SendAsync("a", CancellationToken.None);
+        var complete = session.CompleteAsync(CancellationToken.None);
+        await AssertParkedAsync(complete);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        hub.Forget();
+
+        // The reason is the one the failure recorded, not the generic text of a state read before it was set.
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => complete.WaitAsync(TimeSpan.FromSeconds(10)));
+        clock.Stop();
+        Assert.Contains("data stream failed permanently", failure.Message);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"CompleteAsync took {clock.Elapsed} to report a stream the hub refused for good.");
+    }
+
     private static DataSession<string> NewSession(ForgetfulHub hub, Action<TransportR.Client.SignalR.Configuration.ClientOptions>? configure = null)
     {
         var context = new StubSessionContext(new HttpClient(hub));

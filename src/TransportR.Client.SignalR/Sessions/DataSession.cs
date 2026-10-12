@@ -300,7 +300,7 @@ internal class DataSession<T> : IDataSession<T>
             var ackTask = _batchProcessor.WaitForCompleteAckAsync(cancellationToken);
             var delayTask = Task.Delay(retryInterval, cancellationToken);
             
-            var finished = await Task.WhenAny(ackTask, delayTask);
+            var finished = await Task.WhenAny(ackTask, delayTask, _fsm.Stopped);
 
             // Both tasks carry the caller's token, so cancelling completes them rather than leaving
             // them pending: without this, a cancelled wait reads as an acknowledgement and reports
@@ -319,6 +319,10 @@ internal class DataSession<T> : IDataSession<T>
                 // completed channel above lets the write loop produce.
                 return;
             }
+
+            // The session stopped under the wait (the hub ended the transfer, the peer aborted): what
+            // follows the loop says why, and a retry of Complete would be sent to nobody.
+            if (IsStopped) break;
 
             var acks = _batchProcessor.AcksReceived;
             if (acks != lastAcks)

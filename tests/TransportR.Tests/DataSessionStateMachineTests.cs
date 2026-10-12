@@ -57,6 +57,53 @@ public class DataSessionStateMachineTests
     }
 
     [Fact]
+    public void Stopped_IsPending_UntilAFinalStateIsReached()
+    {
+        _fsm.TransitionTo(SessionState.Starting);
+        _fsm.TransitionTo(SessionState.Streaming);
+        _fsm.OnStreamsLost();
+        _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
+
+        Assert.False(_fsm.Stopped.IsCompleted);
+    }
+
+    [Fact]
+    public void Stopped_Completes_WhenTheSessionCompletes() => AssertStoppedBy(f => f.TransitionTo(SessionState.Completed));
+
+    [Fact]
+    public void Stopped_Completes_WhenTheSessionFails() => AssertStoppedBy(f => f.TransitionTo(SessionState.Failed));
+
+    [Fact]
+    public void Stopped_Completes_WhenThePeerAborts() => AssertStoppedBy(f => f.OnAborted());
+
+    [Fact]
+    public void Stopped_Completes_WhenTheHubEndsTheTransfer() => AssertStoppedBy(f => f.OnEndedByHub());
+
+    [Fact]
+    public void Stopped_Completes_WhenTheSessionIsReleased() => AssertStoppedBy(f => f.OnReleased());
+
+    [Fact]
+    public async Task Stopped_WakesAWaiterThatIsAlreadyParkedOnIt()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+        var waiter = Task.Run(async () => await _fsm.Stopped);
+        await Task.Delay(50);
+        Assert.False(waiter.IsCompleted);
+
+        _fsm.OnEndedByHub();
+
+        await waiter.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private void AssertStoppedBy(Func<DataSessionStateMachine, bool> stop)
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+
+        Assert.True(stop(_fsm));
+        Assert.True(_fsm.Stopped.IsCompleted);
+    }
+
+    [Fact]
     public void OnStreamsLost_FromStreaming_MovesToReconnecting()
     {
         _fsm.TransitionTo(SessionState.Streaming);

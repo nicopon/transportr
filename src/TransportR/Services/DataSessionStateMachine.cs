@@ -12,8 +12,15 @@ public class DataSessionStateMachine
     private readonly ILogger _logger;
     private readonly string _transferId;
     private readonly object _lock = new();
+    private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public SessionState CurrentState => _currentState;
+
+    /// <summary>
+    /// Completes when the session reaches a final state, whichever of them. A wait with no event of its
+    /// own to be woken by ends on this instead of on its next tick.
+    /// </summary>
+    public Task Stopped => _stopped.Task;
 
     /// <summary>
     /// True while the session is in one of the domino states, sender or receiver side: the data is
@@ -44,8 +51,7 @@ public class DataSessionStateMachine
                 return false;
             }
 
-            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, newState, _transferId);
-            _currentState = newState;
+            Enter(newState);
             return true;
         }
     }
@@ -62,8 +68,7 @@ public class DataSessionStateMachine
         {
             if (IsFinal(_currentState) || _currentState == SessionState.Reconnecting) return false;
 
-            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Reconnecting, _transferId);
-            _currentState = SessionState.Reconnecting;
+            Enter(SessionState.Reconnecting);
             return true;
         }
     }
@@ -79,8 +84,7 @@ public class DataSessionStateMachine
         {
             if (IsFinal(_currentState)) return false;
 
-            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Disposed, _transferId);
-            _currentState = SessionState.Disposed;
+            Enter(SessionState.Disposed);
             return true;
         }
     }
@@ -96,8 +100,7 @@ public class DataSessionStateMachine
         {
             if (IsFinal(_currentState)) return false;
 
-            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Failed, _transferId);
-            _currentState = SessionState.Failed;
+            Enter(SessionState.Failed);
             return true;
         }
     }
@@ -114,9 +117,20 @@ public class DataSessionStateMachine
         {
             if (IsFinal(_currentState)) return false;
 
-            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Failed, _transferId);
-            _currentState = SessionState.Failed;
+            Enter(SessionState.Failed);
             return true;
+        }
+    }
+
+    // Called under the lock: the state, the log line and the signal that the session stopped are one step.
+    private void Enter(SessionState state)
+    {
+        _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, state, _transferId);
+        _currentState = state;
+
+        if (IsFinal(state))
+        {
+            _stopped.TrySetResult();
         }
     }
 
