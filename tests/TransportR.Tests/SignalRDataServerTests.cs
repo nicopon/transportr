@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Hub.SignalR.Controllers;
 using TransportR.Hub.SignalR.Hubs;
@@ -10,6 +11,7 @@ using TransportR.Hub.SignalR.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
+using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
@@ -27,12 +29,13 @@ public class SignalRDataServerTests
     {
         public BridgeManager Bridges { get; } = new(NullLoggerFactory.Instance);
         public RecordingTerminator Terminator { get; } = new();
+        public LogRecorder Logs { get; } = new();
         public SignalRDataServer Server { get; }
 
         public Harness()
         {
             Server = new SignalRDataServer(
-                NullLogger<SignalRDataServer>.Instance,
+                Logs.Factory.CreateLogger<SignalRDataServer>(),
                 new IgnoredProgress(),
                 new UnusedHubContext(),
                 new KnownTransfer(),
@@ -99,6 +102,25 @@ public class SignalRDataServerTests
 
         Assert.Empty(hub.Terminator.Retired);
         Assert.NotEqual(BridgeState.Completed, bridge.State);
+    }
+
+    [Fact]
+    public async Task SendCutByARupture_OfATransferTheHubStillCarries_IsAWarning()
+    {
+        // The warning means a client that should reconnect, and for a live transfer that is what it
+        // is. Whatever is done about the transfers the hub ended itself must leave this one alone.
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.Cut(new IOException("connection reset"));
+        await EndsAsync(send);
+
+        Assert.True(hub.Logs.Has(LogLevel.Warning, "RUPTURE"), "A rupture of a live transfer was not logged as a warning.");
     }
 
     [Fact]
