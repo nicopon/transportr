@@ -65,7 +65,9 @@ public class StreamController : ControllerBase
         var participants = await _transferManager.GetParticipantsAsync(transferId);
         if (participants == null)
         {
-            _logger.LogWarning("Security: Stream access denied - transfer {TransferId} not found", transferId);
+            // A client reopening a stream of a transfer the hub retired or ended meets this, twice per
+            // reopening; it says nothing about the caller's right to be there, which is judged below.
+            _logger.LogInformation("Stream request for transfer {TransferId} refused: the hub does not know it (finished, terminated or never opened)", transferId);
             return false;
         }
 
