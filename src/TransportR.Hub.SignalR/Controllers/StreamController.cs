@@ -80,37 +80,52 @@ public class StreamController : ControllerBase
 
         var caller = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null);
         var callerSubject = caller?.Subject;
+        var roleName = role == Role.Either ? "sender or receiver" : role.ToString().ToLowerInvariant();
 
         // Past this route an authenticated caller must have been attested: a registration or a token
         // without a subject is refused here even though two absent subjects are equal elsewhere.
         // Lifetime is the host's middleware's call, so only a token that grants nothing is refused.
-        var expectedSubjects = new List<string>();
-        if (caller != null && callerSubject != null && _policy.Evaluate(caller) != AccessVerdict.NoGroups)
+        // Each refusal says which of the three it is: a line that lists what was expected, empty, is
+        // read as a subject mismatch for a comparison that never ran.
+        if (caller == null || callerSubject == null)
         {
-            var expectedIds = role switch
-            {
-                Role.Sender => new[] { participants.SenderId },
-                Role.Receiver => new[] { participants.ReceiverId },
-                _ => new[] { participants.SenderId, participants.ReceiverId }
-            };
+            _logger.LogWarning(
+                "Security: Stream access denied - the caller of transfer {TransferId} has no attested identity to compare (the identity could not be resolved, or its token carries no subject)",
+                transferId);
+            return false;
+        }
 
-            foreach (var expectedId in expectedIds)
-            {
-                var expected = await _stateStore.GetClientAsync(expectedId);
-                if (expected?.Subject != null
-                    && AccessPolicy.SameIdentity(expected.Subject, callerSubject) == AccessVerdict.Allowed)
-                {
-                    return true;
-                }
+        if (_policy.Evaluate(caller) == AccessVerdict.NoGroups)
+        {
+            _logger.LogWarning(
+                "Security: Stream access denied - caller '{CallerSubject}' holds no group, so it is not the {Role} of transfer {TransferId}",
+                callerSubject, roleName, transferId);
+            return false;
+        }
 
-                expectedSubjects.Add($"'{expected?.Subject ?? "<none>"}'");
+        var expectedIds = role switch
+        {
+            Role.Sender => new[] { participants.SenderId },
+            Role.Receiver => new[] { participants.ReceiverId },
+            _ => new[] { participants.SenderId, participants.ReceiverId }
+        };
+
+        var expectedSubjects = new List<string>();
+        foreach (var expectedId in expectedIds)
+        {
+            var expected = await _stateStore.GetClientAsync(expectedId);
+            if (expected?.Subject != null
+                && AccessPolicy.SameIdentity(expected.Subject, callerSubject) == AccessVerdict.Allowed)
+            {
+                return true;
             }
+
+            expectedSubjects.Add($"'{expected?.Subject ?? "<none>"}'");
         }
 
         _logger.LogWarning(
             "Security: Stream access denied - caller '{CallerSubject}' is not the {Role} of transfer {TransferId} (expected {ExpectedSubjects})",
-            callerSubject ?? "<none>", role == Role.Either ? "sender or receiver" : role.ToString().ToLowerInvariant(),
-            transferId, string.Join(" or ", expectedSubjects));
+            callerSubject, roleName, transferId, string.Join(" or ", expectedSubjects));
         return false;
     }
 

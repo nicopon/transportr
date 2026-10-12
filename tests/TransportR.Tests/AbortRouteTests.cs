@@ -121,6 +121,26 @@ public class AbortRouteTests
     }
 
     [Fact]
+    public async Task ATokenWithNoSubject_IsRefusedWithAReasonThatSaysSo()
+    {
+        var hubLogs = new LogRecorder();
+        using var host = await CreateHostWithTransferAsync(new RecordingNotifier(), hubLogs: hubLogs);
+        using var client = host.GetTestClient();
+
+        static string Encode(string json) =>
+            Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        var expiry = new DateTimeOffset(DateTime.UtcNow.AddHours(1), TimeSpan.Zero).ToUnixTimeSeconds();
+        var token = $"{Encode("{\"alg\":\"none\"}")}.{Encode($"{{\"exp\":{expiry},\"scope\":[\"transportr:group:test\"]}}")}.signature";
+
+        using var response = await AbortWithTokenAsync(client, token);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var refusal = Assert.Single(hubLogs.MessagesFrom(LogLevel.Warning), m => m.Contains("Stream access denied"));
+        Assert.Contains("no attested identity", refusal);
+        Assert.DoesNotContain("expected", refusal);
+    }
+
+    [Fact]
     public async Task AStranger_IsRefusedWithTheSubjectItWasComparedTo()
     {
         var hubLogs = new LogRecorder();
