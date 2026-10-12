@@ -408,7 +408,7 @@ public class BatchProcessorTests
 
         await processor.SendAsync("a", CancellationToken.None);
         await processor.SendAsync("b", CancellationToken.None);
-        while (processor.UnackedCount < 2) await Task.Delay(10);
+        await ReadOutgoingAsync(processor, 2);
 
         var blocked = processor.SendAsync("c", CancellationToken.None);
         Assert.NotSame(blocked, await Task.WhenAny(blocked, Task.Delay(200)));
@@ -424,8 +424,25 @@ public class BatchProcessorTests
             nextExpectedFromPong: 1,
             token: CancellationToken.None);
 
-        // Assert
-        Assert.Equal(1, processor.UnackedCount);
+        // Assert: the slot came back, and the batch parked on it was registered and handed to the
+        // channel. The count is read after that and not before: the slot lets the parked producer
+        // run, so the count is 1 until its batch registers and 2 after, and which one a read sees
+        // is a matter of scheduling.
         await blocked.WaitAsync(TimeSpan.FromSeconds(5));
+        await ReadOutgoingAsync(processor, 1);
+
+        // Batch 0 went with the implicit ack; batches 1 and 2 are left.
+        Assert.Equal(2, processor.UnackedCount);
+    }
+
+    // A batch reaches the outgoing channel after it is registered, so reading it is waiting for its
+    // registration. Nothing else reads the channel in these tests.
+    private static async Task ReadOutgoingAsync(BatchProcessor<string> processor, int count)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        for (var i = 0; i < count; i++)
+        {
+            await processor.OutgoingMessages.ReadAsync(deadline.Token);
+        }
     }
 }
