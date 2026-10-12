@@ -117,8 +117,17 @@ public class SignalRDataServer : ITransportRServer
                 }
                 else if (endReason == StreamEndReason.Rupture)
                 {
-                    _logger.LogWarning("BRIDGE: Sender POST ended with RUPTURE {BridgeKey}. Client should reconnect.", bridgeKey);
                     bridge.OnDisconnected(connectionId);
+
+                    if (await HoldsAsync(transferId).ConfigureAwait(false))
+                    {
+                        _logger.LogWarning("BRIDGE: Sender POST ended with RUPTURE {BridgeKey}. Client should reconnect.", bridgeKey);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("BRIDGE: Sender POST ended with RUPTURE {BridgeKey}: the hub no longer holds the transfer.", bridgeKey);
+                    }
+
                     return;
                 }
                 else // Cancelled
@@ -155,9 +164,17 @@ public class SignalRDataServer : ITransportRServer
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("BRIDGE: Source Disconnected {BridgeKey} ({Message})", bridgeKey, ex.Message);
             bridge.OnDisconnected(connectionId);
-            
+
+            if (await HoldsAsync(transferId).ConfigureAwait(false))
+            {
+                _logger.LogWarning("BRIDGE: Source Disconnected {BridgeKey} ({Message})", bridgeKey, ex.Message);
+            }
+            else
+            {
+                _logger.LogInformation("BRIDGE: Source Disconnected {BridgeKey} ({Message}): the hub no longer holds the transfer.", bridgeKey, ex.Message);
+            }
+
             // The source is healthy and answers for nothing here, but a normal end would tell its
             // client the stream is over rather than that it has to reopen. A failing read never gets
             // this far (it is a Rupture above), so an IOException is the destination's.
@@ -220,6 +237,24 @@ public class SignalRDataServer : ITransportRServer
             // Note: We do NOT send StreamDisconnected notifications anymore.
         }
     }
+    /// <summary>
+    /// Whether the hub still holds the transfer. A stream that breaks on one it does not (finished,
+    /// ended by the hub, expired) is that transfer's end and not a client to wait for: the hub removes
+    /// the state before it tells anyone to cut, so a cut always finds it gone. Only the level of a log
+    /// line depends on this, so a store that cannot answer leaves the louder one.
+    /// </summary>
+    private async Task<bool> HoldsAsync(string transferId)
+    {
+        try
+        {
+            return await _transferManager.GetParticipantsAsync(transferId).ConfigureAwait(false) != null;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
     private async Task<StreamEndReason> CopyAndFlushAsync(Stream source, Stream destination, int bufferSize, CancellationToken token)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
