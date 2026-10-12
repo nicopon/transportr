@@ -102,6 +102,24 @@ public class DataSessionStateMachine
         }
     }
 
+    /// <summary>
+    /// Records that the hub ended the transfer, which fails it. Neither end released anything: the
+    /// state says that the transfer failed, where a release leaves <see cref="SessionState.Disposed"/>.
+    /// A session that already reached an outcome keeps it.
+    /// </summary>
+    /// <returns>True when the hub's ending stopped a session that had not yet reached an outcome.</returns>
+    public bool OnEndedByHub()
+    {
+        lock (_lock)
+        {
+            if (IsFinal(_currentState)) return false;
+
+            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Failed, _transferId);
+            _currentState = SessionState.Failed;
+            return true;
+        }
+    }
+
     // "No transition may leave this state", which is not the same question as "did the transfer
     // stop": a disposed session never succeeded, so callers reporting an outcome ask their own.
     private static bool IsFinal(SessionState state) =>

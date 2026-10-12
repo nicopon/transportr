@@ -37,6 +37,8 @@ internal class DataSession<T> : IDataSession<T>
     private const string ReleasedBeforeCompletion =
         "The transfer handle was released before the transfer completed; the transfer was abandoned.";
 
+    private const string EndedByHub = "The hub ended the transfer before it completed.";
+
     public string TransferId { get; }
     public int BatchSize { get; }
     public string DataUrl { get; }
@@ -346,11 +348,7 @@ internal class DataSession<T> : IDataSession<T>
         }
 
         // Only reachable when something else stopped the session under us.
-        throw new TransferFailedException(
-            TransferId,
-            _fsm.CurrentState == SessionState.Disposed
-                ? ReleasedBeforeCompletion
-                : "Transfer failed before it could complete.");
+        throw new TransferFailedException(TransferId, FailureMessage);
     }
     
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken)
@@ -413,14 +411,9 @@ internal class DataSession<T> : IDataSession<T>
             await Task.Delay(100, cancellationToken);
         }
 
-        if (_fsm.CurrentState == SessionState.Disposed)
+        if (_fsm.CurrentState is SessionState.Disposed or SessionState.Failed)
         {
-            throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
-        }
-
-        if (_fsm.CurrentState == SessionState.Failed)
-        {
-            throw new TransferFailedException(TransferId, "Transfer failed before it could complete.");
+            throw new TransferFailedException(TransferId, FailureMessage);
         }
     }
 
@@ -447,6 +440,23 @@ internal class DataSession<T> : IDataSession<T>
     {
         _batchProcessor.EnqueueAbort(reason);
         _abortQueued = true;
+    }
+
+    public async Task EndByHubAsync()
+    {
+        // A session that already stopped keeps the reason it stopped for. The reason is set before the
+        // state moves: whoever polls the state reads the reason next.
+        if (!IsStopped)
+        {
+            _failureReason ??= EndedByHub;
+            if (_fsm.OnEndedByHub())
+            {
+                _batchProcessor.Fail(EndedByHub);
+            }
+        }
+
+        // Failed, the session is past OnReleased: nothing is queued to the peer, which the hub told itself.
+        await DisposeAsync();
     }
 
     public async ValueTask DisposeAsync()

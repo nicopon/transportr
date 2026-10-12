@@ -91,6 +91,27 @@ public class DataSessionStateMachineTests
     }
 
     [Fact]
+    public void OnEndedByHub_FromARunningSession_FailsIt()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+
+        Assert.True(_fsm.OnEndedByHub());
+        Assert.Equal(SessionState.Failed, _fsm.CurrentState);
+    }
+
+    [Theory]
+    [InlineData(SessionState.Completed)]
+    [InlineData(SessionState.Failed)]
+    [InlineData(SessionState.Disposed)]
+    public void OnEndedByHub_FromAStoppedSession_KeepsItsOutcome(SessionState final)
+    {
+        if (final == SessionState.Disposed) _fsm.OnReleased(); else _fsm.TransitionTo(final);
+
+        Assert.False(_fsm.OnEndedByHub());
+        Assert.Equal(final, _fsm.CurrentState);
+    }
+
+    [Fact]
     public void OnReleased_FromNonFinalState_ReturnsTrueAndMovesToDisposed()
     {
         _fsm.TransitionTo(SessionState.Streaming);

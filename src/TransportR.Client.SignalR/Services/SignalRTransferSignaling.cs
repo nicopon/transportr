@@ -219,7 +219,7 @@ internal class SignalRTransferSignaling<T>
         if (_sessionRegistry.TryRemove(transferId, out var session) && session != null)
         {
             _logger.LogWarning("Cancelling Transfer {TransferId} as requested by Hub.", transferId);
-            await session.DisposeAsync();
+            await session.EndByHubAsync();
         }
     }
 }

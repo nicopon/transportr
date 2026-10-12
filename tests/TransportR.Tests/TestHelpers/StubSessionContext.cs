@@ -11,7 +11,7 @@ namespace TransportR.Tests.TestHelpers;
 public class StubSessionContext : ISessionContext<string>
 {
     public Guid ClientId { get; } = Guid.NewGuid();
-    public ILogger Logger { get; } = new StubLogger();
+    public ILogger Logger { get; }
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
     public HttpClient HttpClient { get; }
     
@@ -23,9 +23,10 @@ public class StubSessionContext : ISessionContext<string>
     public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
     public ClientOptions Options { get; } = new ClientOptions();
 
-    public StubSessionContext(HttpClient? httpClient = null)
+    public StubSessionContext(HttpClient? httpClient = null, ILogger? logger = null)
     {
         HttpClient = httpClient ?? new HttpClient();
+        Logger = logger ?? new StubLogger();
     }
 
     public int RemoveSessionCount { get; private set; }

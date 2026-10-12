@@ -106,4 +106,11 @@ public interface IDataSession<T> : IAsyncDisposable
     /// Waits for the transfer to be fully completed (including shutdown handshake).
     /// </summary>
     Task WaitForCompletionAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The hub cancelled the transfer: fails it with the hub as the reason, which releases whoever is
+    /// parked on it, then releases the session. Not <see cref="IAsyncDisposable.DisposeAsync"/>, which
+    /// is the host letting go and tells the peer so.
+    /// </summary>
+    Task EndByHubAsync();
 }

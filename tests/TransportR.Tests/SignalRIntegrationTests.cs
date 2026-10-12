@@ -506,7 +506,8 @@ public class SignalRIntegrationTests
             Assert.Fail($"The receiver was never told its sender gave up; it opened its data stream {opens.Opens} times.");
         }
 
-        await Assert.ThrowsAsync<TransferFailedException>(() => verdict);
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => verdict);
+        Assert.Contains("hub ended", failure.Message);
     }
 
     [Fact]
@@ -565,6 +566,52 @@ public class SignalRIntegrationTests
         receiveStopwatch.Stop();
         Assert.True(receiveStopwatch.Elapsed < TimeSpan.FromSeconds(1),
             $"Expected termination to fail the receive in under a second; took {receiveStopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task HostTermination_SaysTheHubEndedIt_AndNotThatTheHandleWasReleased()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        // The same stuck pair as above: a window of one batch, and a receive buffer of one item nobody drains.
+        await using var sender = CreateClient(handler, "http://localhost", o => o.MaxInFlightBatches = 1);
+        await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        var receive = await receiveHandle.Task;
+
+        await send.SendAsync("item-1");
+        await send.SendAsync("item-2").WaitAsync(TimeSpan.FromSeconds(10));
+        var parked = send.SendAsync("item-3");
+        await Task.Delay(100);
+        Assert.False(parked.IsCompleted, "item-3 should be parked on a full window.");
+
+        await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(send.TransferId);
+
+        // Neither end released anything: the hub ended the transfer, and each end is told so. A message
+        // about a handle being released sends the reader looking for a disposal that never happened.
+        var sendFailure = await Assert.ThrowsAsync<TransferFailedException>(() => parked.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Contains("hub ended", sendFailure.Message);
+        Assert.DoesNotContain("released", sendFailure.Message);
+
+        // The enumeration does not end as a finished transfer's does: the consumer who only enumerates
+        // would take a transfer cut short for a complete one.
+        var enumerationFailure = await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync()) { }
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("hub ended", enumerationFailure.Message);
+
+        var waitFailure = await Assert.ThrowsAsync<TransferFailedException>(() => receive.WaitForCompletionAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Contains("hub ended", waitFailure.Message);
+        Assert.DoesNotContain("released", waitFailure.Message);
     }
 
     [Fact]
