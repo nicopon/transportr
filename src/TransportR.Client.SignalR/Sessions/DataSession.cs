@@ -578,6 +578,10 @@ internal class DataSession<T> : IDataSession<T>
                          break;
                 }
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                // DisposeAsync cancels the loop's own token last: that is the loop ending, not failing.
+            }
             catch (Exception ex)
             {
                  _config.Logger.LogError(ex, "Session Loop Error");
@@ -618,7 +622,7 @@ internal class DataSession<T> : IDataSession<T>
                     _config.Logger.LogWarning("Stream failed (Retryable): {Error}. Transitioning to Reconnecting.", result.ErrorMessage);
                     if (!IsInCompletingPhase)
                     {
-                        _fsm.TransitionTo(SessionState.Reconnecting);
+                        _fsm.OnStreamsLost();
                     }
                     else
                     {
@@ -668,7 +672,7 @@ internal class DataSession<T> : IDataSession<T>
                     }
                     else
                     {
-                        _fsm.TransitionTo(SessionState.Reconnecting);
+                        _fsm.OnStreamsLost();
                     }
                 }
             }

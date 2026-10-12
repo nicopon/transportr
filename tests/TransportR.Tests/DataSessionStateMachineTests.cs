@@ -57,6 +57,40 @@ public class DataSessionStateMachineTests
     }
 
     [Fact]
+    public void OnStreamsLost_FromStreaming_MovesToReconnecting()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+
+        Assert.True(_fsm.OnStreamsLost());
+        Assert.Equal(SessionState.Reconnecting, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void OnStreamsLost_WhileAlreadyReconnecting_ChangesNothing()
+    {
+        _fsm.TransitionTo(SessionState.Reconnecting);
+
+        Assert.False(_fsm.OnStreamsLost());
+        Assert.Equal(SessionState.Reconnecting, _fsm.CurrentState);
+    }
+
+    [Theory]
+    [InlineData(SessionState.Completed)]
+    [InlineData(SessionState.Failed)]
+    [InlineData(SessionState.Disposed)]
+    public void OnStreamsLost_FromAStoppedSession_KeepsItsStateAndSaysNothingOfIt(SessionState final)
+    {
+        // The streams of a session that stopped end because it stopped: nothing there is a fault.
+        var logs = new TransportR.Tests.Infrastructure.LogRecorder();
+        var fsm = new DataSessionStateMachine("test-transfer", logs.Factory.CreateLogger("fsm"));
+        if (final == SessionState.Disposed) fsm.OnReleased(); else fsm.TransitionTo(final);
+
+        Assert.False(fsm.OnStreamsLost());
+        Assert.Equal(final, fsm.CurrentState);
+        Assert.False(logs.Has(LogLevel.Warning, "Invalid transition"));
+    }
+
+    [Fact]
     public void OnReleased_FromNonFinalState_ReturnsTrueAndMovesToDisposed()
     {
         _fsm.TransitionTo(SessionState.Streaming);

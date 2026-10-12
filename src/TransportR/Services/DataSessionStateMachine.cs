@@ -51,6 +51,24 @@ public class DataSessionStateMachine
     }
 
     /// <summary>
+    /// Records that the streams ended without the transfer having, which a session that is still
+    /// working answers by reconnecting. A session that has stopped keeps its state: its own release
+    /// or failure is what cancelled the streams, and their ending says nothing new.
+    /// </summary>
+    /// <returns>True when the session moved to <see cref="SessionState.Reconnecting"/>.</returns>
+    public bool OnStreamsLost()
+    {
+        lock (_lock)
+        {
+            if (IsFinal(_currentState) || _currentState == SessionState.Reconnecting) return false;
+
+            _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, SessionState.Reconnecting, _transferId);
+            _currentState = SessionState.Reconnecting;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Records that the session was released. A session that already reached an outcome keeps it:
     /// releasing a finished transfer is how its handle ends, not a state change.
     /// </summary>
