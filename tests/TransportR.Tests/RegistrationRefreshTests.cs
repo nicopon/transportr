@@ -206,8 +206,10 @@ public class RegistrationRefreshTests
 
         Assert.Equal(beats, node.Store.LookupsByConnection);
 
-        // And they resume once it is done.
-        await Task.Delay(TimeSpan.FromMilliseconds(300));
+        // And they resume once it is done: at the next tick, however late a loaded runner delivers it.
+        // Six ticks of a 50 ms interval fitted in a fixed 300 ms until a two-core CI runner missed them once.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (node.Store.LookupsByConnection <= beats && DateTime.UtcNow < deadline) await Task.Delay(20);
         Assert.True(node.Store.LookupsByConnection > beats, "the presence heartbeat never came back");
     }
 
