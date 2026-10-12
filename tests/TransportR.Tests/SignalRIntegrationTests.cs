@@ -480,8 +480,11 @@ public class SignalRIntegrationTests
         await using var receive = await receiveHandle.Task;
 
         // Nobody enumerates. The receiver holds one item and stops reading; four batches of 4 MB are
-        // then in flight, more than the sockets and the hub's buffers hold, so the Abort the sender
-        // writes on giving up stays queued behind them and cannot reach the receiver or the hub.
+        // then in flight. On the loopback this was measured on (macOS) that is more than the sockets
+        // and the hub's buffers hold, so the Abort the sender writes on giving up stays queued behind
+        // them and the sender asks the hub to end the transfer. A host with larger loopback buffers
+        // may hold all of it: the Abort then gets through, and the receiver reopens its data stream
+        // and fails on the hub's 404. The claim below is true of both.
         // Random, because the serializer compresses and a run of one character would take no room at all.
         var item = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(3 * 1024 * 1024));
         var gaveUp = false;
@@ -506,8 +509,11 @@ public class SignalRIntegrationTests
             Assert.Fail($"The receiver was never told its sender gave up; it opened its data stream {opens.Opens} times.");
         }
 
-        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => verdict);
-        Assert.Contains("hub ended", failure.Message);
+        // The reason is not asserted: it is the hub's ("The hub ended the transfer…") on the path that
+        // needed the request, and the 404's on the other, and which one runs is the host's buffers' doing.
+        // The wording of the first is held where no pipe has to be filled: AbortRouteTests,
+        // OutOfBandAbortTests, HubEndedSessionTests and HostTermination_SaysTheHubEndedIt_….
+        await Assert.ThrowsAsync<TransferFailedException>(() => verdict);
     }
 
     [Fact]
