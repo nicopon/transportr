@@ -30,6 +30,7 @@ public class SignalRDataServerTests
         public BridgeManager Bridges { get; } = new(NullLoggerFactory.Instance);
         public RecordingTerminator Terminator { get; } = new();
         public LogRecorder Logs { get; } = new();
+        public KnownTransfer Transfers { get; } = new();
         public SignalRDataServer Server { get; }
 
         public Harness()
@@ -38,7 +39,7 @@ public class SignalRDataServerTests
                 Logs.Factory.CreateLogger<SignalRDataServer>(),
                 new IgnoredProgress(),
                 new UnusedHubContext(),
-                new KnownTransfer(),
+                Transfers,
                 Bridges,
                 Terminator);
         }
@@ -121,6 +122,63 @@ public class SignalRDataServerTests
         await EndsAsync(send);
 
         Assert.True(hub.Logs.Has(LogLevel.Warning, "RUPTURE"), "A rupture of a live transfer was not logged as a warning.");
+    }
+
+    [Fact]
+    public async Task SendCutByARupture_OfATransferTheHubForgot_IsNotAWarning()
+    {
+        // The hub removes a transfer it ends before it tells anyone, so a stream that breaks after that
+        // is the transfer's end, and nobody is going to reconnect.
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        hub.Transfers.Forget();
+        input.Cut(new IOException("connection reset"));
+        await EndsAsync(send);
+
+        Assert.False(hub.Logs.Has(LogLevel.Warning, "RUPTURE"), "A rupture of a transfer the hub had forgotten was logged as a warning.");
+        Assert.True(hub.Logs.Has(LogLevel.Information, "Sender POST ended with RUPTURE"), "The end of the stream was not logged at all.");
+    }
+
+    [Fact]
+    public async Task SourceLosingItsDestination_OfATransferTheHubForgot_IsNotAWarning()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new FailingStream(new IOException("destination reset")), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        hub.Transfers.Forget();
+        input.Push(new byte[] { 1, 2, 3 });
+        await AssertEndsAbnormallyAsync(send);
+
+        Assert.False(hub.Logs.Has(LogLevel.Warning, "Source Disconnected"), "A destination lost on a transfer the hub had forgotten was logged as a warning.");
+        Assert.True(hub.Logs.Has(LogLevel.Information, "Source Disconnected"), "The end of the stream was not logged at all.");
+    }
+
+    [Fact]
+    public async Task SourceLosingItsDestination_OfATransferTheHubStillCarries_IsAWarning()
+    {
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(ConnectionType.Data);
+        _ = bridge.RegisterReceiverAsync(new FailingStream(new IOException("destination reset")), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.Push(new byte[] { 1, 2, 3 });
+        await AssertEndsAbnormallyAsync(send);
+
+        Assert.True(hub.Logs.Has(LogLevel.Warning, "Source Disconnected"));
     }
 
     [Fact]
@@ -504,8 +562,12 @@ public class SignalRDataServerTests
 
     private sealed class KnownTransfer : ITransferManager
     {
+        private volatile bool _forgotten;
+
+        public void Forget() => _forgotten = true;
+
         public Task<TransferParticipants?> GetParticipantsAsync(string transferId) =>
-            Task.FromResult<TransferParticipants?>(new TransferParticipants(Guid.NewGuid(), Guid.NewGuid()));
+            Task.FromResult<TransferParticipants?>(_forgotten ? null : new TransferParticipants(Guid.NewGuid(), Guid.NewGuid()));
 
         public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => throw new NotSupportedException();
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => throw new NotSupportedException();
