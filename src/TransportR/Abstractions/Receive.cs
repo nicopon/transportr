@@ -38,6 +38,13 @@ public abstract class Receive<T> : Transfer, IAsyncDisposable
     /// <summary>
     /// Waits for the transfer to be fully completed (including shutdown handshake).
     /// </summary>
+    /// <remarks>
+    /// It may be awaited while <see cref="ReceiveAsync"/> is being enumerated. It throws within a
+    /// fraction of a second of the transfer failing, whatever the enumeration has not yet delivered.
+    /// It returns once the sender has been acknowledged, which says nothing of what the consumer has
+    /// taken: items already received stay in the enumeration, and a host that stops consuming when
+    /// the wait returns loses them.
+    /// </remarks>
     /// <exception cref="TransferFailedException">The transfer ended without delivering its data.</exception>
     public virtual Task WaitForCompletionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
