@@ -27,10 +27,10 @@ public static class TestHubServerFactory
     /// cancelled request ends: in memory, a client's cancelled request completes only once the hub's
     /// handler has, whereas a socket ends it on the client's side.
     /// </summary>
-    public static async Task<LoopbackHost> StartLoopbackAsync()
+    public static async Task<LoopbackHost> StartLoopbackAsync(Action<IServiceCollection>? configureServices = null)
     {
         var host = new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseKestrel().UseUrls("http://127.0.0.1:0")))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseKestrel().UseUrls("http://127.0.0.1:0"), configureServices))
             .Build();
 
         await host.StartAsync();
@@ -40,7 +40,7 @@ public static class TestHubServerFactory
         return new LoopbackHost(host, baseUrl);
     }
 
-    private static void Configure(IWebHostBuilder webBuilder)
+    private static void Configure(IWebHostBuilder webBuilder, Action<IServiceCollection>? configureServices = null)
     {
         webBuilder
             .ConfigureServices(services =>
@@ -55,6 +55,8 @@ public static class TestHubServerFactory
                             options.DefaultGroups = ["test"];
                         })
                         .Build();
+
+                configureServices?.Invoke(services);
             })
             .Configure(app =>
             {

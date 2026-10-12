@@ -13,6 +13,9 @@ public sealed class LogRecorder : ILoggerProvider
     public bool Has(LogLevel level, string text) =>
         _entries.Any(e => e.Level == level && e.Message.Contains(text, StringComparison.Ordinal));
 
+    public IReadOnlyList<string> MessagesFrom(LogLevel level) =>
+        [.. _entries.Where(e => e.Level >= level).Select(e => $"{e.Level}: {e.Message}")];
+
     public ILogger CreateLogger(string categoryName) => new Recording(_entries);
 
     public void Dispose()

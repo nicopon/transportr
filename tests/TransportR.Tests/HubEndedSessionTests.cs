@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
+using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Sessions;
 using TransportR.Models;
 using TransportR.Protocol;
@@ -96,6 +97,28 @@ public class HubEndedSessionTests
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => session.WaitForCompletionAsync(CancellationToken.None).WaitAsync(Bound));
         Assert.DoesNotContain("hub ended", failure.Message);
         Assert.Contains("data stream failed", failure.Message);
+    }
+
+    [Fact]
+    public async Task EndByHubAsync_OnAReceiverParkedOnItsFullBuffer_LogsNoStreamFailureAndNoReconnection()
+    {
+        // Failing the session releases the read loop parked on the buffer, and the loop ends with a
+        // closed-channel error before the disposal that follows has cancelled its stream: 30 of 30
+        // sessions here, 36 of 45 on a loopback socket.
+        var session = NewSession(new ReceivingHub(batches: 2), out var logs,
+            o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
+        await session.StartReceiverAsync();
+
+        // The first item is admitted; the second chunk is then read and waits for room.
+        var deadline = DateTime.UtcNow + Bound;
+        while (session.ItemsProcessed < 1 && DateTime.UtcNow < deadline) await Task.Delay(10);
+        Assert.Equal(1, session.ItemsProcessed);
+        await Task.Delay(200);
+
+        await session.EndByHubAsync();
+
+        Assert.False(logs.Has(LogLevel.Warning, "Retryable"), "A transfer the hub ended was logged as a stream to retry.");
+        Assert.False(logs.Has(LogLevel.Warning, "Reconnecting"), "A transfer the hub ended was logged as a session reconnecting.");
     }
 
     private static DataSession<string> NewSession(
