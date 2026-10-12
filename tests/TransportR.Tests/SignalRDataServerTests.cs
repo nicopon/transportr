@@ -386,6 +386,7 @@ public class SignalRDataServerTests
             identityProvider: null!,
             hub.Bridges,
             policy: null!,
+            terminator: null!,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -412,6 +413,7 @@ public class SignalRDataServerTests
             identityProvider: null!,
             new BridgeManager(NullLoggerFactory.Instance),
             policy: null!,
+            terminator: null!,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }

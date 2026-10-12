@@ -81,7 +81,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 2. **Data Plane (HTTP Streaming)**
     - **Role**: "The Pipe"
-    - **Methods**: `POST /api/stream/{id}/send`, `GET /api/stream/{id}/receive`
+    - **Methods**: `POST /api/stream/{id}/send`, `GET /api/stream/{id}/receive`, and `POST /api/stream/{id}/abort` for the one case a stream cannot carry (see *Abort request* below)
     - **Responsibility**: Moves batches of data. The **Hub** acts as a **Dumb Pipe**, forwarding opaque binary chunks from Sender to Receiver without inspecting or deserializing the payload.
 
 ### Communication Channels
@@ -93,6 +93,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`) | Hub → Receiver |
 | **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
+| **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |
 | **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
 
 ### Data Plane Transport: HTTP/1.1

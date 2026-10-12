@@ -25,7 +25,8 @@ Provides the hub services that:
 │                                                             │
 │  StreamController (HTTP)                                    │
 │  ├── POST /api/stream/{id}/send                             │
-│  └── GET /api/stream/{id}/receive                           │
+│  ├── GET /api/stream/{id}/receive                           │
+│  └── POST /api/stream/{id}/abort                            │
 │                                                             │
 │  ClientController (HTTP)                                    │
 │  └── PUT /api/client/{id}/token                             │

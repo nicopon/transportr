@@ -20,6 +20,7 @@ public class StreamController : ControllerBase
     private readonly IClientIdentityProvider _identityProvider;
     private readonly IBridgeManager _bridgeManager;
     private readonly AccessPolicy _policy;
+    private readonly ITransferTerminator _terminator;
     private readonly ILogger<StreamController> _logger;
 
     public StreamController(
@@ -29,6 +30,7 @@ public class StreamController : ControllerBase
         IClientIdentityProvider identityProvider,
         IBridgeManager bridgeManager,
         AccessPolicy policy,
+        ITransferTerminator terminator,
         ILogger<StreamController> logger)
     {
         _brokerServer = brokerServer;
@@ -37,6 +39,7 @@ public class StreamController : ControllerBase
         _identityProvider = identityProvider;
         _bridgeManager = bridgeManager;
         _policy = policy;
+        _terminator = terminator;
         _logger = logger;
     }
 
@@ -45,7 +48,19 @@ public class StreamController : ControllerBase
     /// belongs to. Every rejection is a 404: the client already treats NotFound as a terminal
     /// "transfer gone", and a 403 would turn the route into an existence oracle for transfer ids.
     /// </summary>
-    private async Task<bool> ValidateTransfer(string transferId, ConnectionType type, bool isWrite)
+    private Task<bool> ValidateTransfer(string transferId, ConnectionType type, bool isWrite)
+    {
+        // A participant holds two streams in opposite directions: the sender writes Data and reads
+        // Control, the receiver reads Data and writes Control. So the role is the method crossed
+        // with the connection type, not the method alone. The header is not trusted here - it only
+        // selects which participant the caller is then required to prove it is.
+        var isSenderStream = isWrite ^ (type == ConnectionType.Control);
+        return Admit(transferId, isSenderStream ? Role.Sender : Role.Receiver);
+    }
+
+    private enum Role { Sender, Receiver, Either }
+
+    private async Task<bool> Admit(string transferId, Role role)
     {
         var participants = await _transferManager.GetParticipantsAsync(transferId);
         if (participants == null)
@@ -61,33 +76,40 @@ public class StreamController : ControllerBase
             return true;
         }
 
-        // A participant holds two streams in opposite directions: the sender writes Data and reads
-        // Control, the receiver reads Data and writes Control. So the role is the method crossed
-        // with the connection type, not the method alone. The header is not trusted here — it only
-        // selects which participant the caller is then required to prove it is.
-        var isSenderStream = isWrite ^ (type == ConnectionType.Control);
-        var expectedId = isSenderStream ? participants.SenderId : participants.ReceiverId;
-
-        var expected = await _stateStore.GetClientAsync(expectedId);
         var caller = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null);
         var callerSubject = caller?.Subject;
 
         // Past this route an authenticated caller must have been attested: a registration or a token
         // without a subject is refused here even though two absent subjects are equal elsewhere.
         // Lifetime is the host's middleware's call, so only a token that grants nothing is refused.
-        if (expected?.Subject == null
-            || caller == null
-            || callerSubject == null
-            || _policy.Evaluate(caller) == AccessVerdict.NoGroups
-            || AccessPolicy.SameIdentity(expected.Subject, callerSubject) != AccessVerdict.Allowed)
+        var expectedSubjects = new List<string>();
+        if (caller != null && callerSubject != null && _policy.Evaluate(caller) != AccessVerdict.NoGroups)
         {
-            _logger.LogWarning(
-                "Security: Stream access denied - caller '{CallerSubject}' is not the {Role} of transfer {TransferId} (expected '{ExpectedSubject}')",
-                callerSubject ?? "<none>", isSenderStream ? "sender" : "receiver", transferId, expected?.Subject ?? "<none>");
-            return false;
+            var expectedIds = role switch
+            {
+                Role.Sender => new[] { participants.SenderId },
+                Role.Receiver => new[] { participants.ReceiverId },
+                _ => new[] { participants.SenderId, participants.ReceiverId }
+            };
+
+            foreach (var expectedId in expectedIds)
+            {
+                var expected = await _stateStore.GetClientAsync(expectedId);
+                if (expected?.Subject != null
+                    && AccessPolicy.SameIdentity(expected.Subject, callerSubject) == AccessVerdict.Allowed)
+                {
+                    return true;
+                }
+
+                expectedSubjects.Add($"'{expected?.Subject ?? "<none>"}'");
+            }
         }
 
-        return true;
+        _logger.LogWarning(
+            "Security: Stream access denied - caller '{CallerSubject}' is not the {Role} of transfer {TransferId} (expected {ExpectedSubjects})",
+            callerSubject ?? "<none>", role == Role.Either ? "sender or receiver" : role.ToString().ToLowerInvariant(),
+            transferId, string.Join(" or ", expectedSubjects));
+        return false;
     }
 
     [HttpPost("{transferId}/send")]
@@ -121,6 +143,25 @@ public class StreamController : ControllerBase
             // all over HTTP/1.1; a connection that closes is what it reliably reacts to.
             HttpContext.Abort();
         }
+    }
+
+    /// <summary>
+    /// Ends the transfer at a participant's request, the way a host terminating a run does: state and
+    /// bridges removed, both participants told to cancel. This is for the sender whose Abort cannot
+    /// reach the wire because the data stream in front of it is full: the in-stream signal is the one
+    /// the design relies on, and this request is only what is left when the stream cannot carry it.
+    /// </summary>
+    [HttpPost("{transferId}/" + WireRoutes.AbortSegment)]
+    public async Task<IActionResult> Abort(string transferId)
+    {
+        if (!await Admit(transferId, Role.Either))
+        {
+            return NotFound();
+        }
+
+        _logger.LogInformation("Transfer {TransferId} ended at the request of one of its participants", transferId);
+        await _terminator.TerminateAsync(transferId);
+        return NoContent();
     }
 
     [HttpGet("{transferId}/receive")]

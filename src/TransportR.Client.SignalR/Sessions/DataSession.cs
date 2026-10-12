@@ -31,6 +31,9 @@ internal class DataSession<T> : IDataSession<T>
     // down anyway. A stream stuck on backpressure must not hang disposal.
     private static readonly TimeSpan AbortWriteTimeout = TimeSpan.FromSeconds(2);
 
+    // Bounds the request that tells the hub when the Abort could not be written.
+    private static readonly TimeSpan AbortRequestTimeout = TimeSpan.FromSeconds(2);
+
     private const string ReleasedBeforeCompletion =
         "The transfer handle was released before the transfer completed; the transfer was abandoned.";
 
@@ -477,16 +480,26 @@ internal class DataSession<T> : IDataSession<T>
         // loaded machine.
         if (_abortQueued || _fsm.CurrentState == SessionState.Completed)
         {
+            var abortUnconfirmed = false;
             try
             {
                 if (_httpStreamManager.WriteTask is { } writeTask)
                 {
-                    await writeTask.WaitAsync(AbortWriteTimeout);
+                    abortUnconfirmed = !AbortConfirmed(await writeTask.WaitAsync(AbortWriteTimeout));
                 }
             }
             catch (Exception ex)
             {
+                abortUnconfirmed = true;
                 _config.Logger.LogDebug(ex, "Could not confirm Abort was written for Transfer={TransferId}", TransferId);
+            }
+
+            // An Abort queued behind data nobody reads cannot overtake it, and cancelling the stream
+            // below then looks to the hub like a cut it should wait out. Only a request of its own
+            // gets through a stream that is full, so the hub is told that way.
+            if (abortUnconfirmed && _abortQueued)
+            {
+                await _httpStreamManager.RequestAbortAsync(AbortRequestTimeout);
             }
         }
 
@@ -500,6 +513,15 @@ internal class DataSession<T> : IDataSession<T>
         _cts.Dispose();
         _signalR.RemoveSession(TransferId);
     }
+
+    /// <summary>
+    /// Whether the write direction's end says the Abort is no longer this side's to deliver: the
+    /// request completed, which means the hub read the body to its end, or the hub refused the stream
+    /// for good, which means it has no such transfer to tell. A cut or a cancelled request says
+    /// neither.
+    /// </summary>
+    private static bool AbortConfirmed(HttpStreamManager.StreamResult written) =>
+        written is { IsSuccess: true, ErrorMessage: null } or { IsSuccess: false, IsRetryable: false };
 
     #endregion
 

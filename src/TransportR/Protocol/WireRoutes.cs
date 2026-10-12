@@ -20,6 +20,13 @@ public static class WireRoutes
     public const string StreamBase = "/api/stream";
 
     /// <summary>
+    /// The last segment of <c>POST {StreamBase}/{transferId}/abort</c>: a participant asking the hub
+    /// to end the transfer on a request of its own, for the case where the in-stream <c>Abort</c>
+    /// cannot overtake the data in front of it. Answered 204; every refusal is a 404, as on the streams.
+    /// </summary>
+    public const string AbortSegment = "abort";
+
+    /// <summary>
     /// The path a client renews its token on, relative to the hub's base URL:
     /// <c>PUT {clientId}/token</c> under this base, answered with a <see cref="TokenRenewalResponse"/>.
     /// A reverse proxy that filters by path has to let it through as it does <see cref="StreamBase"/>.

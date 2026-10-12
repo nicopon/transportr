@@ -78,7 +78,11 @@ over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GE
 without deserializing them. Reliability, resumption and even transfer-completion detection are all
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid SignalR-vs-stream
 race conditions — don't reintroduce a control-plane message for something the data plane already
-decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`).
+decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`). The one request that is not
+a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a sender whose in-stream `Abort`
+cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
+transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
+cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
 
 The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`: do not enable HTTP/2 without reading
 "Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md` (an upload is capped by the flow-control

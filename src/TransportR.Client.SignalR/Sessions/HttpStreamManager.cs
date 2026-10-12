@@ -219,6 +219,45 @@ internal class HttpStreamManager : IAsyncDisposable
         return new StreamResult(true, false, "Canceled");
     }
 
+    /// <summary>
+    /// Asks the hub to end the transfer, on a request of its own. This is for an Abort that could not
+    /// be written to the data stream: behind data nobody reads the stream is full, and a request is
+    /// the only thing that still gets through. Best effort and bounded by <paramref name="timeout"/>;
+    /// never throws. A hub that predates the route answers 404, which is no reason to say anything.
+    /// </summary>
+    /// <returns>True when the hub accepted the request.</returns>
+    public async Task<bool> RequestAbortAsync(TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_dataUrl}/{_transferId}/{WireRoutes.AbortSegment}");
+            request.Version = HttpVersion.Version11;
+            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+
+            var token = await _transport.GetAccessTokenAsync(forceRefresh: false).WaitAsync(cts.Token);
+            if (!string.IsNullOrEmpty(token))
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+
+            using var response = await _transport.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                _config.Logger.LogInformation("Asked the hub to end Transfer={TransferId}: the Abort could not be written to the data stream", _transferId);
+                return true;
+            }
+
+            _config.Logger.LogDebug("The hub did not end Transfer={TransferId}: {Status}", _transferId, response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _config.Logger.LogWarning("Could not ask the hub to end Transfer={TransferId} ({Message}); the receiver learns of it when the hub's bridge timeout expires", _transferId, ex.Message);
+        }
+
+        return false;
+    }
+
     private HttpRequestMessage CreateStreamRequest(ConnectionType type, bool isWrite, Func<Stream, CancellationToken, Task> writeAction, CancellationToken token)
     {
         string method = isWrite ? "send" : "receive";

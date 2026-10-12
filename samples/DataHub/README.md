@@ -20,6 +20,7 @@ dotnet run --urls http://localhost:5252
 | `/hub/command` | SignalR command hub |
 | `POST /api/stream/{id}/send` | Data upload |
 | `GET /api/stream/{id}/receive` | Data download |
+| `POST /api/stream/{id}/abort` | A participant ends its transfer when its `Abort` cannot be written to the stream |
 
 ## Configuration
 

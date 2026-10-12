@@ -456,6 +456,60 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task Abort_BehindMoreDataThanThePipeHolds_StillEndsTheReceiversTransfer()
+    {
+        await using var host = await TestHubServerFactory.StartLoopbackAsync();
+
+        // Capped at 50 opens, as above: a receiver that reopens in a loop would exhaust the ports.
+        var opens = new DataStreamOpenCounter(limit: 50);
+
+        await using var sender = CreateClient(null, host.BaseUrl, o =>
+        {
+            o.MaxInFlightBatches = 4;
+            o.CompleteStallTimeout = TimeSpan.FromSeconds(1);
+        });
+        await using var receiver = CreateClient(null, host.BaseUrl, o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 1);
+        await using var receive = await receiveHandle.Task;
+
+        // Nobody enumerates. The receiver holds one item and stops reading; four batches of 4 MB are
+        // then in flight, more than the sockets and the hub's buffers hold, so the Abort the sender
+        // writes on giving up stays queued behind them and cannot reach the receiver or the hub.
+        // Random, because the serializer compresses and a run of one character would take no room at all.
+        var item = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(3 * 1024 * 1024));
+        var gaveUp = false;
+        for (var i = 0; i < 100 && !gaveUp; i++)
+        {
+            try
+            {
+                await send.SendAsync(item).WaitAsync(TimeSpan.FromSeconds(30));
+            }
+            catch (TransferFailedException)
+            {
+                gaveUp = true;
+            }
+        }
+        Assert.True(gaveUp, "The sender never gave up on its window.");
+
+        await send.DisposeAsync();
+
+        var verdict = receive.WaitForCompletionAsync();
+        if (await Task.WhenAny(verdict, Task.Delay(TimeSpan.FromSeconds(8))) != verdict)
+        {
+            Assert.Fail($"The receiver was never told its sender gave up; it opened its data stream {opens.Opens} times.");
+        }
+
+        await Assert.ThrowsAsync<TransferFailedException>(() => verdict);
+    }
+
+    [Fact]
     public async Task HostTermination_MakesBothEndsFailFast_SendAsyncIncluded()
     {
         using var host = TestHubServerFactory.CreateHost();
