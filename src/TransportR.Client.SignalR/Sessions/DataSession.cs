@@ -429,10 +429,15 @@ internal class DataSession<T> : IDataSession<T>
     /// </summary>
     private void FailTransfer(string reason)
     {
-        if (!_fsm.TransitionTo(SessionState.Failed)) return;
+        // A session that already stopped keeps the reason it stopped for. The reason is set before the
+        // state moves: whoever polls the state, or is woken by it, reads the reason next.
+        if (IsStopped) return;
 
-        _failureReason = reason;
-        _batchProcessor.Fail(reason);
+        _failureReason ??= reason;
+        if (_fsm.TransitionTo(SessionState.Failed))
+        {
+            _batchProcessor.Fail(reason);
+        }
     }
 
     /// <summary>
