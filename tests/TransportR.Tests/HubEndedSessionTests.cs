@@ -53,6 +53,28 @@ public class HubEndedSessionTests
     }
 
     [Fact]
+    public async Task EndByHubAsync_OnASenderWaitingForTheCompleteAck_ReleasesItAtOnce()
+    {
+        // The wait for the acknowledgement is a retry interval long (5 s), and nothing woke it when the
+        // session stopped: the caller learned the hub had ended the transfer at the next tick, 2.6 to
+        // 4.0 s later in the three passes measured.
+        var session = NewSession(new SilentHub(), out _);
+        await session.StartSenderAsync();
+        await session.SendAsync("a", CancellationToken.None);
+        var complete = session.CompleteAsync(CancellationToken.None);
+        await Task.Delay(300);
+        Assert.False(complete.IsCompleted, "CompleteAsync should be waiting for an acknowledgement that never comes.");
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await session.EndByHubAsync();
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => complete.WaitAsync(TimeSpan.FromSeconds(10)));
+        clock.Stop();
+
+        Assert.Contains("hub ended", failure.Message);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"CompleteAsync took {clock.Elapsed} to report that the hub ended the transfer.");
+    }
+
+    [Fact]
     public async Task EndByHubAsync_TellsThePeerNothing_AndDoesNotSayTheTransferWasAbandoned()
     {
         var hub = new SilentHub();

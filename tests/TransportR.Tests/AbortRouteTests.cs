@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
@@ -103,6 +104,38 @@ public class AbortRouteTests
     }
 
     [Fact]
+    public async Task ATokenThatHoldsNoGroup_IsRefusedWithAReasonThatSaysSo()
+    {
+        // The comparison with the participants' subjects never runs for such a token, so a line that lists
+        // what was expected, empty, sends the operator looking for a subject mismatch that did not happen.
+        var hubLogs = new LogRecorder();
+        using var host = await CreateHostWithTransferAsync(new RecordingNotifier(), hubLogs: hubLogs);
+        using var client = host.GetTestClient();
+
+        using var response = await AbortWithTokenAsync(client, StubJwt.Create(SenderSubject, DateTime.UtcNow.AddHours(1)));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var refusal = Assert.Single(hubLogs.MessagesFrom(LogLevel.Warning), m => m.Contains("Stream access denied"));
+        Assert.Contains("holds no group", refusal);
+        Assert.DoesNotContain("expected", refusal);
+    }
+
+    [Fact]
+    public async Task AStranger_IsRefusedWithTheSubjectItWasComparedTo()
+    {
+        var hubLogs = new LogRecorder();
+        using var host = await CreateHostWithTransferAsync(new RecordingNotifier(), hubLogs: hubLogs);
+        using var client = host.GetTestClient();
+
+        using var response = await AbortAsync(client, TransferId, "someone-else");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var refusal = Assert.Single(hubLogs.MessagesFrom(LogLevel.Warning), m => m.Contains("Stream access denied"));
+        Assert.Contains("'someone-else'", refusal);
+        Assert.Contains($"expected '{SenderSubject}' or '{ReceiverSubject}'", refusal);
+    }
+
+    [Fact]
     public async Task AReplicaThatHoldsNoBridgeOfTheTransfer_RefusesIt_AndLeavesTheTransferAlone()
     {
         // Behind a proxy with affinity, a request that lost its cookie reaches a replica that knows the
@@ -136,10 +169,14 @@ public class AbortRouteTests
         Assert.Empty(notifier.NotifiedConnectionIds);
     }
 
-    private static async Task<IHost> CreateHostWithTransferAsync(RecordingNotifier notifier, bool holdsTheBridges = true)
+    private static async Task<IHost> CreateHostWithTransferAsync(
+        RecordingNotifier notifier, bool holdsTheBridges = true, LogRecorder? hubLogs = null)
     {
         var host = AuthenticatedHubServerFactory.CreateHost(configureServices: services =>
-            services.AddSingleton<ITransferNotifier>(notifier));
+        {
+            services.AddSingleton<ITransferNotifier>(notifier);
+            if (hubLogs != null) services.AddLogging(logging => logging.AddProvider(hubLogs));
+        });
 
         var store = host.Services.GetRequiredService<IStateStore>();
         await store.SaveClientAsync(new ClientRegistration(SenderId, "conn-sender", ["test"], null, null, DateTime.UtcNow, Subject: SenderSubject));
