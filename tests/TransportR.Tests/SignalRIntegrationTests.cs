@@ -20,6 +20,7 @@ using Xunit.Abstractions;
 
 
 using TransportR.Serialization.MessagePack; // Extension
+using TransportR.Serialization.Json.Services;
 
 namespace TransportR.Tests;
 
@@ -231,6 +232,55 @@ public class SignalRIntegrationTests
         await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Theory]
+    [InlineData("item-9")]   // the last batch: before the fix, CompleteAsync succeeded without it
+    [InlineData("item-2")]   // the first batch
+    public async Task A_Batch_That_Does_Not_Serialize_Fails_Both_Ends(string poison)
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        var inner = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
+        await using var sender = CreateClient(handler, "http://localhost", serializer: new FailingOn(inner, poison));
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 5);
+        await using var receive = await receiveHandle.Task;
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync())
+            {
+            }
+        });
+
+        // Whichever call meets the failure first reports it: SendAsync when the producer is still
+        // adding, CompleteAsync otherwise.
+        await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            await send.SendAsync(Enumerable.Range(0, 10).Select(i => $"item-{i}"));
+            await send.CompleteAsync();
+        }).WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Told by the Abort, not by a stall bound: well under the 60s default.
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Contains("serialize", failure.Message);
+    }
+
+    private sealed class FailingOn(IBatchSerializer<string> inner, string poison) : IBatchSerializer<string>
+    {
+        public Task SerializeBatchAsync(Stream destination, List<string> batch)
+            => batch.Contains(poison) ? throw new InvalidOperationException("Not serializable.") : inner.SerializeBatchAsync(destination, batch);
+
+        public Task<List<string>?> DeserializeBatchAsync(Stream source) => inner.DeserializeBatchAsync(source);
     }
 
     private static IHost CreateHostWithoutProgressMonitor()
@@ -845,11 +895,55 @@ public class SignalRIntegrationTests
         Assert.Contains(receivers, c => c.ClientId == receiver.ClientId);
     }
 
+    [Fact]
+    public async Task A_Batch_That_Does_Not_Decode_Fails_Both_Ends_Instead_Of_Being_Resent()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        // Compressed on one end, plain on the other: every batch is intact on the wire and none
+        // decodes, so a resend after a reconnection would decode no better.
+        await using var sender = CreateClient(handler, "http://localhost",
+            serializer: new JsonBatchSerializer<string>(compress: true));
+        await using var receiver = CreateClient(handler, "http://localhost",
+            serializer: new JsonBatchSerializer<string>(compress: false));
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 5);
+        await using var receive = await receiveHandle.Task;
+
+        var consumer = Task.Run(async () =>
+        {
+            var count = 0;
+            await foreach (var _ in receive.ReceiveAsync())
+            {
+                count++;
+            }
+            return count;
+        });
+
+        await send.SendAsync(Enumerable.Range(0, 10).Select(i => $"item-{i}"));
+
+        // Before the decode failure was made fatal, the receiver reconnected on it forever and this
+        // wait timed out.
+        await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Told by the receiver's Abort, well inside the sender's 60s stall bound, which is all it
+        // had before.
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(() => send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Contains("decode", failure.Message);
+    }
+
     /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>
     /// <param name="networkHandler">What carries the data streams over the network; the default socket handler if null.</param>
     private SignalRDataClient<string> CreateClient(
         HttpMessageHandler? handler, string url, Action<ClientOptions>? configure = null,
-        HttpMessageHandler? networkHandler = null)
+        HttpMessageHandler? networkHandler = null, IBatchSerializer<string>? serializer = null)
     {
         // Custom Connection Manager that uses TestServer's HttpMessageHandler
         var options = new ClientOptions();
@@ -876,7 +970,7 @@ public class SignalRIntegrationTests
         );
         
         var registry = new SessionRegistry<string>(logger);
-        var serializer = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
+        serializer ??= new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = handler != null
             ? new HttpClient(handler) { BaseAddress = new Uri(url) }

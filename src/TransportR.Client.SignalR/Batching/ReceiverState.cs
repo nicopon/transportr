@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 
 namespace TransportR.Client.SignalR.Batching;
 
@@ -142,7 +143,17 @@ internal class ReceiverState<T>
 
         using (source)
         {
-            return await serializer.DeserializeBatchAsync(source);
+            try
+            {
+                return await serializer.DeserializeBatchAsync(source);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The body arrived whole, framed by its header, so a resend after a reconnection
+                // decodes no better: left retryable, this reconnects forever on the same batch.
+                throw new UndecodableBatchException(
+                    $"A batch body could not be decoded by {serializer.GetType().Name}: {ex.Message}", ex);
+            }
         }
     }
 

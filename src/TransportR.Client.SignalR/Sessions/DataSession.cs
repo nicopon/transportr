@@ -8,6 +8,7 @@ using TransportR.Protocol;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
+using TransportR.Client.SignalR.Batching;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Models;
 using TransportR.Services;
@@ -69,6 +70,7 @@ internal class DataSession<T> : IDataSession<T>
 
     private readonly Timer _heartbeatTimer;
     private int _disposed;
+    private int _writeSideEndDelivered;
 
     // Session Statistics
     public DateTime StartedAt { get; } = DateTime.UtcNow;
@@ -136,6 +138,17 @@ internal class DataSession<T> : IDataSession<T>
             }
         };
         
+        _batchProcessor.OnSerializationFailed += (ex) => {
+            if (IsStopped) return;
+
+            FailTransfer($"A batch could not be serialized: {ex.Message}");
+
+            // The receiver holds every batch up to this one and nothing would tell it the rest is not
+            // coming. Abort precedes completing the channel, as on the stall bound.
+            AbortPeer(AbortReason.SerializationFailed);
+            _batchProcessor.CompleteSenderChannel();
+        };
+
         _heartbeatTimer = new Timer(HeartbeatLoop, null, (int)_config.Options.HeartbeatInterval.TotalMilliseconds, (int)_config.Options.HeartbeatInterval.TotalMilliseconds);
     }
 
@@ -508,27 +521,7 @@ internal class DataSession<T> : IDataSession<T>
         // loaded machine.
         if (_abortQueued || _fsm.CurrentState == SessionState.Completed)
         {
-            var abortUnconfirmed = false;
-            try
-            {
-                if (_httpStreamManager.WriteTask is { } writeTask)
-                {
-                    abortUnconfirmed = !AbortConfirmed(await writeTask.WaitAsync(AbortWriteTimeout));
-                }
-            }
-            catch (Exception ex)
-            {
-                abortUnconfirmed = true;
-                _config.Logger.LogDebug(ex, "Could not confirm Abort was written for Transfer={TransferId}", TransferId);
-            }
-
-            // An Abort queued behind data nobody reads cannot overtake it, and cancelling the stream
-            // below then looks to the hub like a cut it should wait out. Only a request of its own
-            // gets through a stream that is full, so the hub is told that way.
-            if (abortUnconfirmed && _abortQueued)
-            {
-                await _httpStreamManager.RequestAbortAsync(AbortRequestTimeout);
-            }
+            await DeliverWriteSideEndAsync();
         }
 
         _reconnectionHandler.Dispose();
@@ -540,6 +533,38 @@ internal class DataSession<T> : IDataSession<T>
         _heartbeatTimer.Dispose();
         _cts.Dispose();
         _signalR.RemoveSession(TransferId);
+    }
+
+    /// <summary>
+    /// Waits, bounded, for the write direction's HTTP request to end, and falls back on the hub's abort
+    /// route when an Abort is queued and that end does not confirm it. Runs once: the read loop calls it
+    /// before failing on a batch it cannot decode, and the release that follows has nothing to add.
+    /// </summary>
+    private async Task DeliverWriteSideEndAsync()
+    {
+        if (Interlocked.Exchange(ref _writeSideEndDelivered, 1) != 0) return;
+
+        var abortUnconfirmed = false;
+        try
+        {
+            if (_httpStreamManager.WriteTask is { } writeTask)
+            {
+                abortUnconfirmed = !AbortConfirmed(await writeTask.WaitAsync(AbortWriteTimeout));
+            }
+        }
+        catch (Exception ex)
+        {
+            abortUnconfirmed = true;
+            _config.Logger.LogDebug(ex, "Could not confirm Abort was written for Transfer={TransferId}", TransferId);
+        }
+
+        // An Abort queued behind data nobody reads cannot overtake it, and cancelling the stream
+        // afterwards then looks to the hub like a cut it should wait out. Only a request of its own
+        // gets through a stream that is full, so the hub is told that way.
+        if (abortUnconfirmed && _abortQueued)
+        {
+            await _httpStreamManager.RequestAbortAsync(AbortRequestTimeout);
+        }
     }
 
     /// <summary>
@@ -840,7 +865,19 @@ internal class DataSession<T> : IDataSession<T>
                     break;
                 }
 
-                await _batchProcessor.ProcessChunkAsync(chunkData.Value, token);
+                try
+                {
+                    await _batchProcessor.ProcessChunkAsync(chunkData.Value, token);
+                }
+                catch (UndecodableBatchException ex) when (!_cts.IsCancellationRequested && !IsStopped)
+                {
+                    // Failing cancels this attempt's write stream along with this one, so the sender is
+                    // told first; otherwise it waits out its stall bound on a transfer that cannot complete.
+                    _config.Logger.LogError(ex, "A batch could not be decoded - aborting Transfer={TransferId}", TransferId);
+                    AbortPeer(AbortReason.UndecodableBatch);
+                    await DeliverWriteSideEndAsync();
+                    throw;
+                }
                 
                 // Exit when entering completing phase (receiver got Complete chunk) or fully completed
                 if (IsInCompletingPhase || IsTerminal)

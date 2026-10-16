@@ -9,7 +9,7 @@ namespace TransportR.Serialization.Json.Services;
 /// </summary>
 /// <remarks>
 /// Both ends of a transfer must agree on <c>compress</c>: the wire carries no marker saying which
-/// one was used.
+/// one was used. A mismatch fails the transfer at its first batch, on both ends.
 /// </remarks>
 public class JsonBatchSerializer<T> : IBatchSerializer<T>
 {

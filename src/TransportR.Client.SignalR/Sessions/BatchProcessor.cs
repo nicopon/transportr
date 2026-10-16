@@ -211,7 +211,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                _context.Logger.LogWarning("Serialization worker error for batch {BatchId}: {Message}", batchId, ex.Message);
+                // A batch that is never sent is a gap the receiver's Complete check cannot see when it
+                // is the last one: carrying on reported such a transfer as completed, short of that
+                // batch. The worker stops and the session fails.
+                _context.Logger.LogError(ex, "Batch {BatchId} could not be serialized (Transfer={TransferId})", batchId, _transferId);
+                OnSerializationFailed?.Invoke(ex);
+                return;
             }
         }
     }
@@ -363,6 +368,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public event Action? OnCompleteAckReceived;
     public event Func<Task>? OnCompleteReceived;
     public event Action<AbortReason>? OnAbortReceived;
+
+    /// <summary>
+    /// Raised once, on the serialization worker, when a batch cannot be serialized. The worker has
+    /// stopped: nothing after that batch will be sent.
+    /// </summary>
+    public event Action<Exception>? OnSerializationFailed;
 
     private void HandlePong(int nextExpectedBatchId)
     {
