@@ -178,8 +178,8 @@ try
                     await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger);
 
                     // ProcessStreamAsync's loop already waits for the shutdown handshake before
-                    // returning, so this now resolves at once; left explicit as the point where the
-                    // sample would react to a late failure if it needed to.
+                    // returning (and throws into the same catch below if it fails), so this now
+                    // resolves at once; harmless to leave.
                     await transfer.WaitForCompletionAsync(cts.Token);
 
                     logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
