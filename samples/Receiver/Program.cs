@@ -175,12 +175,13 @@ try
                 await using (transfer)
                 {
                     logger.LogInformation("[Transfer {TransferId}] Starting reception (BatchSize: {BatchSize})", transfer.TransferId, transfer.BatchSize);
-                    await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger); 
-                    
-                    // CRITICAL: Wait for full completion (Shutdown handshake) to ensure ACKs are flushed
-                    logger.LogInformation("[Transfer {TransferId}] Waiting for Shutdown Handshake...", transfer.TransferId);
+                    await ProcessStreamAsync(transfer, broker, receiverOptions.OutputDirectory, showProgress, receiverOptions.ConsumeItemsPerSecond, cts.Token, logger);
+
+                    // ProcessStreamAsync's loop already waits for the shutdown handshake before
+                    // returning, so this now resolves at once; left explicit as the point where the
+                    // sample would react to a late failure if it needed to.
                     await transfer.WaitForCompletionAsync(cts.Token);
-                    
+
                     logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
                 }
             }

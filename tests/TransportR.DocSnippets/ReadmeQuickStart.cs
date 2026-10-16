@@ -69,17 +69,15 @@ internal static class ReadmeQuickStart
 
         receiver.OnTransferStarted += async transfer =>
         {
-            // The handler owns the handle and must release it -- but only once the transfer has
-            // closed: the loop below ends at the last item, which is before the sender has been
-            // told so.
+            // The handler owns the handle and must release it. The loop below ends only once the
+            // transfer has reached its outcome, not at the last item, so releasing right after it
+            // is correct.
             await using (transfer)
             {
                 await foreach (var order in transfer.ReceiveAsync())
                 {
                     Console.WriteLine($"Received: {order.Id}");
                 }
-
-                await transfer.WaitForCompletionAsync();
             }
         };
 

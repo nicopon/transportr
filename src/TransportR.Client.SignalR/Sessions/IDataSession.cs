@@ -87,7 +87,8 @@ public interface IDataSession<T> : IAsyncDisposable
     Task CompleteAsync(CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Receive items as an async enumerable.
+    /// Receive items as an async enumerable, ending only once the transfer has reached its outcome -
+    /// not at the last item.
     /// </summary>
     IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken);
     
