@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>TransportR.Serialization.MessagePack</PackageId>
-    <Description>MessagePack batch serializer for TransportR</Description>
+    <Description>MessagePack + LZ4 batch serializer for TransportR: any POCO, no schema needed</Description>
     <PackageTags>transport;streaming;serialization;messagepack</PackageTags>
   </PropertyGroup>
 

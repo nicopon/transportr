@@ -11,7 +11,7 @@
 
   <PropertyGroup>
     <PackageId>TransportR.Storage.Redis</PackageId>
-    <Description>Redis-backed state store for TransportR high availability</Description>
+    <Description>Redis-backed state store for TransportR: shares client registrations and transfer sessions between hubs behind a sticky load balancer</Description>
     <PackageTags>transport;streaming;redis;high-availability;state-store</PackageTags>
   </PropertyGroup>
 

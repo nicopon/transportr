@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <PackageId>TransportR.Serialization.Json</PackageId>
-    <Description>JSON batch serializer with Zstandard compression for TransportR</Description>
+    <Description>System.Text.Json batch serializer for TransportR, Zstd-compressed or plain JSON for debugging</Description>
     <PackageTags>transport;streaming;serialization;json;zstd</PackageTags>
   </PropertyGroup>
 

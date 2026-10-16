@@ -12,7 +12,7 @@
 
   <PropertyGroup>
     <PackageId>TransportR.Serialization.Protobuf</PackageId>
-    <Description>Protobuf-net batch serializer for TransportR</Description>
+    <Description>Protobuf-net + Zstd batch serializer for TransportR: annotated contracts, the most compact payload</Description>
     <PackageTags>transport;streaming;serialization;protobuf</PackageTags>
   </PropertyGroup>
 

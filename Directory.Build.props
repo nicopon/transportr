@@ -16,6 +16,15 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
 
+  <!-- Each package ships the README.md beside its project as its NuGet page. Samples and tests
+       have READMEs too, but are not packed (below). -->
+  <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)/README.md')">
+    <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
   <!-- Samples and tests are not published as NuGet packages -->
   <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('samples')) or $(MSBuildProjectFullPath.Contains('tests'))">
     <IsPackable>false</IsPackable>

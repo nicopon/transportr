@@ -14,7 +14,7 @@
     
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR</PackageId>
-    <Description>Core library for TransportR - High-performance data transport protocol and contracts</Description>
+    <Description>TransportR core: the wire protocol, contracts and network-free hub services for moving record sets between .NET applications through a hub</Description>
     <PackageTags>signalr;transport;streaming;bulk-data</PackageTags>
   </PropertyGroup>
 

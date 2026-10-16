@@ -12,7 +12,7 @@
   <PropertyGroup>
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR.Client.SignalR</PackageId>
-    <Description>SignalR client implementation for TransportR - High-performance data transport</Description>
+    <Description>TransportR client: streams typed records to another .NET application through a TransportR hub, resuming after network cuts, with opt-in backpressure</Description>
     <PackageTags>signalr;transport;streaming;client;bulk-data;auth;oauth2</PackageTags>
   </PropertyGroup>
 
