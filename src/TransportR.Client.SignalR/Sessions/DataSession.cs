@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using TransportR.Abstractions;
 using TransportR.Interfaces;
@@ -355,9 +356,17 @@ internal class DataSession<T> : IDataSession<T>
         throw new TransferFailedException(TransferId, FailureMessage);
     }
     
-    public IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken)
+    public async IAsyncEnumerable<T> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        return _batchProcessor.ReceiveAsync(cancellationToken);
+        await foreach (var item in _batchProcessor.ReceiveAsync(cancellationToken))
+        {
+            yield return item;
+        }
+
+        // The last item is not the last word: the acknowledgement is still queued behind it, and a
+        // caller that stops here as soon as items stop arriving can abandon a transfer it in fact
+        // received in full.
+        await WaitForCompletionAsync(cancellationToken);
     }
 
     public void TriggerReconnect()
