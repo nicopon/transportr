@@ -15,10 +15,10 @@ public static class TestHubServerFactory
 {
     public const string HubUrl = "http://localhost" + WireRoutes.CommandHub;
 
-    public static IHost CreateHost()
+    public static IHost CreateHost(Action<IServiceCollection>? configureServices = null)
     {
         return new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer()))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureServices))
             .Start();
     }
 
