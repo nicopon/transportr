@@ -46,11 +46,12 @@ internal static class ReadmeQuickStart
             .WithMessagePackSerialization()
             .Build();
 
-        await sender.ConnectAsync();
+        // In dev mode a client names its groups; with authentication they come from its token.
+        await sender.ConnectAsync(["senders"]);
 
         // Find a receiver and start transfer
         var receivers = await sender.GetReceiversAsync();
-        var transfer = await sender.InitTransferAsync(receivers[0].ClientId);
+        await using var transfer = await sender.InitTransferAsync(receivers[0].ClientId);
 
         // Stream data (auto-batched, auto-compressed)
         foreach (var order in GetOrders())
@@ -81,7 +82,7 @@ internal static class ReadmeQuickStart
             }
         };
 
-        await receiver.ConnectAsync();
+        await receiver.ConnectAsync(["receivers"]);
         await Task.Delay(Timeout.Infinite); // Keep listening
     }
 

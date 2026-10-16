@@ -23,9 +23,13 @@ dotnet run
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `Sender__HubUrl` | http://localhost:5252 | Hub URL |
-| `Sender__BatchSize` | 5000 | Items per batch |
+| `Sender__BatchSize` | 500 (`appsettings.json`) | Items per batch |
 | `Sender__BatchTimeoutMs` | 500 | Batch flush timeout |
 | `Sender__SourceFilePath` | data/orders.bin | Data source file |
+| `Sender__Group` | senders | Group announced in dev mode |
+| `Sender__MaxInFlightBatches` | unbounded | Send window, in batches |
+| `Sender__EnableAuth`, `Sender__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |
+| `SERIALIZER_TYPE` | MessagePack | `MessagePack`, `Protobuf` or `Json`; the receiver must use the same |
 
 ## Data Flow
 
@@ -34,5 +38,4 @@ dotnet run
 3. Wait for receiver to connect
 4. Initiate transfer
 5. Stream items through batches
-6. Wait for all ACKs
-7. Send completion signal
+6. Send the completion signal and wait for the receiver to acknowledge everything (`CompleteAsync`)

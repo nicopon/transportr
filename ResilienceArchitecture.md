@@ -6,9 +6,9 @@
 
 TransportR implements a **"Dataplane First" resilience pattern** where:
 1.  **State is driven by streams**: HTTP streams interactions determine the transfer state.
-2.  **Reachability via Stream Handshake**: Connections are verified by exchanging Ping/Pong on the data stream itself, not via SignalR.
+2.  **Resumption via Stream Handshake**: After a cut, the client waits for its control connection to answer a probe, then reopens its streams and exchanges Ping/Pong on the new data stream, which carries the resume point.
 3.  **Smart Resend**: Stream Handshake tells the sender exactly which batch was last processed (Packet Level Ack), enabling precise resumption without duplicates.
-4.  **Hub Lifecycle Management**: The Hub acts as a passive router + active monitor (Reaper), terminating stalled transfers but not orchestrating recovery.
+4.  **Hub Lifecycle Management**: The Hub acts as a passive router + active monitor (Reaper), terminating silent transfers (and, opt-in, stalled ones) but not orchestrating recovery.
 
 ---
 
@@ -16,9 +16,9 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 
 | Component | Delay | Description |
 |-----------|-------|---------|
-| **Reconnect probe interval** | 2 s | Wait between connectivity probes while a session is `Reconnecting` (hard-coded) |
+| **Reconnect probe** | ≤ 15 s, then 2 s | While `Reconnecting`: up to 10 s for the control connection, 5 s for the hub's SignalR `Pong`; 2 s pause after a failed probe (hard-coded) |
 | **Pong Wait** | 10 s timeout | HTTP stream Ping/Pong Handshake |
-| **SignalR connect backoff** | 500 ms → 5 s | Exponential over 5 attempts, on the initial hub connection only (hard-coded). Restarting a data stream is not backed off. |
+| **SignalR connect backoff** | 500 ms → 4 s | Doubling between 5 attempts, on the initial hub connection only (hard-coded). Restarting a data stream is not backed off. |
 | **SignalR restart backoff** | 1 s → 30 s | After a closed hub connection: exponential with jitter (half to full delay), no limit (hard-coded) |
 | **Bridge Timeout** | 300 s | Hub cancels a non-active bridge waiting for a peer (`BridgeTimeoutSeconds`) |
 | **Transfer Inactivity** | 60 s | Hub terminates a transfer gone fully silent (`TransferInactivityTimeoutSeconds`) |
@@ -45,11 +45,14 @@ sequenceDiagram
 
     rect rgb(255, 230, 230)
         Note over H: Bridge.OnDisconnected() for specific stream
-        Note over S: IOException Detectected
-        Note over R: IOException Detectected
+        Note over S: IOException detected
+        Note over R: IOException detected
     end
 
-    Note over S: TriggerReconnect() called
+    Note over S,R: Session → Reconnecting
+
+    S->>H: SignalR Ping(transferId)
+    H-->>S: SignalR Pong (control plane reachable)
 
     Note over S,R: Restart HTTP Streams (Autonomously)
 
@@ -82,6 +85,12 @@ sequenceDiagram
 
 Both Sender and Receiver rely on standard `IOException` or `HttpRequestException` when reading/writing to the stream.
 The Hub **DOES NOT** actively notify clients of disconnections via SignalR (to avoid race conditions).
+
+A batch body the receiver cannot decode is not a cut: it arrived whole, so a resend would decode no better. The
+receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead of reconnecting; the sender's
+`SendAsync` or `CompleteAsync` throws `TransferFailedException`. The other way round, a batch the sender cannot
+serialize fails the sender's session at once, and the receiver is told with `Abort` (`SerializationFailed`). Either
+`Abort` falls back on `POST /api/stream/{id}/abort` when it cannot be written within `AbortWriteTimeout`.
 
 A write stream sees a cut even when its client has nothing to write because its requests carry
 `Expect: 100-continue`; the reason, and what a reverse proxy in front of the hub must accept and forward, are in
@@ -136,7 +145,9 @@ lives forever, and a Redis one expires on a fixed timer whether or not the clien
 
 ### 2. Stream Handshake (Reachability & Resume)
 
-Instead of querying the Hub for a "Checkpoint", the Sender asks the Receiver directly **through the new data stream**:
+The streams are reopened only once the control connection answers: a session in `Reconnecting` probes the hub with a
+SignalR `Ping`, so the data plane does not resume while SignalR is down. The resume point is then not asked of the
+Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new data stream**:
 
 1.  **Sender** sends `ChunkType.Ping` immediately upon connecting the stream.
 2.  **Receiver** responds with `ChunkType.Pong`, carrying the `NextExpectedBatchId`.
@@ -159,7 +170,7 @@ if (pong.NextExpectedBatchId > currentBatch.Id) {
 
 The Hub employs a **TransferCleanupService** that monitors all active transfers.
 
--   **LastActivityUtc**: Updates on Heartbeat (SignalR) or HTTP activity.
+-   **LastActivityUtc**: Updates on the per-transfer heartbeats and on `Ping`, all SignalR. Data moving on the streams does not count: a transfer whose participants' control connections stay silent past the timeout is terminated.
 -   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
 -   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — not even a heartbeat — is terminated, whether or not it ever reported: the hub knows a transfer from its registration. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
@@ -186,7 +197,7 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 
 **Both are opt-in, and that is a decision rather than an omission.** The figure that makes a bound useful depends on how large an item is, which only the caller knows: for record-sized payloads an unbounded buffer is a memory spike, for multi-megabyte ones it is the process. A default would be a guess wearing the costume of a safeguard, and the wrong guess is worse than none because nobody looks for a setting that appears to be handled. `Build()` warns when neither end is set, so the absence is loud rather than silent.
 
-**Out of the box there is therefore no backpressure anywhere**, and a consumer slower than its producer is absorbed in memory until something dies. **Set both ends: either one alone moves the backlog to the other process.** The receiver's bound stops the sender's HTTP write through the chain above, but not its serialization worker, which never waits — serialized batches queue behind the blocked write. Measured: `slow-receiver` holds its receiver at 193 MB while its sender, which it does not assert, peaks at 451 MB; an integration moving Arrow batches reached 1 693 MB on the sender with the receiver bounded alone, and 1 038 MB on the receiver with neither. The send window is what stops the worker, and the receiver's bound is what the window cannot see.
+**Out of the box there is therefore no backpressure anywhere**, and a consumer slower than its producer is absorbed in memory until something dies. **Set both ends: either one alone moves the backlog to the other process.** The receiver's bound stops the sender's HTTP write through the chain above, but not its serialization worker, which never waits — serialized batches queue behind the blocked write. Measured: `slow-receiver` holds its receiver under 200 MB (182 and 193 MB on two runs) while its sender, which it does not assert, peaks at 451 MB; an integration moving Arrow batches reached 1 693 MB on the sender with the receiver bounded alone, and 1 038 MB on the receiver with neither. The send window is what stops the worker, and the receiver's bound is what the window cannot see.
 
 A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
 
@@ -321,7 +332,7 @@ stateDiagram-v2
 | `Idle` | Initial state before starting |
 | `Starting` | Establishing HTTP streams |
 | `Streaming` | Normal data transfer |
-| `Reconnecting` | Stream broken: probes the hub every 2 s until it answers. No retry limit |
+| `Reconnecting` | Stream broken: probes the hub over SignalR until it answers, 2 s apart after a failed probe. No retry limit |
 | `SenderCompleteSent` | Sender: Complete sent, awaiting ACK |
 | `SenderAckReceived` | Sender: Got CompleteAck |
 | `ReceiverCompleteReceived` | Receiver: Got Complete chunk |

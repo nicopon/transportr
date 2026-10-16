@@ -20,12 +20,36 @@ sequenceDiagram
 
 ## Scope Convention
 
-| Scope | Description |
-|-------|-------------|
-| `transportr:group:senders` | Can initiate transfers |
-| `transportr:group:receivers` | Can receive transfers |
+Each `transportr:group:<name>` scope puts the client in group `<name>`. The hub reads the `scope` claim in
+either shape an issuer gives it, a space-delimited string or an array, and ignores scopes without the prefix,
+which allows coexistence with other apps on a shared IDP. A provider that carries rights in another claim
+(Entra ID app roles, for instance) needs the host's own `IClientIdentityProvider`.
 
-The `transportr:` prefix allows coexistence with other apps on a shared IDP.
+A group name carries no right by itself: `senders` and `receivers` are the names the samples use, and what
+one group may do to another is the flow control rule below.
+
+---
+
+## Group Access Rules (Flow Control)
+
+**Without an `IFlowControlService`, any client holding a group may open a transfer to any other client holding
+one.** `AddDataHub()` registers none; the host adds the rules:
+
+```csharp
+builder.Services.AddSingleton(new FlowControlOptions
+{
+    Groups = new()
+    {
+        ["senders"]   = new GroupAccess { CanSendTo = ["receivers"] },
+        ["receivers"] = new GroupAccess { CanSendTo = [] },
+    }
+});
+builder.Services.AddSingleton<IFlowControlService, DefaultFlowControlService>();
+```
+
+A source may reach a target when, for **every** group of the target, one of the source's groups lists it (or
+`"*"`). The same rule filters `GetReceivers`, admits `InitTransfer`, and is re-applied to running transfers by
+the access sweep (see Token Renewal).
 
 ---
 
@@ -39,7 +63,7 @@ Both planes are stated separately, because they are armed separately.
 | Unauthenticated access to the data plane | JWT required when auth enabled; **open in dev mode** |
 | A third party streaming into or out of a transfer, or ending it (`POST /api/stream/{id}/abort`) | The caller's token subject must match a participant that registered |
 | Group spoofing | Group from JWT scope only |
-| Unauthorized transfer | FlowControl validates permissions |
+| Unauthorized transfer | The flow control rules, when the host registers them; without them any group reaches any other |
 | Token tampering | Signature verified against IDP |
 | Expired tokens | `exp` validated by the host when a connection or a stream opens; judged by the hub for as long as it runs (see Token Renewal) |
 

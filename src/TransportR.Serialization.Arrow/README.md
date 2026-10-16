@@ -57,6 +57,7 @@ Two things to know about that number:
   than you planned for throttles the transfer rather than stalling it.
 
 The sender end is separate and also unbounded by default: `WithMaxInFlightBatches` counts batches,
-not bytes, because its slot is taken before serialization where the size is not yet known. A
-bounded receiver throttles the sender anyway, through acknowledgements it withholds while the
-consumer is behind — so if you set one of the two, set this one.
+not bytes, because its slot is taken before serialization where the size is not yet known. Set it
+too: the receiver's bound stops the sender's network write, but not its serialization worker, so
+with the receiver bounded alone the serialized batches pile up in the sender instead (see
+"Backpressure" in `ResilienceArchitecture.md`).

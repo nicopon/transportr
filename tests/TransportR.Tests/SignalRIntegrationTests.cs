@@ -234,6 +234,52 @@ public class SignalRIntegrationTests
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(10)));
     }
 
+    [Fact]
+    public async Task The_Readme_Quick_Start_Configuration_Delivers()
+    {
+        // The hub exactly as the README's Quick Start builds it: UseDevMode() with no default group.
+        using var host = CreateHost(services => services.AddDataHub().UseDevMode().Build());
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        // Without a group the identity resolves to nothing, which is what the Quick Start did until
+        // its clients named one. A client of its own: one refused cannot connect again.
+        await using (var anonymous = CreateClient(handler, "http://localhost"))
+        {
+            await Assert.ThrowsAsync<HubException>(() => anonymous.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+
+        await sender.ConnectAsync(["senders"]).WaitAsync(TimeSpan.FromSeconds(10));
+        await receiver.ConnectAsync(["receivers"]).WaitAsync(TimeSpan.FromSeconds(10));
+
+        var receivers = await sender.GetReceiversAsync();
+        Assert.Equal(receiver.ClientId, Assert.Single(receivers).ClientId);
+
+        await using var send = await sender.InitTransferAsync(receivers[0].ClientId, batchSize: 10).WaitAsync(TimeSpan.FromSeconds(10));
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var expected = Enumerable.Range(0, 50).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+            {
+                items.Add(item);
+            }
+            return items;
+        });
+
+        await send.SendAsync(expected).WaitAsync(TimeSpan.FromSeconds(10));
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
     [Theory]
     [InlineData("item-9")]   // the last batch: before the fix, CompleteAsync succeeded without it
     [InlineData("item-2")]   // the first batch
@@ -281,6 +327,23 @@ public class SignalRIntegrationTests
             => batch.Contains(poison) ? throw new InvalidOperationException("Not serializable.") : inner.SerializeBatchAsync(destination, batch);
 
         public Task<List<string>?> DeserializeBatchAsync(Stream source) => inner.DeserializeBatchAsync(source);
+    }
+
+    private static IHost CreateHost(Action<IServiceCollection> addHub)
+    {
+        return new HostBuilder()
+            .ConfigureWebHost(webBuilder =>
+            {
+                webBuilder
+                    .UseTestServer()
+                    .ConfigureServices(addHub)
+                    .Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: false));
+                    });
+            })
+            .Start();
     }
 
     private static IHost CreateHostWithoutProgressMonitor()

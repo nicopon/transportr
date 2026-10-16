@@ -27,6 +27,9 @@ dotnet run
 | `Receiver__ReceiveMaxItems` | unbounded | Receive buffer bound, in items |
 | `Receiver__ReceiveMaxBytes` | unbounded | Receive buffer bound, in wire bytes |
 | `Receiver__ConsumeItemsPerSecond` | 0 (no pacing) | Throttles the consumer |
+| `Receiver__Group` | receivers | Group announced in dev mode |
+| `Receiver__EnableAuth`, `Receiver__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |
+| `SERIALIZER_TYPE` | MessagePack | `MessagePack`, `Protobuf` or `Json`; the sender must use the same |
 
 ## Data Flow
 

@@ -1,12 +1,12 @@
 # TransportR - SignalR Client
 
-The official SignalR client implementation for [TransportR](https://github.com/nicopon/TransportR), a high-performance data transport library for .NET.
+The client of [TransportR](https://github.com/nicopon/TransportR): streams typed records between .NET applications through a hub both sides connect out to.
 
 ## Features
 
-- **Efficient Streaming**: Stream large datasets in chunks with minimal memory overhead.
-- **Resilience**: Automatic reconnection, resumption from the receiver's last batch, and chaos-tested stability.
-- **Flexibility**: Protocol-agnostic transport layer.
+- **Efficient Streaming**: Stream large datasets in batches, with opt-in backpressure at both ends to bound memory.
+- **Resilience**: Automatic reconnection and resumption from the receiver's last batch, checked by fault-injection scenarios (see the repository's `scripts/README.md`).
+- **Serializer-agnostic**: MessagePack, Protobuf, JSON, Apache Arrow, or your own `IBatchSerializer<T>`.
 - **Built-in auth**: OAuth2 client credentials. MessagePack serialization ships in its own package, `TransportR.Serialization.MessagePack`.
 
 ## Installation
@@ -30,7 +30,7 @@ var client = new TransportRClientBuilder<Order>()
         tokenEndpoint: "http://localhost:5100/connect/token",
         clientId: "my-client",
         clientSecret: "my-secret",
-        scope: "api"
+        scope: "transportr:group:senders"   // the client's groups come from these scopes
     )
     .WithMessagePackSerialization() // Use built-in MessagePack support
     // .WithSerializer(new MyCustomSerializer()) // Or bring your own
@@ -38,12 +38,12 @@ var client = new TransportRClientBuilder<Order>()
     .WithLoggerFactory(LoggerFactory.Create(b => b.AddConsole()))
     .Build();
 
-// 2. Connect
-await client.ConnectAsync(new[] { "my-group" });
+// 2. Connect (with a token, groups passed here are ignored: the token's scopes decide)
+await client.ConnectAsync();
 
 // 3. Send Data
 var receivers = await client.GetReceiversAsync();
-var transfer = await client.InitTransferAsync(receivers[0].ClientId);
+await using var transfer = await client.InitTransferAsync(receivers[0].ClientId);
 // ... send each item with transfer.SendAsync(item) ...
 await transfer.CompleteAsync();
 
@@ -76,8 +76,11 @@ not connected, and the hub's refusal when the identity holds no group (the regis
 The hub must be of the same release.
 
 ### Serialization
-We recommend MessagePack for performance, but you can implement `IBatchSerializer<T>` for any
-format (e.g. JSON, Protobuf).
+MessagePack is the recommended default: on par with Protobuf in our benchmark, and it takes any POCO
+without attributes or schema. Protobuf needs annotated contracts and produces the most compact payload;
+JSON can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`). Both ends of a
+transfer must use the same serializer and settings: a batch the receiver cannot decode fails the transfer.
+Any other format is an `IBatchSerializer<T>` away.
 
 The builder carries the item type, so a serializer that cannot carry it is not an overload that
 exists: `new TransportRClientBuilder<string>().WithArrowSerialization()` does not compile, rather

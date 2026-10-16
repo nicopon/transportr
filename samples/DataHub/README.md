@@ -21,6 +21,7 @@ dotnet run --urls http://localhost:5252
 | `POST /api/stream/{id}/send` | Data upload |
 | `GET /api/stream/{id}/receive` | Data download |
 | `POST /api/stream/{id}/abort` | A participant ends its transfer when its `Abort` cannot be written to the stream |
+| `PUT /api/client/{id}/token` | A client renews its token |
 
 ## Configuration
 
@@ -29,6 +30,14 @@ dotnet run --urls http://localhost:5252
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ASPNETCORE_URLS` | http://localhost:5252 | Server URL |
+| `HUB_PORT` | 5252 | Port the hub names itself by (issuer of the embedded IdP) |
+| `EnableAuth` | false | JWT authentication; dev mode (default group `dev`) when false |
+| `EnableEmbeddedIdp` | false | Hosts SimpleIdp on the hub itself |
+| `Oidc__Authority` | http://localhost:5100 | External IdP, when auth is on and the embedded one is off |
+| `FLOWCONTROL_MODE` | default | `default` (senders → receivers), `wildcard` (adds `test` → `*`), `none` (no rules) |
+| `USE_REDIS` | — | Redis connection string: Redis store and affinity handoff |
+| `USE_TEST_PROXY` | — | TestProxy URL: its state store and affinity handoff (ignored when `USE_REDIS` is set) |
+| `OUTPUT_DIR` | output | Where `hub.log` is written |
 | `Logging__LogLevel__Default` | Information | Log level |
 
 ## Structure

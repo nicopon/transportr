@@ -24,26 +24,9 @@ Shared/
 
 ## 📊 Order Model
 
-```csharp
-public class Order
-{
-    public int OrderId { get; set; }
-    public DateTime OrderDate { get; set; }
-    public string CustomerName { get; set; } = string.Empty;
-    public string CustomerEmail { get; set; } = string.Empty;
-    public string ShippingAddress { get; set; } = string.Empty;
-    public string BillingAddress { get; set; } = string.Empty;
-    public decimal TotalAmount { get; set; }
-    public decimal TaxAmount { get; set; }
-    public decimal DiscountAmount { get; set; }
-    public string Currency { get; set; } = "EUR";
-    public string PaymentMethod { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public string ShippingPriority { get; set; } = string.Empty;
-    public string TrackingNumber { get; set; } = string.Empty;
-    public string Notes { get; set; } = string.Empty;
-}
-```
+`Models/Order.cs` holds the class. It carries both serializers' contracts, `[MessagePackObject]`/`[Key(n)]` and
+`[ProtoContract]`/`[ProtoMember(n)]`, which is what lets the samples switch serializer (`SERIALIZER_TYPE`)
+on the same type.
 
 ### Fields
 

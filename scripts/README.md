@@ -72,10 +72,25 @@ Unified benchmark runner with scenario support.
 | `fast-chaos` | Chaos simulation on 200 000 items, for quick iterations |
 | `chaos-cut-sender` | Holds the sender's link silent (nothing passes, nothing is refused), then closes its connections; the transfer must resume and deliver every line |
 | `chaos-cut-receiver` | The same cut on the receiver's link |
-| `ha-no-shared-state` | HA mode (2 Hubs + TestProxy) with sticky sessions and no shared state store |
-| `ha-redis` | Redis State Store (single hub, for HA preparation) |
+| `ha-no-shared-state` | HA mode (2 hubs behind the TestProxy, sticky sessions); the hubs share state through the TestProxy's own store rather than Redis |
+| `ha-redis` | HA mode (2 hubs behind the TestProxy, sticky sessions) with the Redis state store |
 | `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
+
+### `test-all.sh`, `verify-loop.sh`
+
+`test-all.sh` runs `init.sh`, a Release build and every scenario of its `SCENARIOS` list in sequence, and exits 1
+if any of them failed. `verify-loop.sh` runs `test-all.sh` up to four times back to back, stopping at the first
+failed loop, for flakes and leaks.
+
+### `benchmark-compare.sh`
+
+Runs the `default` scenario three times with MessagePack, then three times with JSON (`SERIALIZER_TYPE`), and
+prints the sender's throughput for each. The runs are sequential, not interleaved.
+
+### `lint-comments.sh`
+
+Refuses deliberation left in comments and doc comments with no member under them. CI runs it ahead of the build.
 
 ---
 
@@ -122,10 +137,11 @@ receiver under 300 MB where its control, which differs only by the byte bound, r
 
 ## Asserting the transfer actually succeeded
 
-The row count is not the verdict. The receiver writes every row before the sender learns whether
-its `Complete` was acknowledged, so a transfer that ends in `TransferFailedException` still leaves
-a full CSV, a clean session registry and a flat memory profile behind — and the sample catches the
-exception and exits 0. A run can therefore be wrong in every way that matters and still satisfy
+The row count is not the verdict. A transfer can deliver every row and still end in
+`TransferFailedException` on the sender — its `Complete` unacknowledged within the stall bound —
+which leaves a full CSV, a clean session registry and a flat memory profile behind, and the sample
+catches the exception and exits 0. The converse holds too: a batch is acknowledged when it reaches
+the receive buffer, so the sender can report success while the receiver is still writing rows. A run can therefore be wrong in every way that matters and still satisfy
 every other check on this page.
 
 So the runner also requires each sender to have logged `[SENDER][STATS] Transfer <id> complete:`,

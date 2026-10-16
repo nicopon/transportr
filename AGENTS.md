@@ -11,8 +11,9 @@ the pitch/comparison-to-Kafka-and-gRPC, and the three docs below for the design.
 
 - `TransportRArchitecture.md` — control plane (SignalR) vs data plane (HTTP streaming) split, binary
   wire protocol (30-byte `ChunkHeader` + opaque payload), HA model.
-- `ResilienceArchitecture.md` — "Dataplane First" resilience: reachability via in-stream Ping/Pong
-  (not SignalR), packet-level resumption, the EOF "domino sequence" that terminates a transfer.
+- `ResilienceArchitecture.md` — "Dataplane First" resilience: resume point via in-stream Ping/Pong
+  (streams reopen once a SignalR probe answers), packet-level resumption, the EOF "domino sequence"
+  that terminates a transfer.
 - `SecurityArchitecture.md` — JWT/OAuth2, `transportr:group:*` scopes, dev vs production auth mode.
 
 ## Build & Test
@@ -50,7 +51,7 @@ counts in the output CSVs):
 ./scripts/run-benchmark.sh           # scenario "default": no auth
 ./scripts/run-benchmark.sh oidc      # external TestIdp + OIDC
 ./scripts/run-benchmark.sh chaos     # Toxiproxy-injected network faults mid-transfer
-./scripts/run-benchmark.sh ha-redis  # Redis-backed IStateStore, single hub
+./scripts/run-benchmark.sh ha-redis  # 2 hubs behind the TestProxy, Redis-backed IStateStore
 ./scripts/run-benchmark.sh slow-receiver  # throttled consumer, asserts a receiver memory ceiling
 ./scripts/test-all.sh                # runs every scenario in test-all.sh's list in sequence; exit 1 on any failure
 ./scripts/verify-loop.sh             # runs test-all.sh 4× back-to-back (flake/leak hunting)
@@ -72,12 +73,15 @@ handoff.
 
 This split is the central design decision and shows up everywhere: SignalR (`CommandHub` /
 `TransportR.Hub.SignalR/Hubs/CommandHub.cs`) only ever does presence/discovery/handshake
-(`Connect`, `GetReceivers`, `InitTransfer`) — it never touches bulk bytes. Data itself moves
+(`Connect`, `GetReceivers`, `InitTransfer`, the heartbeats, and the `Ping` a reconnecting session
+probes it with) — it never touches bulk bytes. Data itself moves
 over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
 /api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
-without deserializing them. Reliability, resumption and even transfer-completion detection are all
+without deserializing them. Reliability, the resume point and even transfer-completion detection are
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid SignalR-vs-stream
-race conditions — don't reintroduce a control-plane message for something the data plane already
+race conditions. Two things still lean on SignalR, and the docs say so: a reconnecting session waits
+for a SignalR `Ping` to answer before reopening its streams, and the hub judges a transfer's activity
+on its SignalR heartbeats only — don't reintroduce a control-plane message for something the data plane already
 decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`). The one request that is not
 a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a sender whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
@@ -152,10 +156,12 @@ notifies clients of a disconnect — see "Disconnection Detection" in `Resilienc
 
 `ConnectionBridge` + `BridgeStateMachine` model one active transfer as a bridge between a sender
 stream and a receiver stream (`BridgeManager` is only the `ConcurrentDictionary` that keys them by
-`transferId:ConnectionType`); `DataSessionStateMachine` models the per-client session states. Both
-state machines take **events**, not target states — `OnSenderRegistered`/`OnSenderLost`/… — and pick
-the resulting state themselves, so a caller cannot drive one into a state its table forbids, and
-`SenderConnected`/`ReceiverConnected` are derived from the state rather than stored beside it. They
+`transferId:ConnectionType`). `BridgeStateMachine` takes **events**, not target states —
+`OnSenderRegistered`/`OnSenderLost`/… — and picks the resulting state itself, so a caller cannot
+drive it into a state its table forbids, and `SenderConnected`/`ReceiverConnected` are derived from
+the state rather than stored beside it. Its client-side counterpart, `DataSessionStateMachine`
+(driven by `DataSession`), takes events for the endings (`OnStreamsLost`, `OnReleased`, `OnAborted`,
+`OnEndedByHub`) and `TransitionTo` for the rest, which refuses only a move out of a terminal state. They
 are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.cs`,
 `DataSessionStateMachineTests.cs`, `DominoStateTransitionTests.cs` for the completion sequence) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in

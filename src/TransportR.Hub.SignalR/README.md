@@ -8,7 +8,7 @@ Provides the hub services that:
 1. Manage client connections and discovery
 2. Orchestrate transfer handshakes between senders and receivers
 3. Act as a "dumb pipe" for data transfer (no deserialization)
-4. Route clients to data plane endpoints (HA-ready)
+4. Redirect a client to the instance holding its transfer when several hubs share a state store (affinity handoff)
 
 ## Architecture
 
@@ -45,16 +45,19 @@ var builder = WebApplication.CreateBuilder(args);
 
 // The hub forwards opaque chunks and never deserializes a payload, so it registers no
 // serializer: that is a client-side decision between the two ends of a transfer.
-builder.Services.AddDataHub();
+// Build() is required: it registers the identity provider (JWT by default, UseDevMode() for development).
+builder.Services.AddDataHub().Build();
 
 // For HA deployment (Redis + Affinity):
 // builder.Services.AddDataHub()
 //     .UseRedisStore("localhost:6379")
-//     .UseAffinityHandoff();
+//     .UseAffinityHandoff()
+//     .Build();
 
 var app = builder.Build();
 
-// 3. Map endpoints
+// With the JWT default the host also configures JwtBearer authentication, calls UseAuthentication()
+// and UseAuthorization(), and maps with requireAuth: true (see SecurityArchitecture.md).
 app.MapDataHub();
 
 app.Run();
@@ -75,7 +78,6 @@ var hub = new CommandHub(
     stateStore,
     transferManager,
     identityProvider,        // IClientIdentityProvider
-    bridgeManager,           // IBridgeManager
     initiator,               // SignalRTransferInitiator
     policy,
     new ConnectionRegistry(),

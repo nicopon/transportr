@@ -16,7 +16,7 @@ TransportR.Client.SignalR/               # SignalR + HTTP streaming client & OAu
 TransportR.Hub.SignalR/                  # SignalR Hub + HTTP API server & group flow control
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
 TransportR.Serialization.Protobuf/       # Protobuf + Zstd serializer
-TransportR.Serialization.Json/           # System.Text.Json serializer (debug)
+TransportR.Serialization.Json/           # System.Text.Json + Zstd serializer (uncompressed for debugging)
 TransportR.Serialization.Arrow/          # Apache Arrow RecordBatch serializer
 TransportR.Auth.SimpleIdp/               # Lightweight Identity Provider (dev/test)
 TransportR.Storage.Redis/                # Redis State Store implementation
@@ -128,10 +128,10 @@ For a deployment:
 
 TransportR utilizes a **Dataplane First** resilience strategy:
 
-- **Stream Handshake (Ping/Pong)**: Verifies end-to-end reachability via the data stream itself (not SignalR).
+- **Stream Handshake (Ping/Pong)**: After a cut, the client waits for its control connection to answer, then reopens its streams; a Ping/Pong on the new data stream tells the sender where the receiver stands.
 - **Packet-Level Resumption**: Receiver indicates the exact offset to resume from, eliminating the need for Hub-side state (Checkpoints).
 - **Sender-side Buffering**: Payloads are kept until End-to-End ACK is received.
-- **Hub Lifecycle Management**: Hub actively terminates transfers that show no progress (timeout).
+- **Hub Lifecycle Management**: Hub terminates transfers that go silent (timeout), and, if configured, those that stop progressing.
 
 See [ResilienceArchitecture.md](./ResilienceArchitecture.md) for the complete design.
 
@@ -211,7 +211,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | Pong | 0x06 | Connection probe response |
 | Abort | 0x07 | The sending end gave up; `BatchId` carries an `AbortReason` |
 
-> **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. The included `TransportR.Serialization.MessagePack` uses MessagePack with Lz4 compression for high performance.
+> **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. A batch body the receiver cannot decode fails its session instead of being resent: it arrived whole, and a resend would decode no better.
 
 ---
 
@@ -240,7 +240,10 @@ Run: `dotnet test`
 
 ## Performance
 
-TransportR can achieve **hundreds of thousands of items per second** with favorable network conditions and appropriate batch sizes.
+On one machine over loopback, the `default` scenario moves 2 million orders (about 500 bytes each as JSON) at
+450 000 to 630 000 items per second on the sender side, whichever of MessagePack, Protobuf or JSON carries them
+(five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
+135 000 items per second. Over a real network, bandwidth and item size decide.
 
 Run benchmarks: `./scripts/run-benchmark.sh`
 

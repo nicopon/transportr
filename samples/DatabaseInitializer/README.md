@@ -68,34 +68,15 @@ ITEM_COUNT=500000 ./scripts/init.sh
 
 | Order Count | File Size |
 |-------------|-----------|
-| 100,000 | ~40 MB |
-| 1,000,000 | ~400 MB |
-| 2,000,000 | ~800 MB |
+| 100,000 | ~26 MB |
+| 1,000,000 | ~260 MB |
+| 2,000,000 | ~520 MB |
 
 ---
 
 ## Order Model
 
-```csharp
-public class Order
-{
-    public int OrderId { get; set; }
-    public DateTime OrderDate { get; set; }
-    public string CustomerName { get; set; }
-    public string CustomerEmail { get; set; }
-    public string ShippingAddress { get; set; }
-    public string BillingAddress { get; set; }
-    public decimal TotalAmount { get; set; }
-    public decimal TaxAmount { get; set; }
-    public decimal DiscountAmount { get; set; }
-    public string Currency { get; set; }
-    public string PaymentMethod { get; set; }
-    public string Status { get; set; }
-    public string ShippingPriority { get; set; }
-    public string TrackingNumber { get; set; }
-    public string Notes { get; set; }
-}
-```
+The `Order` class of `samples/Shared` (see its README).
 
 ---
 
@@ -146,7 +127,7 @@ Completed in 42.5s. Average speed: 47,000 items/s
 | Package | Version | Usage |
 |---------|---------|-------|
 | `Bogus` | 35.x | Fake data generation |
-
+| `MessagePack` | 3.x | Record serialization |
 | `Shared` | local | Order model |
 
 ---

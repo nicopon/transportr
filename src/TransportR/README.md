@@ -4,7 +4,9 @@ Core library containing interfaces, protocols, and abstractions for the Transpor
 
 ## Purpose
 
-This project defines the foundational contracts and binary protocols without implementing any network transport logic. It serves as the backbone for client and server implementations.
+This project defines the foundational contracts and the binary protocol, and holds the hub services that need no
+network stack: the in-memory state store, the bridge and session state machines, the transfer manager and the
+cleanup services. It references no SignalR or ASP.NET Core package.
 
 ## Key Interfaces
 
@@ -48,7 +50,7 @@ public interface ITransferManager { ... }
 
 ## Protocols
 
-The chunk types and the protocol flow are described in [TransportRArchitecture.md](../../TransportRArchitecture.md).
+The chunk types and the protocol flow are described in [TransportRArchitecture.md](https://github.com/nicopon/TransportR/blob/main/TransportRArchitecture.md).
 
 ### Binary Header (v2)
 
