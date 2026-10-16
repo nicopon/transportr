@@ -109,11 +109,8 @@ public class ReceiveCompletionContractTests
         await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
         var receive = await handle.Task.WaitAsync(Bound);
 
-        // Started before a single item is sent, so the loop ends as soon as the buffer closes -
-        // right after the Complete chunk is processed - rather than after also racing the sender's
-        // own CompleteAsync through the same round trip. That leaves the receiver's own closing
-        // exchange (CompleteAck written, then its own control POST completing) as the window this
-        // test is about.
+        // Started before a single item is sent, the way a real handler is wired: OnTransferStarted
+        // fires, and consumption begins, before the sender has written anything.
         var items = new List<string>();
         TransferStatus? statusAtLoopEnd = null;
         var consumer = Task.Run(async () =>
@@ -139,9 +136,10 @@ public class ReceiveCompletionContractTests
         Assert.False(clientLogs.Has(LogLevel.Warning, "Session released before the transfer ended"),
             "the receiver declared its own transfer abandoned, although it received everything.");
 
-        // statusAtLoopEnd == Completed, just asserted, already is the positive control: the
-        // receiver's own session reaches that state only by way of the normal domino, so there is
-        // no reading of "TerminateAsync was never called" that could be true for the wrong reason.
+        // This only says the hub never ended the transfer itself (no abort, no cleanup sweep) while
+        // the test was running - not that it has retired the transfer by now. The hub's own
+        // bookkeeping can lag well behind a client that has already reached Completed; that lag is
+        // not this contract's concern.
         Assert.Empty(terminator.Terminated);
     }
 
