@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
 
     <!-- Centralized Versioning (Prerelease by default) -->
-    <VersionPrefix>0.5.1</VersionPrefix>
+    <VersionPrefix>0.5.2</VersionPrefix>
     <VersionSuffix Condition="'$(VersionSuffix)' == ''">preview</VersionSuffix>
 
     <!-- Common NuGet Package Metadata -->
