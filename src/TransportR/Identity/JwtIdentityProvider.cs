@@ -15,6 +15,8 @@ namespace TransportR.Identity;
 /// </remarks>
 public class JwtIdentityProvider : IClientIdentityProvider
 {
+    private const string GroupScopePrefix = "transportr:group:";
+
     private readonly ILogger<JwtIdentityProvider>? _logger;
 
     public JwtIdentityProvider(ILogger<JwtIdentityProvider>? logger = null)
@@ -34,9 +36,14 @@ public class JwtIdentityProvider : IClientIdentityProvider
         }
 
         // Extract ALL TransportR-specific scopes for multi-group support
+        // The scope claim is a space-delimited string (RFC 8693 §4.2, RFC 9068 §2.2.3), which is how
+        // OpenIddict emits it; some issuers emit an array instead, which the
+        // JwtBearer handler turns into one claim per element. Both shapes are split the same way.
         var groups = user.Claims
-            .Where(c => c.Type == "scope" && c.Value.StartsWith("transportr:group:"))
-            .Select(c => c.Value.Replace("transportr:group:", ""))
+            .Where(c => c.Type == "scope")
+            .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(scope => scope.StartsWith(GroupScopePrefix, StringComparison.Ordinal))
+            .Select(scope => scope[GroupScopePrefix.Length..])
             .ToHashSet();
 
         // An empty set is an answer, not a failure: a valid token that grants nothing is how an
