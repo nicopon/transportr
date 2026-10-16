@@ -11,10 +11,14 @@ public static class TransportRClientBuilderJsonExtensions
     /// </summary>
     /// <param name="builder">The client builder.</param>
     /// <param name="options">Optional custom JsonSerializerOptions.</param>
-    /// <param name="compressionLevel">Zstd compression level (default -1).</param>
+    /// <param name="compressionLevel">Zstd compression level (default -1). Ignored when <paramref name="compress"/> is false.</param>
+    /// <param name="compress">
+    /// Whether to compress batch bodies with Zstd. On by default; turn it off to read the wire as
+    /// plain JSON. Both ends of a transfer must use the same setting.
+    /// </param>
     /// <returns>The builder instance.</returns>
-    public static TransportRClientBuilder<T> WithJsonSerialization<T>(this TransportRClientBuilder<T> builder, JsonSerializerOptions? options = null, int compressionLevel = -1)
+    public static TransportRClientBuilder<T> WithJsonSerialization<T>(this TransportRClientBuilder<T> builder, JsonSerializerOptions? options = null, int compressionLevel = -1, bool compress = true)
     {
-        return builder.WithSerializer(new JsonBatchSerializer<T>(options, compressionLevel));
+        return builder.WithSerializer(new JsonBatchSerializer<T>(options, compressionLevel, compress));
     }
 }

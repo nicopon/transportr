@@ -4,12 +4,26 @@ using ZstdSharp;
 
 namespace TransportR.Serialization.Json.Services;
 
+/// <summary>
+/// Serializes batches with System.Text.Json, Zstd-compressed unless told otherwise.
+/// </summary>
+/// <remarks>
+/// Both ends of a transfer must agree on <c>compress</c>: the wire carries no marker saying which
+/// one was used.
+/// </remarks>
 public class JsonBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly JsonSerializerOptions _options;
     private readonly int _compressionLevel;
+    private readonly bool _compress;
 
-    public JsonBatchSerializer(JsonSerializerOptions? options = null, int compressionLevel = -1)
+    /// <param name="options">Serializer options; compact, case-insensitive property names by default.</param>
+    /// <param name="compressionLevel">Zstd compression level. Ignored when <paramref name="compress"/> is false.</param>
+    /// <param name="compress">
+    /// Whether to compress batch bodies with Zstd. On by default. Off, a captured body is plain
+    /// UTF-8 JSON, which is the reason to turn it off: reading the wire while debugging.
+    /// </param>
+    public JsonBatchSerializer(JsonSerializerOptions? options = null, int compressionLevel = -1, bool compress = true)
     {
         _options = options ?? new JsonSerializerOptions
         {
@@ -17,31 +31,32 @@ public class JsonBatchSerializer<T> : IBatchSerializer<T>
             WriteIndented = false // Compact by default for network efficiency
         };
         _compressionLevel = compressionLevel;
+        _compress = compress;
     }
 
     public async Task SerializeBatchAsync(Stream destination, List<T> batch)
     {
-        // Wrap with Zstd Compression
+        if (!_compress)
+        {
+            await JsonSerializer.SerializeAsync(destination, batch, _options);
+            return;
+        }
+
         using var compressionStream = new CompressionStream(destination, level: _compressionLevel, leaveOpen: true);
         await JsonSerializer.SerializeAsync(compressionStream, batch, _options);
         // Implicit Dispose flushes the Zstd frame
     }
 
+    // A body that does not decode throws rather than returning null: the receive path drops a null
+    // batch as empty, so a swallowed error here would acknowledge items nobody ever received.
     public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
-        try 
+        if (!_compress)
         {
-            // Wrap with Zstd Decompression
-            using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
-            return await JsonSerializer.DeserializeAsync<List<T>>(decompressionStream, _options);
+            return await JsonSerializer.DeserializeAsync<List<T>>(source, _options);
         }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (IOException) // To catch potential end-of-stream or decompression errors more gracefully if needed
-        {
-            return null;
-        }
+
+        using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
+        return await JsonSerializer.DeserializeAsync<List<T>>(decompressionStream, _options);
     }
 }
