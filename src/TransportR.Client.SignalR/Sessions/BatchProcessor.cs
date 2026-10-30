@@ -389,7 +389,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     public async Task SendCompleteSignalAsync()
     {
-        _completeAckReceived = new TaskCompletionSource();
+        // One for the whole closing sequence: the receiver acknowledges once, so a retry that replaced
+        // it would lose an acknowledgement landing between two attempts.
+        _completeAckReceived ??= new TaskCompletionSource();
         // Send the Last Batch ID so receiver can verify if it missed anything
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Complete, _maxBatchIdSent));
     }

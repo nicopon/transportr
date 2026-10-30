@@ -155,8 +155,24 @@ public class BatchProcessorTests
         await processor.ProcessChunkAsync(ackChunk);
         
         // Assert: Task should complete
-        await completeTask; 
+        await completeTask;
         Assert.True(completeTask.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task CompleteAck_ThatLandsBetweenTwoCompleteRetries_IsNotLost()
+    {
+        // The receiver acknowledges once and stops reading, so an acknowledgement that arrives after a
+        // retry's wait has run out, but before the next Complete goes out, is the only one there is.
+        await using var processor = CreateProcessor();
+        await processor.SendCompleteSignalAsync();
+
+        var ackHeader = ChunkHeader.CreateControl(_transferId, 0, ChunkType.CompleteAck);
+        await processor.ProcessChunkAsync(new ChunkData(ackHeader, null, 0));
+
+        await processor.SendCompleteSignalAsync();
+
+        Assert.True(processor.WaitForCompleteAckAsync(CancellationToken.None).IsCompletedSuccessfully);
     }
 
     [Fact]
