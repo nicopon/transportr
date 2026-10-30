@@ -119,12 +119,10 @@ internal class SignalRTransferSignaling<T>
     private async Task<bool> HandleGetReadyToReceive(string transferId, Guid senderId)
     {
         _logger.LogDebug("Starting receive session: TransferId={TransferId}, SenderId={SenderId}", transferId, senderId);
-        
-        // Create session
+
         var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, _defaultBatchSize, _dataUrl));
         await session.StartReceiverAsync();
-        
-        // HttpReceive is likely in TransportR.Client.Internal
+
         var transfer = new HttpReceive<T>(session);
         if (_onTransferStarted != null)
         {

@@ -33,7 +33,6 @@ public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
 
     public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
-        // Wrap the source stream with ZstdDecompressionStream
         // 'leaveOpen: true' to keep the source stream open for the next batch
         using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
 

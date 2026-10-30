@@ -191,13 +191,8 @@ internal class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
         try
         {
-            // Step 1: Validate tokens and flow control
             _initiator.ValidateTransferRequest(sourceClient, targetClient);
-
-            // Step 2: Check affinity for HA deployment
             CheckAffinityRedirect(targetClient);
-
-            // Step 3: Execute handshake
             return await _initiator.HandshakeAsync(sourceClient, targetClient, batchSize, timeoutMs, requestSender: false);
         }
         catch (HubRequestFailedException ex)
