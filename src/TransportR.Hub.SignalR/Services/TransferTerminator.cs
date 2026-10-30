@@ -3,7 +3,7 @@ using TransportR.Interfaces;
 
 namespace TransportR.Services;
 
-internal class TransferTerminator : ITransferTerminator
+internal class TransferTerminator : ITransferTerminator, ITransferRetirer
 {
     private readonly ITransferManager _transferManager;
     private readonly IBridgeManager _bridgeManager;

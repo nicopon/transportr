@@ -181,7 +181,7 @@ public class AbortRouteTests
         using var host = await CreateHostWithTransferAsync(notifier);
         using var client = host.GetTestClient();
 
-        await host.Services.GetRequiredService<ITransferTerminator>().RetireAsync(TransferId);
+        await host.Services.GetRequiredService<ITransferRetirer>().RetireAsync(TransferId);
 
         using var response = await AbortAsync(client, TransferId, SenderSubject);
 

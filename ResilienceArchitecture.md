@@ -303,7 +303,7 @@ The Hub detects completion via `CopyAndFlushAsync()` which returns `StreamEndRea
 var endReason = await CopyAndFlushAsync(inputStream, receiverOutput, bufferSize, token);
 if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Triggers Step 6
 {
-    await terminator.RetireAsync(transferId); // state, session and both bridges; nobody is told
+    await retirer.RetireAsync(transferId); // state, session and both bridges; nobody is told
 }
 ```
 

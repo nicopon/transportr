@@ -169,7 +169,7 @@ are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.c
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
 `ConnectionBridge`/`TransferManager`.
 A transfer ends well when the sender's data POST ends cleanly: the bridge takes `OnCompleted` and
-`ITransferTerminator.RetireAsync` removes the state and both bridges, telling nobody. Only that
+`ITransferRetirer.RetireAsync` (internal) removes the state and both bridges, telling nobody. Only that
 signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer

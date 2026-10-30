@@ -26,7 +26,7 @@ public class SignalRDataServerTests
     private sealed class Harness
     {
         public BridgeManager Bridges { get; } = new(NullLoggerFactory.Instance);
-        public RecordingTerminator Terminator { get; } = new();
+        public RecordingRetirer Retirer { get; } = new();
         public LogRecorder Logs { get; } = new();
         public KnownTransfer Transfers { get; } = new();
         public SignalRDataServer Server { get; }
@@ -38,7 +38,7 @@ public class SignalRDataServerTests
                 new IgnoredProgress(),
                 Transfers,
                 Bridges,
-                Terminator);
+                Retirer);
         }
 
         public ConnectionBridge BridgeFor(ConnectionType type) =>
@@ -60,7 +60,7 @@ public class SignalRDataServerTests
         await EndsAsync(send);
 
         Assert.Equal(BridgeState.Completed, bridge.State);
-        Assert.Equal([TransferId], hub.Terminator.Retired);
+        Assert.Equal([TransferId], hub.Retirer.Retired);
     }
 
     [Theory]
@@ -101,7 +101,7 @@ public class SignalRDataServerTests
         input.End();
         await EndsAsync(send);
 
-        Assert.Empty(hub.Terminator.Retired);
+        Assert.Empty(hub.Retirer.Retired);
         Assert.NotEqual(BridgeState.Completed, bridge.State);
     }
 
@@ -120,7 +120,7 @@ public class SignalRDataServerTests
         input.Cut(new IOException("connection reset"));
         await EndsAsync(send);
 
-        Assert.Empty(hub.Terminator.Retired);
+        Assert.Empty(hub.Retirer.Retired);
         Assert.NotEqual(BridgeState.Completed, bridge.State);
     }
 
@@ -215,7 +215,7 @@ public class SignalRDataServerTests
         request.Cancel();
         await EndsAsync(send);
 
-        Assert.Empty(hub.Terminator.Retired);
+        Assert.Empty(hub.Retirer.Retired);
     }
 
     [Fact]
@@ -560,11 +560,9 @@ public class SignalRDataServerTests
         public void CompleteTransfer(string transferId) { }
     }
 
-    private sealed class RecordingTerminator : ITransferTerminator
+    private sealed class RecordingRetirer : ITransferRetirer
     {
         public List<string> Retired { get; } = [];
-
-        public Task TerminateAsync(string transferId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task RetireAsync(string transferId)
         {

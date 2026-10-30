@@ -102,6 +102,5 @@ public class HubClockTests
             return Task.CompletedTask;
         }
 
-        public Task RetireAsync(string transferId) => throw new NotSupportedException();
     }
 }

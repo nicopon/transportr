@@ -14,20 +14,20 @@ internal class SignalRDataServer : ITransportRServer
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly IBridgeManager _bridgeManager;
-    private readonly ITransferTerminator _terminator;
+    private readonly ITransferRetirer _retirer;
 
     public SignalRDataServer(
         ILogger<SignalRDataServer> logger, 
         IHubProgressMonitor progressMonitor,
         ITransferManager transferManager,
         IBridgeManager bridgeManager,
-        ITransferTerminator terminator)
+        ITransferRetirer retirer)
     {
         _logger = logger;
         _progressMonitor = progressMonitor;
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
-        _terminator = terminator;
+        _retirer = retirer;
     }
 
     public async Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
@@ -108,7 +108,7 @@ internal class SignalRDataServer : ITransportRServer
                         // Abort that was written, so both ends are done with the transfer.
                         if (bridge.Complete())
                         {
-                            await _terminator.RetireAsync(transferId).ConfigureAwait(false);
+                            await _retirer.RetireAsync(transferId).ConfigureAwait(false);
                         }
                     }
                 }

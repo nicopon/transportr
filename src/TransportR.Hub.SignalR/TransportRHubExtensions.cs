@@ -166,8 +166,10 @@ public static class TransportRHubExtensions
 
         // Terminates a transfer unilaterally (state, bridges, both participants notified) - the
         // one implementation, used by the cleanup service below and available to a host that wants
-        // to terminate a run it owns.
-        services.AddSingleton<ITransferTerminator, TransferTerminator>();
+        // to terminate a run it owns. The same instance retires a transfer that ended well.
+        services.AddSingleton<TransferTerminator>();
+        services.AddSingleton<ITransferTerminator>(sp => sp.GetRequiredService<TransferTerminator>());
+        services.AddSingleton<ITransferRetirer>(sp => sp.GetRequiredService<TransferTerminator>());
 
         // Transfer cleanup service (Timeouts)
         services.AddHostedService<TransferCleanupService>();

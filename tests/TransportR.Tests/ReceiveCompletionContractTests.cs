@@ -89,9 +89,8 @@ public class ReceiveCompletionContractTests
     {
         using var host = TestHubServerFactory.CreateHost(services =>
         {
-            // ITransferTerminator.TerminateAsync is the hub ending a transfer unilaterally (abort,
-            // cleanup); RetireAsync is the normal domino and must keep working undisturbed.
-            services.AddSingleton<TransferTerminator>();
+            // ITransferTerminator is the hub ending a transfer unilaterally (abort, cleanup); the
+            // normal end retires the transfer through the data server and never reaches it.
             services.AddSingleton<ITransferTerminator>(sp => new RecordingTerminator(sp.GetRequiredService<TransferTerminator>()));
         });
         var terminator = (RecordingTerminator)host.Services.GetRequiredService<ITransferTerminator>();
@@ -225,7 +224,7 @@ public class ReceiveCompletionContractTests
 
     /// <summary>
     /// Counts calls to <see cref="TerminateAsync"/> - the hub ending a transfer unilaterally - while
-    /// delegating everything, <see cref="RetireAsync"/> included, to the real terminator.
+    /// delegating them to the real terminator.
     /// </summary>
     private sealed class RecordingTerminator(ITransferTerminator inner) : ITransferTerminator
     {
@@ -239,6 +238,5 @@ public class ReceiveCompletionContractTests
             return inner.TerminateAsync(transferId, cancellationToken);
         }
 
-        public Task RetireAsync(string transferId) => inner.RetireAsync(transferId);
     }
 }

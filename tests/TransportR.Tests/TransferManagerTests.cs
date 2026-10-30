@@ -240,7 +240,6 @@ public class TransferManagerTests
             if (transferId == "witness") WitnessEnded.TrySetResult();
         }
 
-        public Task RetireAsync(string transferId) => inner.RetireAsync(transferId);
     }
 
     /// <summary>The in-memory store, with session writes the test can refuse or hold.</summary>
