@@ -99,6 +99,10 @@ drives it for a sender that asks, and `ITransferInitiator` for the application h
 which opens a transfer between two registered clients without either asking. One implementation,
 so authorization and the cleanup of a half-done handshake cannot drift between the two.
 
+SignalR stays inside the client and hub packages: no public type exposes it (`CommandHub`, the
+`ICommandHub`/`ICommandClient` contracts and the client's connection are internal), so the control
+plane can leave it without breaking the API. A change that hands a host a SignalR type undoes that.
+
 ### Wire protocol
 
 Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHeader.cs`:
@@ -117,8 +121,8 @@ but `RecordBatch`) is a compile error rather than a throw on the first batch —
 
 ```
 src/TransportR                          # Protocol, interfaces, models — no SignalR/hub deps
-src/TransportR.Client           # Client: TransportRClient<T>, HubConnectionManager, batching, OAuth2 client credentials
-src/TransportR.Hub              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
+src/TransportR.Client                   # Client: TransportRClient<T>, HubConnectionManager, batching, OAuth2 client credentials
+src/TransportR.Hub                      # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
 src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
 src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
 src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
@@ -251,9 +255,8 @@ happen: see "Token Renewal" in `SecurityArchitecture.md`.
 - **Scope discipline**: TransportR is deliberately not a message broker. Flag (rather than silently
   implement) anything that pushes it toward pub/sub, hub-side persistence/replay, or topic routing —
   point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces before
-  building it. The control connection a host extends (`UseHub<THub>()` on the hub,
-  `WithControlConnection` on the client) carries the host's coordination of its own clients:
-  TransportR adds no routing or broadcast to it, and SignalR groups or fan-out proposed there are
-  the same drift toward pub/sub. Ask of each addition a consumer requests whether it is transport or
+  building it. A host coordinates its own clients over a channel of its own: TransportR's control
+  connection offers it no hook, and a hook, SignalR group or fan-out proposed there is the same
+  drift toward pub/sub. Ask of each addition a consumer requests whether it is transport or
   orchestration; orchestration belongs to the host.
 - No generation dates in documentation.

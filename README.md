@@ -60,8 +60,8 @@ last batch, a memory bound at each end for a caller that sets one, and groups th
 ## Quick Start
 
 ```bash
-dotnet add package TransportR.Hub                # the hub
-dotnet add package TransportR.Client             # each application
+dotnet add package TransportR.Hub                        # the hub
+dotnet add package TransportR.Client                     # each application
 dotnet add package TransportR.Serialization.MessagePack  # a serializer, the same at both ends
 ```
 

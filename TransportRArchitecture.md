@@ -12,8 +12,8 @@
 
 ```
 TransportR/                              # Interfaces, protocols, abstractions
-TransportR.Client/               # SignalR + HTTP streaming client & OAuth2 auth
-TransportR.Hub/                  # SignalR Hub + HTTP API server & group flow control
+TransportR.Client/                       # SignalR + HTTP streaming client & OAuth2 auth
+TransportR.Hub/                          # SignalR Hub + HTTP API server & group flow control
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
 TransportR.Serialization.Protobuf/       # Protobuf + Zstd serializer
 TransportR.Serialization.Json/           # System.Text.Json + Zstd serializer (uncompressed for debugging)

@@ -66,10 +66,9 @@ app.Run();
 ## Testability
 
 Every hub-side clock and timer reads the `TimeProvider` in the container. A test registers its own
-next to `AddDataHub()`, before or after it, and moves it instead of waiting. Most of the hub's
-collaborators are internal, and `CommandHub` takes a `CommandHubDependencies` that only the container
-builds, so a test gets the hub as production does and drives it through its endpoints, over an
-ASP.NET Core `TestServer`:
+next to `AddDataHub()`, before or after it, and moves it instead of waiting. The hub and most of
+its collaborators are internal, so a test gets the hub as production does and drives it through its
+endpoints, over an ASP.NET Core `TestServer`:
 
 ```csharp
 var clock = new FakeTimeProvider();                  // Microsoft.Extensions.TimeProvider.Testing
@@ -91,9 +90,6 @@ using var host = new HostBuilder()
 
 // Clients connect through host.GetTestServer().CreateHandler(); clock.Advance(...) runs the hub's timeouts.
 ```
-
-A hub derived from `CommandHub` and registered with `UseHub<THub>()` receives `CommandHubDependencies`
-from the container and passes it to `base` unopened.
 
 ## Dumb Pipe Design
 

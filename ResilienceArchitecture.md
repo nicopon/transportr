@@ -30,7 +30,7 @@ says: a builder method on the client, an options class on the hub.
 | client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
 | client | Abort write (`DataSession.cs:33`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
 | client | Abort request (`DataSession.cs:36`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
-| client | Handshake (`TransportRClient.cs:50`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
+| client | Handshake (`TransportRClient.cs:49`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
 | client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat, which only runs while a transfer does |
 | client | `ClientOptions.PresenceHeartbeatInterval` | 60 s | **fixed** | `Heartbeat()`, which keeps the registration alive between transfers |
 | client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write |
@@ -39,7 +39,7 @@ says: a builder method on the client, an options class on the hub.
 | client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
 | client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
 | client | Renewal retry (`TokenRenewer.cs:30-31`) | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
-| client | Connect backoff (`HubConnectionManager.cs:209-224`) | 500 ms → 4 s | **fixed** | Five attempts to open the first hub connection. Restarting a data stream is not backed off |
+| client | Connect backoff (`HubConnectionManager.cs:192-209`) | 500 ms → 4 s | **fixed** | Five attempts to open the first hub connection. Restarting a data stream is not backed off |
 | client | Restart backoff (`HubConnectionManager.cs:40-41`) | 1 s → 30 s | **fixed** | After a closed hub connection: doubling, half to full delay, no limit |
 | hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
 | hub | `TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
