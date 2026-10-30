@@ -6,7 +6,7 @@ namespace TransportR.Interfaces;
 /// Manages connection bridges for transfer streaming.
 /// Bridges coordinate the sender and receiver HTTP streams for a transfer.
 /// </summary>
-public interface IBridgeManager
+internal interface IBridgeManager
 {
     /// <summary>
     /// Builds the key a transfer's bridge for <paramref name="type"/> is held under.

@@ -3,7 +3,7 @@ namespace TransportR.Interfaces;
 /// <summary>
 /// Interface for managing active transfers and their statistics.
 /// </summary>
-public interface ITransferManager
+internal interface ITransferManager
 {
     /// <summary>
     /// Registers sender and receiver for a transfer, and starts its state: from here on the
@@ -77,12 +77,12 @@ public interface ITransferManager
 /// <summary>
 /// Represents the sender and receiver of a transfer.
 /// </summary>
-public record TransferParticipants(Guid SenderId, Guid ReceiverId);
+internal record TransferParticipants(Guid SenderId, Guid ReceiverId);
 
 /// <summary>
 /// Represents the current state and statistics of a transfer.
 /// </summary>
-public class TransferState
+internal class TransferState
 {
     private readonly TimeProvider _time;
 

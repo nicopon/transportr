@@ -10,7 +10,7 @@ namespace TransportR.Hub.SignalR.Access;
 /// closes a connection whose token ran out, and the backstop for a right the host withdrew without
 /// calling the reconciler.
 /// </summary>
-public sealed class AccessSweepService : BackgroundService
+internal sealed class AccessSweepService : BackgroundService
 {
     private readonly IAccessReconciler _reconciler;
     private readonly TimeSpan _interval;

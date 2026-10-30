@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using TransportR.Hub.SignalR.Access;
 using TransportR.Hub.SignalR.Controllers;
@@ -57,18 +59,6 @@ public class DataHubBuilder
         return this;
     }
     
-    /// <summary>
-    /// Connects to TestProxy for multi-instance testing.
-    /// Replaces default InMemoryStateStore with HTTP client to proxy's state API.
-    /// </summary>
-    /// <param name="proxyUrl">URL of TestProxy (e.g., http://localhost:5000)</param>
-    public DataHubBuilder UseTestProxyStore(string proxyUrl)
-    {
-        // Remove default InMemoryStateStore and replace with TestProxy client
-        Services.AddSingleton<IStateStore>(new TestProxyStateStore(proxyUrl));
-        return this;
-    }
-
     /// <summary>
     /// Registers <typeparamref name="THub"/> in place of <see cref="CommandHub"/> as the single hub
     /// this connection carries. <see cref="MapDataHub"/> maps whichever hub was registered here -
@@ -177,6 +167,19 @@ public static class TransportRHubExtensions
         // Register Broker Server
         services.AddSingleton<ITransportRServer, SignalRDataServer>();
 
+        // DI cannot call the internal constructor, so the hub's dependencies are assembled here. Transient
+        // because a hub is created per invocation and holds nothing of its own.
+        services.AddTransient(sp => new CommandHubDependencies(
+            sp.GetRequiredService<IStateStore>(),
+            sp.GetRequiredService<ITransferManager>(),
+            sp.GetRequiredService<IClientIdentityProvider>(),
+            sp.GetRequiredService<SignalRTransferInitiator>(),
+            sp.GetRequiredService<AccessPolicy>(),
+            sp.GetRequiredService<ConnectionRegistry>(),
+            sp.GetRequiredService<IOptions<AffinityOptions>>(),
+            sp.GetRequiredService<ILogger<CommandHub>>(),
+            sp.GetRequiredService<TimeProvider>()));
+
         // SignalRDataServer requires an IHubProgressMonitor; TryAdd so a host that registers its
         // own before Build() keeps seeing it used, whichever order that registration happens in.
         services.TryAddSingleton<IHubProgressMonitor, NoopHubProgressMonitor>();
@@ -186,7 +189,8 @@ public static class TransportRHubExtensions
 
         // Add Controllers (for StreamController)
         services.AddControllers()
-                .AddApplicationPart(typeof(TransportRHubExtensions).Assembly);
+                .AddApplicationPart(typeof(TransportRHubExtensions).Assembly)
+                .ConfigureApplicationPartManager(manager => manager.FeatureProviders.Add(new DataHubControllerFeatureProvider()));
 
         // Default hub for MapDataHub to map; UseHub<THub>() overrides this registration.
         services.AddSingleton(new DataHubTypeMarker(typeof(CommandHub), (endpoints, pattern) => endpoints.MapHub<CommandHub>(pattern)));

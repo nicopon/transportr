@@ -25,26 +25,17 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
     private readonly ILogger<CommandHub> _logger;
     private readonly TimeProvider _time;
 
-    public CommandHub(
-        IStateStore stateStore,
-        ITransferManager transferManager, 
-        IClientIdentityProvider identityProvider,
-        SignalRTransferInitiator initiator,
-        AccessPolicy policy,
-        ConnectionRegistry connections,
-        IOptions<AffinityOptions> affinityOptions,
-        ILogger<CommandHub> logger,
-        TimeProvider timeProvider)
+    public CommandHub(CommandHubDependencies dependencies)
     {
-        _time = timeProvider;
-        _stateStore = stateStore;
-        _transferManager = transferManager;
-        _identityProvider = identityProvider;
-        _initiator = initiator;
-        _policy = policy;
-        _connections = connections;
-        _affinityOptions = affinityOptions.Value;
-        _logger = logger;
+        _time = dependencies.TimeProvider;
+        _stateStore = dependencies.StateStore;
+        _transferManager = dependencies.TransferManager;
+        _identityProvider = dependencies.IdentityProvider;
+        _initiator = dependencies.Initiator;
+        _policy = dependencies.Policy;
+        _connections = dependencies.Connections;
+        _affinityOptions = dependencies.AffinityOptions.Value;
+        _logger = dependencies.Logger;
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

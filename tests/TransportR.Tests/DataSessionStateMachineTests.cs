@@ -156,8 +156,9 @@ public class DataSessionStateMachineTests
     [InlineData(SessionState.Completed)]
     [InlineData(SessionState.Failed)]
     [InlineData(SessionState.Disposed)]
-    public void OnStreamsLost_FromAStoppedSession_KeepsItsStateAndSaysNothingOfIt(SessionState final)
+    public void OnStreamsLost_FromAStoppedSession_KeepsItsStateAndSaysNothingOfIt(object stopped)
     {
+        var final = (SessionState)stopped;
         // The streams of a session that stopped end because it stopped: nothing there is a fault.
         var logs = new TransportR.Tests.Infrastructure.LogRecorder();
         var fsm = new DataSessionStateMachine("test-transfer", logs.Factory.CreateLogger("fsm"));
@@ -181,8 +182,9 @@ public class DataSessionStateMachineTests
     [InlineData(SessionState.Completed)]
     [InlineData(SessionState.Failed)]
     [InlineData(SessionState.Disposed)]
-    public void OnEndedByHub_FromAStoppedSession_KeepsItsOutcome(SessionState final)
+    public void OnEndedByHub_FromAStoppedSession_KeepsItsOutcome(object stopped)
     {
+        var final = (SessionState)stopped;
         if (final == SessionState.Disposed) _fsm.OnReleased(); else _fsm.TransitionTo(final);
 
         Assert.False(_fsm.OnEndedByHub());

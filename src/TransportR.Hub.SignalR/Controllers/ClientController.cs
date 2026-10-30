@@ -13,7 +13,7 @@ namespace TransportR.Hub.SignalR.Controllers;
 /// </summary>
 [ApiController]
 [Route(WireRoutes.ClientBase)]
-public class ClientController : ControllerBase
+internal class ClientController : ControllerBase
 {
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;

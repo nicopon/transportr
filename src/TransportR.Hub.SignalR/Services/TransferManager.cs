@@ -9,7 +9,7 @@ namespace TransportR.Services;
 /// Manages active transfers and their statistics.
 /// Keeps participants in the injected IStateStore and transfer statistics in memory.
 /// </summary>
-public class TransferManager : ITransferManager
+internal class TransferManager : ITransferManager
 {
     private readonly ConcurrentDictionary<string, TransferState> _transfers = new();
     private readonly ConcurrentDictionary<string, TransferParticipants> _participants = new();

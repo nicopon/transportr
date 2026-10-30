@@ -11,7 +11,7 @@ namespace TransportR.Services;
 /// <remarks>
 /// Every member takes the machine's own lock and may be called from any thread.
 /// </remarks>
-public class BridgeStateMachine
+internal class BridgeStateMachine
 {
     private volatile BridgeState _currentState = BridgeState.Idle;
     private readonly ILogger _logger;

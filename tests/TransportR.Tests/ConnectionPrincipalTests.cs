@@ -25,17 +25,8 @@ public class ConnectionPrincipalTests
 {
     private class ProbeHub : CommandHub
     {
-        public ProbeHub(
-            IStateStore stateStore,
-            ITransferManager transferManager,
-            IClientIdentityProvider identityProvider,
-            SignalRTransferInitiator initiator,
-            AccessPolicy policy,
-            ConnectionRegistry connections,
-            IOptions<AffinityOptions> affinityOptions,
-            ILogger<CommandHub> logger,
-            TimeProvider timeProvider)
-            : base(stateStore, transferManager, identityProvider, initiator, policy, connections, affinityOptions, logger, timeProvider)
+        public ProbeHub(CommandHubDependencies dependencies)
+            : base(dependencies)
         {
         }
 

@@ -5,8 +5,8 @@ namespace TransportR.Interfaces;
 /// Or, for one that ended well, forgets it without telling anyone.
 /// </summary>
 /// <remarks>
-/// The callers of <see cref="TerminateAsync"/> are <see cref="Services.TransferCleanupService"/> (a
-/// transfer gone silent or stalled), <see cref="Services.BridgeCleanupService"/> (a bridge left
+/// The callers of <see cref="TerminateAsync"/> are <c>TransferCleanupService</c> (a
+/// transfer gone silent or stalled), <c>BridgeCleanupService</c> (a bridge left
 /// waiting for a peer), the access reconciler (a participant lost its right to act), the stream
 /// route's abort request (a participant whose in-stream Abort cannot reach the wire) and a host
 /// terminating a run it owns. The hub's data server calls <see cref="RetireAsync"/> when a data

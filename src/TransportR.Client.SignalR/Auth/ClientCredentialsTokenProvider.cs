@@ -9,7 +9,7 @@ namespace TransportR.Auth.ClientCredentials;
 /// Token provider that acquires OAuth tokens using the client credentials flow.
 /// Automatically caches tokens and refreshes them before expiry.
 /// </summary>
-public class ClientCredentialsTokenProvider : IDisposable
+internal class ClientCredentialsTokenProvider : IDisposable
 {
     private readonly ClientCredentialsOptions _options;
     private readonly HttpClient _httpClient;

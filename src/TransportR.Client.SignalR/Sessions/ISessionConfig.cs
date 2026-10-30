@@ -13,7 +13,7 @@ namespace TransportR.Client.SignalR.Sessions;
 /// payload — <see cref="HttpStreamManager"/>, <see cref="ReconnectionHandler"/> — are not made
 /// generic just to reach a logger.
 /// </remarks>
-public interface ISessionConfig
+internal interface ISessionConfig
 {
     ILogger Logger { get; }
     int BatchFlushIntervalMs { get; }
@@ -24,7 +24,7 @@ public interface ISessionConfig
 /// <summary>
 /// Adds the serializer, which is where the item type enters a session.
 /// </summary>
-public interface ISessionConfig<T> : ISessionConfig
+internal interface ISessionConfig<T> : ISessionConfig
 {
     IBatchSerializer<T> Serializer { get; }
 }

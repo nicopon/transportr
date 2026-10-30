@@ -6,7 +6,7 @@ namespace TransportR.Services;
 /// <summary>
 /// Manages state transitions for DataSession with validation and thread safety.
 /// </summary>
-public class DataSessionStateMachine
+internal class DataSessionStateMachine
 {
     private volatile SessionState _currentState = SessionState.Idle;
     private readonly ILogger _logger;

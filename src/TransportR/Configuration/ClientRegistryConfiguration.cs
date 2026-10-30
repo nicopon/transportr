@@ -24,7 +24,7 @@ public class ClientRegistryConfiguration
     /// </summary>
     /// <remarks>
     /// This is the window in which a reconnecting client can claim its registration back. It
-    /// matches <see cref="DataPlaneConfiguration.BridgeTimeoutSeconds"/> on purpose: there is no
+    /// matches <c>DataPlaneConfiguration.BridgeTimeoutSeconds</c> on purpose: there is no
     /// point keeping a registration alive longer than the transfer it would resume.
     /// </remarks>
     public int DisconnectedGraceSeconds { get; set; } = 300;

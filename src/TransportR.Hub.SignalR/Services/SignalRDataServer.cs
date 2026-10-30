@@ -8,7 +8,7 @@ using System.Buffers;
 
 namespace TransportR.Hub.SignalR.Services;
 
-public class SignalRDataServer : ITransportRServer
+internal class SignalRDataServer : ITransportRServer
 {
     private const string DestinationLostMessage = "The destination of the stream is no longer connected.";
 

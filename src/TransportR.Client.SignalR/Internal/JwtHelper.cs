@@ -5,7 +5,7 @@ namespace TransportR.Client.SignalR.Internal;
 /// <summary>
 /// Utility class for parsing JWT tokens without external dependencies.
 /// </summary>
-public static partial class JwtHelper
+internal static partial class JwtHelper
 {
     /// <summary>
     /// Extracts the expiration time from a JWT token.

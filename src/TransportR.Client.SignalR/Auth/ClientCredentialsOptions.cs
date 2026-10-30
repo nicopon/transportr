@@ -3,7 +3,7 @@ namespace TransportR.Auth.ClientCredentials;
 /// <summary>
 /// Configuration options for OAuth client credentials token acquisition.
 /// </summary>
-public class ClientCredentialsOptions
+internal class ClientCredentialsOptions
 {
     /// <summary>
     /// The token endpoint URL (e.g., "http://localhost:5252/connect/token").

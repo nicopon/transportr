@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using TransportR.Interfaces;
 using TransportR.Models;
 
-namespace TransportR.Hub.SignalR.Services;
+namespace DataHub.Services;
 
 /// <summary>
 /// State store that connects to TestProxy's state API.

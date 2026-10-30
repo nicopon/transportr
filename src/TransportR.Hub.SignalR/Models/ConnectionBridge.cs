@@ -10,7 +10,7 @@ namespace TransportR.Models;
 /// The bridge does not reach across: the copy loop of the source has to notice that its destination
 /// is gone, by observing <see cref="ReceiverToken"/>, or it keeps writing to a stream nobody reads.
 /// </summary>
-public class ConnectionBridge
+internal class ConnectionBridge
 {
     private readonly object _lock = new();
     private TaskCompletionSource<Stream> _receiverStreamTcs = NewStreamTcs();

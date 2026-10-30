@@ -12,7 +12,7 @@ namespace TransportR.Services;
 /// which releases the requests parked on it, and ends its transfer through
 /// <see cref="ITransferTerminator"/>.
 /// </summary>
-public class BridgeCleanupService : BackgroundService
+internal class BridgeCleanupService : BackgroundService
 {
     private readonly ILogger<BridgeCleanupService> _logger;
     private readonly ITransferTerminator _terminator;

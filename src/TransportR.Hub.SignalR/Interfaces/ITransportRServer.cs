@@ -1,22 +1,6 @@
 namespace TransportR.Interfaces;
 
 /// <summary>
-/// Specifies the type of connection for streaming.
-/// </summary>
-public enum ConnectionType
-{
-    /// <summary>
-    /// Data channel for transferring batch payloads.
-    /// </summary>
-    Data,
-
-    /// <summary>
-    /// Control channel for ACK/Complete messages.
-    /// </summary>
-    Control
-}
-
-/// <summary>
 /// Interface for the server-side data broker that bridges sender and receiver streams.
 /// </summary>
 /// <remarks>
@@ -29,7 +13,7 @@ public enum ConnectionType
 /// Each transfer uses separate bridges for Data and Control channels.
 /// </para>
 /// </remarks>
-public interface ITransportRServer
+internal interface ITransportRServer
 {
     /// <summary>
     /// Handles the sending stream (Client → Server).

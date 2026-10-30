@@ -4,7 +4,7 @@ namespace TransportR.Models;
 /// Indicates how a stream ended.
 /// Critical for distinguishing clean completion (domino advance) vs network failure (reconnect).
 /// </summary>
-public enum StreamEndReason
+internal enum StreamEndReason
 {
     /// <summary>
     /// ReadAsync returned 0 (EOF). The remote party intentionally closed the stream.

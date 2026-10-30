@@ -122,9 +122,9 @@ public class BridgeStateMachineTests
     [InlineData(BridgeState.WaitingForSender)]
     [InlineData(BridgeState.WaitingForReceiver)]
     [InlineData(BridgeState.Active)]
-    public void CanComplete_FromEveryLiveState(BridgeState from)
+    public void CanComplete_FromEveryLiveState(object from)
     {
-        Reach(from);
+        Reach((BridgeState)from);
 
         Assert.True(_fsm.OnCompleted());
         Assert.Equal(BridgeState.Completed, _fsm.CurrentState);

@@ -6,7 +6,7 @@ namespace TransportR.Hub.SignalR.Exceptions;
 /// Exception thrown when sender needs to reconnect to receiver's replica.
 /// The client should catch this and reconnect with the provided affinity token.
 /// </summary>
-public class AffinityRedirectException : HubException
+internal class AffinityRedirectException : HubException
 {
     /// <summary>
     /// The affinity token to use for reconnection.

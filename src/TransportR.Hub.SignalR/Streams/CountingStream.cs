@@ -4,7 +4,7 @@ namespace TransportR.Hub.SignalR.Streams;
 /// Reports how many bytes each read returned, without looking at them: the hub counts what crosses
 /// its streams and never reads it.
 /// </summary>
-public class CountingStream(Stream inner, Action<long> onBytesRead) : Stream
+internal class CountingStream(Stream inner, Action<long> onBytesRead) : Stream
 {
     public override int Read(byte[] buffer, int offset, int count)
     {

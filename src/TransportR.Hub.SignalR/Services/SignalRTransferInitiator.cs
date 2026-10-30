@@ -18,7 +18,7 @@ namespace TransportR.Hub.SignalR.Services;
 /// readied and the cleanup of a handshake that fails halfway cannot drift apart. Every failure is a
 /// <see cref="HubException"/>, whose message SignalR forwards to a calling client.
 /// </remarks>
-public class SignalRTransferInitiator : ITransferInitiator
+internal class SignalRTransferInitiator : ITransferInitiator
 {
     private readonly IHubContext<CommandHub> _hubContext;
     private readonly IStateStore _stateStore;

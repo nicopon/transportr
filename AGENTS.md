@@ -125,7 +125,7 @@ src/TransportR.Storage.Redis                # IStateStore backed by Redis, for H
 `IStateStore` (`src/TransportR/Interfaces/IStateStore.cs`) is the abstraction that makes HA possible:
 client registrations and `TransferSession`s go through it, with three implementations —
 `InMemoryStateStore` (default, single hub), `RedisStateStore` (HA, shared across hub instances), and
-`TestProxyStateStore`, the hub-side adapter of the reference HA harness, which forwards to `ProxyStateStore` in `TransportR.TestProxy` (not a product feature).
+`TestProxyStateStore` in `samples/DataHub`, the adapter of the reference HA harness, which forwards to `ProxyStateStore` in `TransportR.TestProxy` (not a product feature).
 A new state-carrying concept for HA needs a home in this interface, not a hub-local field.
 
 Client registrations outlive their connection on purpose (a reconnect reclaims them), so they are

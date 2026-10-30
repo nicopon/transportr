@@ -9,7 +9,7 @@ namespace TransportR.Client.SignalR.Sessions;
 /// Interface exposing the session context dependencies from the parent SignalRDataClient.
 /// Enables dependency injection and unit testing of DataSession.
 /// </summary>
-public interface ISessionContext : ISessionConfig, IStreamTransport, ISignalRInteraction
+internal interface ISessionContext : ISessionConfig, IStreamTransport, ISignalRInteraction
 {
     // No additional members needed, functions as an aggregator for the Client implementation
     // The specific logic (DataSession, HttpStreamManager) uses the narrow interfaces.
@@ -18,6 +18,6 @@ public interface ISessionContext : ISessionConfig, IStreamTransport, ISignalRInt
 /// <summary>
 /// The same aggregate for the parts of a session that carry the item type.
 /// </summary>
-public interface ISessionContext<T> : ISessionContext, ISessionConfig<T>
+internal interface ISessionContext<T> : ISessionContext, ISessionConfig<T>
 {
 }

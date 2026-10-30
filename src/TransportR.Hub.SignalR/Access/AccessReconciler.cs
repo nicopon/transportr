@@ -5,7 +5,7 @@ using TransportR.Models;
 namespace TransportR.Hub.SignalR.Access;
 
 /// <inheritdoc />
-public sealed class AccessReconciler : IAccessReconciler
+internal sealed class AccessReconciler : IAccessReconciler
 {
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;

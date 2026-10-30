@@ -6,7 +6,7 @@ using TransportR.Models;
 namespace TransportR.Hub.SignalR.Access;
 
 /// <summary>What <see cref="AccessPolicy"/> found. Each surface turns it into its own refusal.</summary>
-public enum AccessVerdict
+internal enum AccessVerdict
 {
     Allowed,
 
@@ -32,7 +32,7 @@ public enum AccessVerdict
 /// identity), never the principal of a connection: that one is fixed when the connection opens and
 /// says nothing of a token renewed since.
 /// </remarks>
-public sealed class AccessPolicy
+internal sealed class AccessPolicy
 {
     private readonly IFlowControlService? _flowControl;
     private readonly TimeSpan _margin;

@@ -4,7 +4,7 @@ namespace TransportR.Models;
 /// Bridge state for lifecycle management.
 /// Tracks which of the two participants currently hold a stream on the bridge.
 /// </summary>
-public enum BridgeState
+internal enum BridgeState
 {
     /// <summary>No one connected.</summary>
     Idle,

@@ -3,7 +3,7 @@ namespace TransportR.Models;
 /// <summary>
 /// Represents the high-level state of a DataSession.
 /// </summary>
-public enum SessionState
+internal enum SessionState
 {
     /// <summary>
     /// Initial state before starting.

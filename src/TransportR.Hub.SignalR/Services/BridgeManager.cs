@@ -10,7 +10,7 @@ namespace TransportR.Services;
 /// Manages connection bridges for transfer streaming.
 /// Thread-safe implementation using ConcurrentDictionary.
 /// </summary>
-public class BridgeManager : IBridgeManager
+internal class BridgeManager : IBridgeManager
 {
     private readonly ConcurrentDictionary<string, ConnectionBridge> _bridges = new();
     private readonly ILoggerFactory _loggerFactory;

@@ -13,7 +13,7 @@ namespace TransportR.Hub.SignalR.Access;
 /// handshake. A failure of the host's flow control service is logged and ends nothing: an error is
 /// not a verdict.
 /// </remarks>
-public interface IAccessReconciler
+internal interface IAccessReconciler
 {
     /// <summary>Judges one client, and the transfers it takes part in.</summary>
     Task ReconcileAsync(Guid clientId, CancellationToken cancellationToken = default);

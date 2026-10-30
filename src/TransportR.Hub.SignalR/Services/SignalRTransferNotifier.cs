@@ -7,7 +7,7 @@ namespace TransportR.Hub.SignalR.Services;
 /// <summary>
 /// Hub-based implementation of ITransferNotifier.
 /// </summary>
-public class SignalRTransferNotifier : ITransferNotifier
+internal class SignalRTransferNotifier : ITransferNotifier
 {
     private readonly IHubContext<CommandHub> _hubContext;
 

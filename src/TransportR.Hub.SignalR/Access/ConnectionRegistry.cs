@@ -12,7 +12,7 @@ namespace TransportR.Hub.SignalR.Access;
 /// connection goes. A connection that never registered holds no right to judge. Local to the
 /// instance: another instance closes the connections it holds.
 /// </remarks>
-public sealed class ConnectionRegistry
+internal sealed class ConnectionRegistry
 {
     private readonly ConcurrentDictionary<string, HubCallerContext> _connections = new();
 

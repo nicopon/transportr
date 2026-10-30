@@ -7,7 +7,7 @@ namespace TransportR.Client.SignalR.Sessions;
 /// Encapsulates the state and logic for a single bidirectional data transfer.
 /// </summary>
 /// <typeparam name="T">The type of items being transferred.</typeparam>
-public interface IDataSession<T> : IAsyncDisposable
+internal interface IDataSession<T> : IAsyncDisposable
 {
     /// <summary>
     /// The unique transfer identifier.

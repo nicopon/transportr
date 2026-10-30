@@ -6,7 +6,7 @@ using TransportR.Interfaces;
 
 namespace TransportR.Services;
 
-public class TransferCleanupService : BackgroundService
+internal class TransferCleanupService : BackgroundService
 {
     private readonly ITransferManager _transferManager;
     private readonly ITransferTerminator _terminator;

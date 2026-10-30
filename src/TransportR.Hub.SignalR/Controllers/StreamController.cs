@@ -12,7 +12,7 @@ namespace TransportR.Hub.SignalR.Controllers;
 
 [ApiController]
 [Route(WireRoutes.StreamBase)]
-public class StreamController : ControllerBase
+internal class StreamController : ControllerBase
 {
     private readonly ITransportRServer _brokerServer;
     private readonly ITransferManager _transferManager;

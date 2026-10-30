@@ -143,9 +143,9 @@ public class AccessPolicyTests
     [InlineData(null, null, AccessVerdict.Allowed)]
     [InlineData(null, "a", AccessVerdict.WrongSubject)]
     [InlineData("a", null, AccessVerdict.WrongSubject)]
-    public void Identities_AreTheSameOnlyWhenTheSubjectsAreEqual(string? registered, string? presented, AccessVerdict expected)
+    public void Identities_AreTheSameOnlyWhenTheSubjectsAreEqual(string? registered, string? presented, object expected)
     {
-        Assert.Equal(expected, AccessPolicy.SameIdentity(registered, presented));
+        Assert.Equal((AccessVerdict)expected, AccessPolicy.SameIdentity(registered, presented));
     }
 
     [Fact]

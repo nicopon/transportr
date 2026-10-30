@@ -12,7 +12,7 @@ namespace TransportR.Identity;
 /// Use this provider only for development/testing scenarios where authentication is disabled.
 /// It trusts client-provided clientId and groups without validation.
 /// </remarks>
-public class DevIdentityProvider : IClientIdentityProvider
+internal class DevIdentityProvider : IClientIdentityProvider
 {
     private readonly DevIdentityOptions _options;
     private readonly ILogger<DevIdentityProvider>? _logger;

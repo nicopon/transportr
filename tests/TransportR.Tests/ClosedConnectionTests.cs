@@ -38,18 +38,8 @@ public class ClosedConnectionTests
     {
         private readonly ConnectionCounter _counter;
 
-        public ClosingHub(
-            IStateStore stateStore,
-            ITransferManager transferManager,
-            IClientIdentityProvider identityProvider,
-            SignalRTransferInitiator initiator,
-            AccessPolicy policy,
-            ConnectionRegistry connections,
-            IOptions<AffinityOptions> affinityOptions,
-            ILogger<CommandHub> logger,
-            TimeProvider timeProvider,
-            ConnectionCounter counter)
-            : base(stateStore, transferManager, identityProvider, initiator, policy, connections, affinityOptions, logger, timeProvider)
+        public ClosingHub(CommandHubDependencies dependencies, ConnectionCounter counter)
+            : base(dependencies)
         {
             _counter = counter;
         }
