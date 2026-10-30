@@ -66,16 +66,12 @@ public class DataHubBuilder
     /// call wins - so a test cannot register one hub and map another.
     /// </summary>
     /// <remarks>
-    /// TransportR's own services resolve <see cref="IHubContext{CommandHub}"/>
-    /// (<c>SignalRTransferInitiator</c>, <c>SignalRTransferNotifier</c>); redirecting that
-    /// resolution to <typeparamref name="THub"/>'s own context - valid because
-    /// <see cref="IHubContext{THub}"/> is covariant in <c>THub</c> - keeps the handshake on the
-    /// connection the derived hub carries.
+    /// TransportR's own services keep resolving <see cref="IHubContext{CommandHub}"/>, which reaches
+    /// none of <typeparamref name="THub"/>'s connections: no transfer opens on such a hub.
     /// </remarks>
     internal DataHubBuilder UseHub<THub>() where THub : CommandHub
     {
         Services.AddSingleton(new DataHubTypeMarker(typeof(THub), (endpoints, pattern) => endpoints.MapHub<THub>(pattern)));
-        Services.AddSingleton<IHubContext<CommandHub>>(sp => sp.GetRequiredService<IHubContext<THub>>());
         return this;
     }
 }
