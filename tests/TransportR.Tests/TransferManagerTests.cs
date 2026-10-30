@@ -159,6 +159,40 @@ public class TransferManagerTests
     }
 
     [Fact]
+    public async Task RegisterParticipants_ThatTheStoreRefuses_LeavesNothingForTheSweep()
+    {
+        // The handshake fails before anyone has heard of the transfer. A state left here would have the
+        // inactivity sweep cancel it with both clients a minute later.
+        var manager = new TransferManager(new ControlledStateStore { RefuseSessions = true });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => manager.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid()));
+
+        Assert.Empty(manager.GetAllTransfers());
+        Assert.Empty(manager.GetAllParticipants());
+    }
+
+    [Fact]
+    public async Task Track_WhileTheTransferIsBeingRemoved_DoesNotBringItBack()
+    {
+        // Until the store has deleted the shared session, a stream reopening on this instance finds it
+        // there.
+        var store = new ControlledStateStore();
+        var manager = new TransferManager(store);
+        await manager.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid());
+
+        var heldDeletion = store.HoldDeletions();
+        var removal = manager.RemoveTransferAsync("transfer-1");
+        await store.DeletionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Null(await manager.TrackAsync("transfer-1"));
+
+        heldDeletion.SetResult();
+        await removal;
+        Assert.Empty(manager.GetAllTransfers());
+    }
+
+    [Fact]
     public async Task AReplicaThatOnlyReadsATransfer_DoesNotEndItForTheSilenceThatFollows()
     {
         // A replica that refuses a misrouted request, or checks whether the hub still holds a transfer,
@@ -207,6 +241,43 @@ public class TransferManagerTests
         }
 
         public Task RetireAsync(string transferId) => inner.RetireAsync(transferId);
+    }
+
+    /// <summary>The in-memory store, with session writes the test can refuse or hold.</summary>
+    private sealed class ControlledStateStore : IStateStore
+    {
+        private readonly InMemoryStateStore _inner = new();
+        private TaskCompletionSource? _heldDeletions;
+
+        public bool RefuseSessions { get; init; }
+
+        public TaskCompletionSource DeletionStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Holds every session deletion until the returned source is completed.</summary>
+        public TaskCompletionSource HoldDeletions() =>
+            _heldDeletions = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task SaveSessionAsync(TransferSession session) => RefuseSessions
+            ? Task.FromException(new InvalidOperationException("The store is unavailable."))
+            : _inner.SaveSessionAsync(session);
+
+        public async Task DeleteSessionAsync(string transferId)
+        {
+            DeletionStarted.TrySetResult();
+            if (_heldDeletions != null) await _heldDeletions.Task;
+            await _inner.DeleteSessionAsync(transferId);
+        }
+
+        public Task<TransferSession?> GetSessionAsync(string transferId) => _inner.GetSessionAsync(transferId);
+        public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry) => _inner.ExtendSessionExpiryAsync(transferId, newExpiry);
+        public Task SaveClientAsync(ClientRegistration client) => _inner.SaveClientAsync(client);
+        public Task<ClientRegistration?> RenewClientAsync(Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry) =>
+            _inner.RenewClientAsync(clientId, expectedSubject, groups, tokenExpiry);
+        public Task<ClientRegistration?> GetClientAsync(Guid clientId) => _inner.GetClientAsync(clientId);
+        public Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId) => _inner.GetClientByConnectionIdAsync(connectionId);
+        public Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync() => _inner.GetAllClientsAsync();
+        public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc) => _inner.MarkDisconnectedAsync(connectionId, whenUtc);
+        public Task DeleteClientAsync(Guid clientId) => _inner.DeleteClientAsync(clientId);
     }
 
     private sealed class SilentNotifier : ITransferNotifier

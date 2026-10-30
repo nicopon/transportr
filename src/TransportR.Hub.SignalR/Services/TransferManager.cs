@@ -14,6 +14,7 @@ internal class TransferManager : ITransferManager
     private readonly ConcurrentDictionary<string, TransferState> _transfers = new();
     private readonly ConcurrentDictionary<string, TransferParticipants> _participants = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastHeartbeat = new();
+    private readonly ConcurrentDictionary<string, byte> _removing = new();
     private readonly IStateStore _stateStore;
     private readonly TimeProvider _time;
     private readonly TimeSpan _sessionTtl = TimeSpan.FromMinutes(5);
@@ -29,16 +30,18 @@ internal class TransferManager : ITransferManager
 
     public async Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId)
     {
+        // Saved first: a session the store refuses fails the handshake before anyone has heard of the
+        // transfer, and must leave no state behind for the inactivity sweep to cancel with both clients.
+        var now = Now;
+        var session = new TransferSession(transferId, senderId, receiverId, now, now.Add(_sessionTtl));
+        await _stateStore.SaveSessionAsync(session).ConfigureAwait(false);
+
         _participants[transferId] = new TransferParticipants(senderId, receiverId);
 
         // Known to the inactivity sweep from the start. The first statistics report comes a heartbeat
         // after the transfer starts, and one that ends or dies sooner would otherwise have no state
         // for the sweep to find.
         _transfers[transferId] = new TransferState(transferId, _time);
-        
-        var now = Now;
-        var session = new TransferSession(transferId, senderId, receiverId, now, now.Add(_sessionTtl));
-        await _stateStore.SaveSessionAsync(session).ConfigureAwait(false);
     }
 
     public async Task<TransferParticipants?> GetParticipantsAsync(string transferId)
@@ -60,13 +63,23 @@ internal class TransferManager : ITransferManager
         }
 
         var session = await _stateStore.GetSessionAsync(transferId).ConfigureAwait(false);
-        if (session == null)
+        if (session == null || _removing.ContainsKey(transferId))
         {
             return null;
         }
 
         _participants.TryAdd(transferId, new TransferParticipants(session.SenderId, session.ReceiverId));
-        return _transfers.GetOrAdd(transferId, id => new TransferState(id, _time));
+        var tracked = _transfers.GetOrAdd(transferId, id => new TransferState(id, _time));
+
+        // A removal that started after the check above has already cleared the entries just added.
+        if (_removing.ContainsKey(transferId))
+        {
+            _transfers.TryRemove(new KeyValuePair<string, TransferState>(transferId, tracked));
+            _participants.TryRemove(transferId, out _);
+            return null;
+        }
+
+        return tracked;
     }
 
     public async Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived)
@@ -110,10 +123,20 @@ internal class TransferManager : ITransferManager
     // that failed leave by the same door.
     public async Task RemoveTransferAsync(string transferId)
     {
-        _transfers.TryRemove(transferId, out _);
-        _participants.TryRemove(transferId, out _);
-        _lastHeartbeat.TryRemove(transferId, out _);
-        await _stateStore.DeleteSessionAsync(transferId).ConfigureAwait(false);
+        // Until the store has deleted the shared session, a stream reopening here would find it there
+        // and bring the transfer back on this instance.
+        _removing[transferId] = 0;
+        try
+        {
+            _transfers.TryRemove(transferId, out _);
+            _participants.TryRemove(transferId, out _);
+            _lastHeartbeat.TryRemove(transferId, out _);
+            await _stateStore.DeleteSessionAsync(transferId).ConfigureAwait(false);
+        }
+        finally
+        {
+            _removing.TryRemove(transferId, out _);
+        }
     }
 
     public IEnumerable<TransferState> GetAllTransfers()
