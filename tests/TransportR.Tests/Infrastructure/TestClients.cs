@@ -14,7 +14,7 @@ namespace TransportR.Tests.Infrastructure;
 /// not let a test choose: the handler that carries it (a <c>TestServer</c> one, or the network) and
 /// the options of its HTTP connection (the SignalR transport).
 /// </summary>
-public static class TestClients
+internal static class TestClients
 {
     public static SignalRDataClient<string> Create(
         HttpMessageHandler? handler,

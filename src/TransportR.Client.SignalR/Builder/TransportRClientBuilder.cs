@@ -70,7 +70,7 @@ public class TransportRClientBuilder<T>
     /// This is the only backpressure path from the receiver back to the producer. Left unset, a
     /// slow receiver makes the sender hold the whole source in memory: TCP throttles the HTTP
     /// write, but nothing upstream of it. The window counts batches, so it bounds roughly
-    /// <c>max × batch size</c> — see <see cref="ClientOptions.MaxInFlightBatches"/> for sizing.
+    /// <c>max × batch size</c> — see "Backpressure" in <c>ResilienceArchitecture.md</c> for sizing.
     /// </remarks>
     public TransportRClientBuilder<T> WithMaxInFlightBatches(int max)
     {

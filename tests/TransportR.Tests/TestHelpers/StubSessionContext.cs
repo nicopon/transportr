@@ -8,7 +8,7 @@ using TransportR.Client.SignalR.Configuration;
 
 namespace TransportR.Tests.TestHelpers;
 
-public class StubSessionContext : ISessionContext<string>
+internal class StubSessionContext: ISessionContext<string>
 {
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; }

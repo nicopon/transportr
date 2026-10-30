@@ -1,9 +1,10 @@
 namespace TransportR.Client.SignalR.Configuration;
 
 /// <summary>
-/// Configuration options for TransportR client.
+/// What a client runs with, assembled by <c>TransportRClientBuilder.Build</c>. Only the builder's
+/// own settings reach it; the timings and the buffer size are fixed.
 /// </summary>
-public class ClientOptions
+internal class ClientOptions
 {
     /// <summary>
     /// Timeout for Pong response during reconnection. Default: 10 seconds.
