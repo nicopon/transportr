@@ -7,6 +7,9 @@ namespace TransportR.Serialization.Protobuf.Services;
 /// <summary>
 /// Serializes batches using Protocol Buffers and compresses them with Zstd.
 /// </summary>
+/// <remarks>
+/// A body that ends early or does not decode throws, and the transfer fails on both ends.
+/// </remarks>
 public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly int _compressionLevel;
@@ -30,17 +33,10 @@ public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
 
     public async Task<List<T>?> DeserializeBatchAsync(Stream source)
     {
-        try 
-        {
-            // Wrap the source stream with ZstdDecompressionStream
-            // 'leaveOpen: true' to keep the source stream open for the next batch
-            using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
+        // Wrap the source stream with ZstdDecompressionStream
+        // 'leaveOpen: true' to keep the source stream open for the next batch
+        using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
 
-            return await Task.Run(() => Serializer.Deserialize<List<T>>(decompressionStream));
-        }
-        catch (EndOfStreamException)
-        {
-            return null;
-        }
+        return await Task.Run(() => Serializer.Deserialize<List<T>>(decompressionStream));
     }
 }
