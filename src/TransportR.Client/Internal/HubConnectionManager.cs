@@ -207,8 +207,6 @@ internal class HubConnectionManager : IAsyncDisposable
                  delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 5000));
              }
          }
-         // Last attempt
-         await _hubConnection.StartAsync(cancellationToken);
     }
 
     public async Task HandleAffinityRedirectAsync(string cookieName, string affinityToken, Func<Task> reconnectAction)
