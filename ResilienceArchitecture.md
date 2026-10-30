@@ -46,8 +46,8 @@ route from the builder, and a hub value is set on the options class named in the
 | hub | Bridge sweep (`BridgeCleanupService.cs:22`) | 5 s | **fixed** | Interval between two `BridgeTimeoutSeconds` checks |
 | hub | Bridge sweep error pause (`BridgeCleanupService.cs:56`) | 10 s | **fixed** | Pause after a failed sweep |
 | hub | Transfer sweep (`TransferCleanupService.cs:22`) | 10 s | **fixed** | Interval between two inactivity and stalled-progress checks |
-| hub | Session TTL (`TransferManager.cs:19`) | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats |
-| hub | Session extension (`TransferManager.cs:20`) | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
+| hub | Session TTL (`TransferManager.cs:20`) | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats and by the bytes of its streams |
+| hub | Session extension (`TransferManager.cs:21`) | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
 | hub | `DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose connection dropped is kept |
 | hub | `ConnectedTtlSeconds` | 3600 s | `ClientRegistryConfiguration` | A connected registration the hub has not heard from at all (stores with server-side expiry) |
 | hub | `AccessSweepIntervalSeconds` | 5 s | `AccessOptions` | Interval between two passes that judge every registered client again |

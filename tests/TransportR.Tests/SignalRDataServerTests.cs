@@ -63,6 +63,28 @@ public class SignalRDataServerTests
         Assert.Equal([TransferId], hub.Terminator.Retired);
     }
 
+    [Theory]
+    [InlineData(ConnectionType.Data)]
+    [InlineData(ConnectionType.Control)]
+    public async Task BytesOnAStream_KeepTheTransferAlive(ConnectionType type)
+    {
+        // A heartbeat reaches only the instance its client's SignalR connection lives on, which need not
+        // carry the streams; the shared session a replica takes the transfer over from is renewed here.
+        var hub = new Harness();
+        var bridge = hub.BridgeFor(type);
+        _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());
+
+        using var input = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, type, input, CancellationToken.None);
+        await UntilAsync(() => bridge.State == BridgeState.Active);
+
+        input.Push(new byte[64]);
+        await UntilAsync(() => hub.Transfers.KeepAlives > 0);
+
+        input.End();
+        await EndsAsync(send);
+    }
+
     [Fact]
     public async Task SendEndingCleanly_OnTheControlStream_RetiresNothing()
     {
@@ -570,7 +592,15 @@ public class SignalRDataServerTests
         public Task RemoveTransferAsync(string transferId) => throw new NotSupportedException();
         public IEnumerable<TransferState> GetAllTransfers() => throw new NotSupportedException();
         public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants() => throw new NotSupportedException();
-        public Task KeepAliveAsync(string transferId) => throw new NotSupportedException();
+        private int _keepAlives;
+
+        public int KeepAlives => Volatile.Read(ref _keepAlives);
+
+        public Task KeepAliveAsync(string transferId)
+        {
+            Interlocked.Increment(ref _keepAlives);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FailingServer(Exception failure) : ITransportRServer

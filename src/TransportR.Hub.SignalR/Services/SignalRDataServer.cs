@@ -79,10 +79,10 @@ internal class SignalRDataServer : ITransportRServer
             var inputToCopy = type == ConnectionType.Data
                 ? new CountingStream(input, bytes =>
                 {
-                    transfer.Touch();
+                    KeepAlive(transferId);
                     _progressMonitor.OnBytesTransferred(bytes);
                 })
-                : new CountingStream(input, _ => transfer.Touch());
+                : new CountingStream(input, _ => KeepAlive(transferId));
 
             // The bridge does not reach across to the source when its destination leaves; a source
             // parked on an input that stays silent learns of it only through this token.
@@ -257,6 +257,26 @@ internal class SignalRDataServer : ITransportRServer
         catch (Exception)
         {
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the transfer's activity and renews its shared session, as a heartbeat does: a
+    /// heartbeat reaches only the instance its client's SignalR connection lives on, which need not
+    /// carry the streams. Called on every read, so it never waits on the store, and a store that fails
+    /// costs a log line rather than the stream.
+    /// </summary>
+    private void KeepAlive(string transferId) => _ = KeepAliveAsync(transferId);
+
+    private async Task KeepAliveAsync(string transferId)
+    {
+        try
+        {
+            await _transferManager.KeepAliveAsync(transferId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("BRIDGE: Could not renew the session of {TransferId}: {Message}", transferId, ex.Message);
         }
     }
 
