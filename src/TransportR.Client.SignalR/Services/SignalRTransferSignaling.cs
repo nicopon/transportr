@@ -64,13 +64,6 @@ internal class SignalRTransferSignaling<T>
             return await HandleGetReadyToReceive(transferId, senderId);
         });
 
-        // Handler for GetReadyToSend
-        connection.On<string, int, Guid, bool>(nameof(ICommandClient.GetReadyToSend), async (transferId, size, receiverId) =>
-        {
-            _logger.LogInformation("Client: Received GetReadyToSend request for Transfer={TransferId} to ReceiverId={ReceiverId}", transferId, receiverId);
-            return await HandleGetReadyToSend(transferId, size, receiverId);
-        });
-
         connection.On<string, int, Guid, bool>(nameof(ICommandClient.RequestSend), async (transferId, size, receiverId) =>
         {
             _logger.LogInformation("Client: Received RequestSend request for Transfer={TransferId} to ReceiverId={ReceiverId}", transferId, receiverId);
@@ -140,31 +133,11 @@ internal class SignalRTransferSignaling<T>
         return true;
     }
 
-    private async Task<bool> HandleGetReadyToSend(string transferId, int size, Guid receiverId)
-    {
-        await StartSendSessionAsync(transferId, size, receiverId);
-        return true;
-    }
-
     /// <summary>
-    /// The send session of a transfer this client asked for, once the hub has returned its id.
+    /// The send session of a transfer this client asked for, started from the id the hub returned
+    /// from <c>InitTransfer</c>: the hub never calls the sender back during the handshake.
     /// </summary>
-    /// <remarks>
-    /// A hub that readies the sender itself, through <see cref="ICommandClient.GetReadyToSend"/>,
-    /// does so before it answers <c>InitTransfer</c>, and the session exists by then. A hub that does
-    /// not call the sender back answers first, and the session is started here.
-    /// </remarks>
-    public async Task<IDataSession<T>> GetOrStartRequestedSendAsync(string transferId, int size, Guid receiverId)
-    {
-        if (_sessionRegistry.TryGetSession(transferId, out var existing) && existing != null)
-        {
-            return existing;
-        }
-
-        return await StartSendSessionAsync(transferId, size, receiverId);
-    }
-
-    private async Task<IDataSession<T>> StartSendSessionAsync(string transferId, int size, Guid receiverId)
+    public async Task<IDataSession<T>> StartRequestedSendAsync(string transferId, int size, Guid receiverId)
     {
         _logger.LogDebug("Starting send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
         

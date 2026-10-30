@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TransportR.Configuration;
@@ -15,7 +14,6 @@ namespace TransportR.Storage.Redis;
 public class RedisStateStore : IStateStore
 {
     private readonly IConnectionMultiplexer _redis;
-    private readonly ILogger<RedisStateStore> _logger;
     private readonly IDatabase _db;
 
     // Keys and TTLs
@@ -34,13 +32,11 @@ public class RedisStateStore : IStateStore
 
     public RedisStateStore(
         IConnectionMultiplexer redis,
-        ILogger<RedisStateStore> logger,
         IOptions<ClientRegistryConfiguration>? config = null,
         TimeProvider? timeProvider = null)
     {
         _time = timeProvider ?? TimeProvider.System;
         _redis = redis;
-        _logger = logger;
         _db = _redis.GetDatabase();
 
         var settings = config?.Value ?? new ClientRegistryConfiguration();

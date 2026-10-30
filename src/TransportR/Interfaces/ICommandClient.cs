@@ -18,22 +18,6 @@ public interface ICommandClient
     Task<bool> GetReadyToReceive(string transferId, Guid senderId);
 
     /// <summary>
-    /// Called by a hub that readies the sender of a transfer the sender asked for, once the receiver
-    /// is ready.
-    /// </summary>
-    /// <remarks>
-    /// <c>TransportR.Hub.SignalR</c> does not call it: the hub runs one invocation at a time per
-    /// client, so the answer would queue behind anything else the sender invoked during its own
-    /// <see cref="ICommandHub.InitTransfer"/>. The sender starts its session from the id that
-    /// <see cref="ICommandHub.InitTransfer"/> returns instead.
-    /// </remarks>
-    /// <param name="transferId">The unique transfer identifier.</param>
-    /// <param name="batchSize">The negotiated batch size for this transfer.</param>
-    /// <param name="receiverId">The ID of the receiving client.</param>
-    /// <returns>True if the sender is ready; false to abort the transfer.</returns>
-    Task<bool> GetReadyToSend(string transferId, int batchSize, Guid receiverId);
-
-    /// <summary>
     /// Called by the hub, once the receiver is ready, when the application hosting it opens a
     /// transfer from this client, which did not ask for it.
     /// </summary>

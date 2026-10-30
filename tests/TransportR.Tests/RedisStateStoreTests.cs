@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using StackExchange.Redis;
@@ -17,7 +16,6 @@ public class RedisStateStoreTests : IAsyncLifetime
     private RedisServer _redis = null!;
     private RedisStateStore _store = null!;
     private IConnectionMultiplexer _multiplexer = null!;
-    private readonly ILogger<RedisStateStore> _logger = new LoggerFactory().CreateLogger<RedisStateStore>();
 
     public async Task InitializeAsync()
     {
@@ -33,7 +31,7 @@ public class RedisStateStoreTests : IAsyncLifetime
             throw;
         }
 
-        _store = new RedisStateStore(_multiplexer, _logger);
+        _store = new RedisStateStore(_multiplexer);
     }
 
     // A container answers from the inside before the port it publishes on the host does, and a
@@ -313,7 +311,7 @@ public class RedisStateStoreTests : IAsyncLifetime
     // ---- Registration lifetime ----
 
     private RedisStateStore StoreWith(int connectedTtlSeconds, int graceSeconds) =>
-        new(_multiplexer, _logger, Options.Create(new ClientRegistryConfiguration
+        new(_multiplexer, Options.Create(new ClientRegistryConfiguration
         {
             ConnectedTtlSeconds = connectedTtlSeconds,
             DisconnectedGraceSeconds = graceSeconds

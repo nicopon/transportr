@@ -1,7 +1,5 @@
 using TransportR.Interfaces;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
-using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Streams;
 using TransportR.Models;
 using System.Buffers;
@@ -13,7 +11,6 @@ internal class SignalRDataServer : ITransportRServer
     private const string DestinationLostMessage = "The destination of the stream is no longer connected.";
 
     private readonly ILogger<SignalRDataServer> _logger;
-    private readonly IHubContext<CommandHub> _hubContext;
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly IBridgeManager _bridgeManager;
@@ -22,14 +19,12 @@ internal class SignalRDataServer : ITransportRServer
     public SignalRDataServer(
         ILogger<SignalRDataServer> logger, 
         IHubProgressMonitor progressMonitor,
-        IHubContext<CommandHub> hubContext,
         ITransferManager transferManager,
         IBridgeManager bridgeManager,
         ITransferTerminator terminator)
     {
         _logger = logger;
         _progressMonitor = progressMonitor;
-        _hubContext = hubContext;
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
         _terminator = terminator;

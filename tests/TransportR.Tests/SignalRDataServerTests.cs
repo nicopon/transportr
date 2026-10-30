@@ -2,11 +2,9 @@ using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Hub.SignalR.Controllers;
-using TransportR.Hub.SignalR.Hubs;
 using TransportR.Hub.SignalR.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -38,7 +36,6 @@ public class SignalRDataServerTests
             Server = new SignalRDataServer(
                 Logs.Factory.CreateLogger<SignalRDataServer>(),
                 new IgnoredProgress(),
-                new UnusedHubContext(),
                 Transfers,
                 Bridges,
                 Terminator);
@@ -552,12 +549,6 @@ public class SignalRDataServerTests
             Retired.Add(transferId);
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class UnusedHubContext : IHubContext<CommandHub>
-    {
-        public IHubClients Clients => throw new NotSupportedException();
-        public IGroupManager Groups => throw new NotSupportedException();
     }
 
     private sealed class KnownTransfer : ITransferManager

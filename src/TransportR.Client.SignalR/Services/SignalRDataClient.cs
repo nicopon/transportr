@@ -338,7 +338,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         {
             var transferId = await _connectionManager.Connection.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), targetClientId, size, HandshakeTimeoutMs);
 
-            return new HttpSend<T>(await _signaling.GetOrStartRequestedSendAsync(transferId, size, targetClientId));
+            return new HttpSend<T>(await _signaling.StartRequestedSendAsync(transferId, size, targetClientId));
         }
         catch (Exception ex) when (ex.Message.Contains("AFFINITY_REDIRECT:"))
         {
