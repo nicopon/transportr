@@ -19,8 +19,8 @@ public class HubConnectionManagerTests
         manager.Initialize(_ => calls.Add("transportr"));
 
         // A single field, overwritten by whichever call came last, is exactly the bug this
-        // guards: the application's own hook onto UseHub<THub>() and TransportR's handshake
-        // registration (SignalRTransferSignaling) both have to end up on the connection.
+        // guards: the application's own registration and TransportR's handshake registration
+        // (SignalRTransferSignaling) both have to end up on the connection.
         Assert.Equal(["app", "transportr"], calls);
     }
 

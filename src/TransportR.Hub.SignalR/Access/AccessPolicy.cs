@@ -20,7 +20,10 @@ internal enum AccessVerdict
     NotAuthorized,
 
     /// <summary>Two identities that had to be the same are not.</summary>
-    WrongSubject
+    WrongSubject,
+
+    /// <summary>The hub reserves opening transfers to its host.</summary>
+    HostOnly
 }
 
 /// <summary>
@@ -36,11 +39,13 @@ internal sealed class AccessPolicy
 {
     private readonly IFlowControlService? _flowControl;
     private readonly TimeSpan _margin;
+    private readonly bool _clientsMayOpenTransfers;
     private readonly TimeProvider _time;
 
     public AccessPolicy(IOptions<AccessOptions> options, TimeProvider timeProvider, IFlowControlService? flowControlService = null)
     {
         _margin = TimeSpan.FromSeconds(options.Value.TokenExpiryMarginSeconds);
+        _clientsMayOpenTransfers = options.Value.ClientsMayOpenTransfers;
         _time = timeProvider;
         _flowControl = flowControlService;
     }
@@ -75,6 +80,13 @@ internal sealed class AccessPolicy
             ? AccessVerdict.Allowed
             : AccessVerdict.NotAuthorized;
     }
+
+    /// <summary>
+    /// Whether a client may look for receivers and open a transfer itself. The host's
+    /// <see cref="ITransferInitiator"/> is not judged here: it opens transfers either way.
+    /// </summary>
+    public AccessVerdict MayClientOpenTransfers() =>
+        _clientsMayOpenTransfers ? AccessVerdict.Allowed : AccessVerdict.HostOnly;
 
     /// <summary>
     /// Strict equality of the subjects the IdP attested. A registration with no subject is not

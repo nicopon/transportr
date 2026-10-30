@@ -1,3 +1,4 @@
+using TransportR.Abstractions;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Hub.SignalR.Access;
@@ -13,7 +14,11 @@ namespace TransportR.Hub.SignalR.Hubs;
 /// <summary>
 /// SignalR hub for orchestrating data transfers between clients.
 /// </summary>
-public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
+/// <remarks>
+/// Not sealed so that the tests can derive a hub that probes the connection; nothing outside this
+/// assembly and its tests can.
+/// </remarks>
+internal class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 {
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
@@ -139,6 +144,8 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
     public async Task<List<ClientInfo>> GetReceivers()
     {
+        RefuseIfOnlyTheHostOpensTransfers(nameof(GetReceivers));
+
         var sourceClient = await GetClientByConnectionAsync(Context.ConnectionId);
         
         if (sourceClient == null)
@@ -170,6 +177,8 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
 
     public async Task<string> InitTransfer(Guid targetClientId, int batchSize, int timeoutMs)
     {
+        RefuseIfOnlyTheHostOpensTransfers(nameof(InitTransfer));
+
         var targetClient = await _stateStore.GetClientAsync(targetClientId);
         if (targetClient == null)
         {
@@ -180,14 +189,32 @@ public class CommandHub : Microsoft.AspNetCore.SignalR.Hub, ICommandHub
         var sourceClient = await GetClientByConnectionAsync(Context.ConnectionId);
         if (sourceClient == null) throw new HubException("Source client not found.");
 
-        // Step 1: Validate tokens and flow control
-        _initiator.ValidateTransferRequest(sourceClient, targetClient);
+        try
+        {
+            // Step 1: Validate tokens and flow control
+            _initiator.ValidateTransferRequest(sourceClient, targetClient);
 
-        // Step 2: Check affinity for HA deployment
-        CheckAffinityRedirect(targetClient);
+            // Step 2: Check affinity for HA deployment
+            CheckAffinityRedirect(targetClient);
 
-        // Step 3: Execute handshake
-        return await _initiator.HandshakeAsync(sourceClient, targetClient, batchSize, timeoutMs, requestSender: false);
+            // Step 3: Execute handshake
+            return await _initiator.HandshakeAsync(sourceClient, targetClient, batchSize, timeoutMs, requestSender: false);
+        }
+        catch (HubRequestFailedException ex)
+        {
+            // SignalR hands a calling client the message of a HubException and of nothing else.
+            throw new HubException(ex.Message, ex);
+        }
+    }
+
+    private void RefuseIfOnlyTheHostOpensTransfers(string method)
+    {
+        // An error rather than an empty list: a caller that finds nobody fails, but for another reason.
+        if (_policy.MayClientOpenTransfers() == AccessVerdict.Allowed) return;
+
+        _logger.LogWarning("{Method} refused for connection {ConnectionId}: only the host opens transfers",
+            method, Context.ConnectionId);
+        throw new HubException("Clients may not open transfers on this hub.");
     }
 
     private void CheckAffinityRedirect(ClientRegistration targetClient)

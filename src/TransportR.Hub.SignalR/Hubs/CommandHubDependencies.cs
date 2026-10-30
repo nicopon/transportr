@@ -9,10 +9,9 @@ namespace TransportR.Hub.SignalR.Hubs;
 
 /// <summary>
 /// What <see cref="CommandHub"/> takes from the host's container. A hub derived from it passes the
-/// instance to <c>base</c> without opening it; what it carries is not an API, and can grow without
-/// breaking such a hub.
+/// instance to <c>base</c> without opening it, so it can grow without breaking such a hub.
 /// </summary>
-public sealed class CommandHubDependencies
+internal sealed class CommandHubDependencies
 {
     internal IStateStore StateStore { get; }
     internal ITransferManager TransferManager { get; }

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using TransportR.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.SignalR.Access;
@@ -16,7 +17,8 @@ namespace TransportR.Hub.SignalR.Services;
 /// <remarks>
 /// One implementation for both, so that authorization, the order in which the two clients are
 /// readied and the cleanup of a handshake that fails halfway cannot drift apart. Every failure is a
-/// <see cref="HubException"/>, whose message SignalR forwards to a calling client.
+/// <see cref="HubRequestFailedException"/>, whose message <see cref="CommandHub"/> forwards to a
+/// calling client.
 /// </remarks>
 internal class SignalRTransferInitiator : ITransferInitiator
 {
@@ -62,14 +64,14 @@ internal class SignalRTransferInitiator : ITransferInitiator
         if (sender == null)
         {
             _logger.LogWarning("InitTransfer by host failed: Source {SourceClientId} not found.", senderClientId);
-            throw new HubException($"Source client {senderClientId} not found.");
+            throw new HubRequestFailedException($"Source client {senderClientId} not found.");
         }
 
         var receiver = await _stateStore.GetClientAsync(receiverClientId);
         if (receiver == null)
         {
             _logger.LogWarning("InitTransfer by host failed: Target {TargetClientId} not found.", receiverClientId);
-            throw new HubException($"Target client {receiverClientId} not found.");
+            throw new HubRequestFailedException($"Target client {receiverClientId} not found.");
         }
 
         ValidateTransferRequest(sender, receiver);
@@ -83,7 +85,7 @@ internal class SignalRTransferInitiator : ITransferInitiator
         {
             _logger.LogWarning("InitTransfer by host denied: Source {SourceClientId} on {SourceAffinity}, Target {TargetClientId} on {TargetAffinity}",
                 sender.ClientId, sender.AffinityToken, receiver.ClientId, receiver.AffinityToken);
-            throw new HubException("Source and target clients are connected to different hub instances.");
+            throw new HubRequestFailedException("Source and target clients are connected to different hub instances.");
         }
 
         return await HandshakeAsync(sender, receiver, batchSize, timeoutMs, requestSender: true, cancellationToken);
@@ -107,7 +109,7 @@ internal class SignalRTransferInitiator : ITransferInitiator
             verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups),
             targetClient.ClientId, string.Join(", ", targetClient.Groups));
 
-        throw new HubException(verdict switch
+        throw new HubRequestFailedException(verdict switch
         {
             AccessVerdict.TokenExpired when sourceAtFault => "Source client token has expired. Please reconnect with a fresh token.",
             AccessVerdict.TokenExpired => "Target client token has expired.",
@@ -157,20 +159,20 @@ internal class SignalRTransferInitiator : ITransferInitiator
             {
                 // The usual cause is a registration that outlived its process: the client is still
                 // in the state store, but SignalR has no such connection any more. Left untranslated
-                // this escapes as a non-HubException and reaches the caller as "An unexpected error
-                // occurred invoking 'InitTransfer'", which says nothing and costs an hour to chase.
+                // this reaches a calling client as "An unexpected error occurred invoking
+                // 'InitTransfer'", which says nothing and costs an hour to chase.
                 // Detail stays in the hub log; the client gets something it can act on.
                 _logger.LogWarning(ex, "Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}. Registration is likely stale.",
                     receiver.ClientId, receiver.ConnectionId, transferId);
                 await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubException($"Target client {receiver.ClientId} is not reachable.");
+                throw new HubRequestFailedException($"Target client {receiver.ClientId} is not reachable.");
             }
 
             if (!receiverReady)
             {
                 _logger.LogWarning("Receiver {TargetClientId} refused {TransferId}.", receiver.ClientId, transferId);
                 await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubException($"Target client {receiver.ClientId} refused the transfer.");
+                throw new HubRequestFailedException($"Target client {receiver.ClientId} refused the transfer.");
             }
 
             if (!requestSender)
@@ -188,7 +190,7 @@ internal class SignalRTransferInitiator : ITransferInitiator
             {
                 _logger.LogWarning(ex, "Sender failed to ready for {TransferId}. Cancelling Receiver.", transferId);
                 await AbandonAsync(transferId, receiver);
-                throw new HubException("Source client failed to prepare for the transfer.");
+                throw new HubRequestFailedException("Source client failed to prepare for the transfer.");
             }
 
             if (!senderReady)
@@ -196,7 +198,7 @@ internal class SignalRTransferInitiator : ITransferInitiator
                 _logger.LogWarning("Sender {SourceClientId} refused {TransferId}. Cancelling Receiver.",
                     sender.ClientId, transferId);
                 await AbandonAsync(transferId, receiver);
-                throw new HubException("Source client refused the transfer.");
+                throw new HubRequestFailedException("Source client refused the transfer.");
             }
         }
         catch (OperationCanceledException)
@@ -205,7 +207,7 @@ internal class SignalRTransferInitiator : ITransferInitiator
             if (cancellationToken.IsCancellationRequested) throw;
 
             _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
-            throw new HubException($"Handshake timed out after {timeoutMs}ms");
+            throw new HubRequestFailedException($"Handshake timed out after {timeoutMs}ms");
         }
 
         return transferId;

@@ -61,26 +61,18 @@ public class DataHubBuilder
     
     /// <summary>
     /// Registers <typeparamref name="THub"/> in place of <see cref="CommandHub"/> as the single hub
-    /// this connection carries. <see cref="MapDataHub"/> maps whichever hub was registered here -
-    /// last call wins, the same as any other singleton registration - so a host cannot register one
-    /// hub and map another.
+    /// this connection carries, for a test that probes the connection from the hub's side.
+    /// <see cref="TransportRHubExtensions.MapDataHub"/> maps whichever hub was registered here - last
+    /// call wins - so a test cannot register one hub and map another.
     /// </summary>
     /// <remarks>
-    /// <para>
     /// TransportR's own services resolve <see cref="IHubContext{CommandHub}"/>
     /// (<c>SignalRTransferInitiator</c>, <c>SignalRTransferNotifier</c>); redirecting that
     /// resolution to <typeparamref name="THub"/>'s own context - valid because
-    /// <see cref="IHubContext{THub}"/> is covariant in <c>THub</c> - is what puts the host's own
-    /// hub methods and TransportR's handshake on the one connection a client has, instead of a
-    /// second hub the client would have to connect to as well.
-    /// </para>
-    /// <para>
-    /// The connection extended this way carries the host's coordination of its own clients.
-    /// TransportR adds no routing or broadcast to it: groups and fan-out written there are the
-    /// host's code, and a transfer still has one sender and one receiver.
-    /// </para>
+    /// <see cref="IHubContext{THub}"/> is covariant in <c>THub</c> - keeps the handshake on the
+    /// connection the derived hub carries.
     /// </remarks>
-    public DataHubBuilder UseHub<THub>() where THub : CommandHub
+    internal DataHubBuilder UseHub<THub>() where THub : CommandHub
     {
         Services.AddSingleton(new DataHubTypeMarker(typeof(THub), (endpoints, pattern) => endpoints.MapHub<THub>(pattern)));
         Services.AddSingleton<IHubContext<CommandHub>>(sp => sp.GetRequiredService<IHubContext<THub>>());

@@ -14,6 +14,7 @@ using TransportR.Client.SignalR.Configuration;
 using TransportR.Client.SignalR.Internal;
 using TransportR.Client.SignalR.Services;
 using TransportR.Hub.SignalR;
+using TransportR.Hub.SignalR.Configuration;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 using Xunit.Abstractions;
@@ -783,7 +784,7 @@ public class SignalRIntegrationTests
         await receiver.ConnectAsync();
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        var ex = await Assert.ThrowsAsync<HubException>(
+        var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
 
         Assert.Contains("refused", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -809,11 +810,43 @@ public class SignalRIntegrationTests
         await receiver.ConnectAsync();
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        await Assert.ThrowsAsync<HubException>(
+        await Assert.ThrowsAsync<HubRequestFailedException>(
             () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
 
         Assert.Empty(sender.GetTransfers());
         await AssertEventuallyEmptyAsync(receiver);
+    }
+
+    [Fact]
+    public async Task HostOnly_RefusesAClientThatLooksForReceiversOrOpensATransfer_ButNotTheHost()
+    {
+        using var host = TestHubServerFactory.CreateHost(services =>
+            services.Configure<AccessOptions>(options => options.ClientsMayOpenTransfers = false));
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        // Refused, not served an empty list: a caller that finds nobody fails for another reason.
+        await Assert.ThrowsAsync<HubException>(() => sender.GetReceiversAsync());
+        await Assert.ThrowsAsync<HubException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        Assert.Empty(receiver.GetTransfers());
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+
+        await using var send = await sendHandle.Task;
+        await using var receive = await receiveHandle.Task;
+        Assert.Equal(transferId, send.TransferId);
+        Assert.Equal(transferId, receive.TransferId);
     }
 
     private static async Task AssertEventuallyEmptyAsync(SignalRDataClient<string> client)

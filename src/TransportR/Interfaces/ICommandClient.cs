@@ -7,7 +7,7 @@ namespace TransportR.Interfaces;
 /// <remarks>
 /// These methods are invoked by the hub during transfer orchestration via SignalR.
 /// </remarks>
-public interface ICommandClient
+internal interface ICommandClient
 {
     /// <summary>
     /// Called by the hub to notify a receiver that a transfer is about to start.

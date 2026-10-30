@@ -27,4 +27,11 @@ public class AccessOptions
     /// transfers it runs, against the registrations of the shared store.
     /// </remarks>
     public int AccessSweepIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Whether a client may look for receivers and open a transfer itself. Default: true. When
+    /// false, a client asking for either is refused with an error, and only the host opens
+    /// transfers, through <see cref="Interfaces.ITransferInitiator"/>.
+    /// </summary>
+    public bool ClientsMayOpenTransfers { get; set; } = true;
 }

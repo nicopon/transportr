@@ -6,9 +6,9 @@ namespace TransportR.Interfaces;
 /// </summary>
 /// <remarks>
 /// The transfer goes through the same authorization and handshake as one a sender initiates. The
-/// sender learns of it through <see cref="ICommandClient.RequestSend"/>, whereas a sender that asks
-/// for a transfer is not called back and starts from the id it is returned; the receiver sees an
-/// ordinary <see cref="ICommandClient.GetReadyToReceive"/>.
+/// sender's handle reaches it through <see cref="IDataSender{T}.OnSendRequested"/>, whereas a sender
+/// that asks for a transfer is not called back and starts from the id it is returned; the receiver
+/// sees an ordinary <see cref="IDataReceiver{T}.OnTransferStarted"/>.
 /// </remarks>
 public interface ITransferInitiator
 {
@@ -25,11 +25,11 @@ public interface ITransferInitiator
     /// The transfer identifier, which the handles both clients were given carry as
     /// <c>TransferId</c>. A client receives its handle during the handshake, before this returns.
     /// </returns>
-    /// <remarks>
-    /// Fails when either client is unknown, has an expired token, is not authorized to reach the
-    /// other, is unreachable or refuses, or when the handshake times out. The exception message is
-    /// generic; the detail is in the hub log.
-    /// </remarks>
+    /// <exception cref="Abstractions.HubRequestFailedException">
+    /// Either client is unknown, has an expired token, is not authorized to reach the other, is
+    /// unreachable or refuses, or the handshake times out. The message is generic; the detail is in
+    /// the hub log.
+    /// </exception>
     Task<string> InitTransferAsync(
         Guid senderClientId,
         Guid receiverClientId,

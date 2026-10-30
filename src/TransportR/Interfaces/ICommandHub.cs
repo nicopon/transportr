@@ -9,7 +9,7 @@ namespace TransportR.Interfaces;
 /// This interface defines the SignalR hub methods for client registration,
 /// discovery, transfer orchestration, and heartbeat reporting.
 /// </remarks>
-public interface ICommandHub
+internal interface ICommandHub
 {
     /// <summary>
     /// Registers a client with the hub.
