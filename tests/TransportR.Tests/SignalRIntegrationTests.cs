@@ -155,6 +155,48 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
+    public async Task SenderInitiatedTransfer_Opens_WhenTheSenderInvokesTheHubDuringIt()
+    {
+        // The hub runs one invocation at a time per client, and InitTransfer is one. Anything else the
+        // sender invokes while it is in flight - its presence beat, the statistics of another transfer -
+        // queues behind it. A handshake that called the sender back would wait behind its own queue;
+        // the sender here invokes the hub from inside that callback, so such a handshake stalls every time.
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var receiver = await StartRawClientAsync(handler, connection =>
+            connection.On<string, Guid, bool>(nameof(ICommandClient.GetReadyToReceive), (_, _) => true));
+        await using var sender = await StartRawClientAsync(handler, connection =>
+            connection.On<string, int, Guid, bool>(nameof(ICommandClient.RequestSend), async (_, _, _) =>
+            {
+                await connection.SendAsync(nameof(ICommandHub.Heartbeat));
+                return true;
+            }));
+
+        var receiverId = Guid.NewGuid();
+        await receiver.InvokeAsync(nameof(ICommandHub.Connect), receiverId, new[] { "test" });
+        await sender.InvokeAsync(nameof(ICommandHub.Connect), Guid.NewGuid(), new[] { "test" });
+
+        // A stalled handshake runs out its whole timeout; an unstalled one takes milliseconds.
+        const int handshakeTimeoutMs = 3_000;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var transferId = await sender.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), receiverId, 10, handshakeTimeoutMs);
+
+        Assert.False(string.IsNullOrEmpty(transferId));
+        Assert.True(clock.ElapsedMilliseconds < handshakeTimeoutMs / 2, $"the handshake took {clock.ElapsedMilliseconds} ms");
+    }
+
+    private static async Task<HubConnection> StartRawClientAsync(HttpMessageHandler handler, Action<HubConnection> register)
+    {
+        var connection = new HubConnectionBuilder()
+            .WithUrl(TestHubServerFactory.HubUrl, options => options.HttpMessageHandlerFactory = _ => handler)
+            .Build();
+        register(connection);
+        await connection.StartAsync();
+        return connection;
+    }
+
+    [Fact]
     public async Task Transfer_DeliversEveryItem_WhenTheHostRegisteredNoProgressMonitor()
     {
         using var host = CreateHostWithoutProgressMonitor();
