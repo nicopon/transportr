@@ -177,8 +177,7 @@ internal class SignalRDataServer : ITransportRServer
             // this far (it is a Rupture above), so an IOException is the destination's.
             if (ex is IOException) throw;
 
-            // Note: We do NOT send StreamDisconnected notifications anymore.
-            // Clients are expected to detect IOException and reconnect autonomously.
+            // Nothing tells the client: it learns of the drop from its own stream and reopens it.
         }
     }
 
@@ -238,8 +237,6 @@ internal class SignalRDataServer : ITransportRServer
         {
             _logger.LogWarning("BRIDGE: Sink Disconnected {BridgeKey} ({Message})", bridgeKey, ex.Message);
             bridge.OnDisconnected(connectionId);
-            
-            // Note: We do NOT send StreamDisconnected notifications anymore.
         }
     }
     /// <summary>

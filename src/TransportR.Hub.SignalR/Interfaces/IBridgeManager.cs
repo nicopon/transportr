@@ -13,8 +13,8 @@ internal interface IBridgeManager
     /// </summary>
     /// <remarks>
     /// The format is the only thing tying together the code that creates a bridge, the code that
-    /// looks one up and the code that reaps it, and they live in different assemblies. Composed here
-    /// so that changing it cannot leave one of them behind.
+    /// looks one up and the code that reaps it. Composed here so that changing it cannot leave one of
+    /// them behind.
     /// </remarks>
     static string KeyFor(string transferId, ConnectionType type) => $"{transferId}:{type}";
 

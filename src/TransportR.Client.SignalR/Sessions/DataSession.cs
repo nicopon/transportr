@@ -892,10 +892,9 @@ internal class DataSession<T> : IDataSession<T>
     {
         if (_cts.IsCancellationRequested) return;
 
-        // A per-transfer heartbeat recreates the hub-side TransferState it reports against, so one
-        // that outlives its transfer resurrects a finished transfer every tick — and, behind a
-        // shared state store, renews its expiry forever. Once this session has nothing left to say
-        // about the transfer, it says nothing.
+        // A heartbeat counts as activity at the hub and renews the transfer's shared session. A session
+        // that has stopped, or a receiver that only waits for its acknowledgement to be read, has no
+        // activity left to claim, and claiming it would keep alive a transfer whose peer is gone.
         if (IsStopped || IsInCompletingPhase)
         {
             _heartbeatTimer.Change(Timeout.Infinite, Timeout.Infinite);
