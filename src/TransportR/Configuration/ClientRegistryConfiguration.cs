@@ -20,19 +20,21 @@ public class ClientRegistryConfiguration
 {
     /// <summary>
     /// How long a registration whose connection has dropped is kept before eviction.
-    /// Default: 300 seconds.
+    /// Default: 300 seconds. Zero or less is refused at startup.
     /// </summary>
     /// <remarks>
     /// This is the window in which a reconnecting client can claim its registration back. It
     /// matches <c>DataPlaneConfiguration.BridgeTimeoutSeconds</c> on purpose: there is no
-    /// point keeping a registration alive longer than the transfer it would resume.
+    /// point keeping a registration alive longer than the transfer it would resume. Nothing
+    /// enforces the match.
     /// </remarks>
     public int DisconnectedGraceSeconds { get; set; } = 300;
 
     /// <summary>
     /// How long a connected registration survives without the hub hearing from that client at all.
-    /// Default: 3600 seconds. Applies to stores with server-side expiry (Redis); the in-memory
-    /// store keeps connected registrations for the lifetime of the process.
+    /// Default: 3600 seconds. Zero or less is refused at startup. Applies to stores with
+    /// server-side expiry (Redis); the in-memory store keeps connected registrations for the
+    /// lifetime of the process.
     /// </summary>
     /// <remarks>
     /// This is a backstop for registrations orphaned by a hub that died without running

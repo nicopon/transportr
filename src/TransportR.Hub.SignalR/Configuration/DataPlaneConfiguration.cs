@@ -7,8 +7,9 @@ public class DataPlaneConfiguration
 {
     /// <summary>
     /// Timeout in seconds for inactive bridges waiting for reconnection.
-    /// After this timeout, the bridge is cancelled and CancelTransfer is sent to both parties.
-    /// Default: 300 seconds.
+    /// After this timeout the bridge is cancelled and its transfer ends: the hub drops the
+    /// transfer's state and bridges and tells each participant still registered to cancel.
+    /// Default: 300 seconds. Zero or less is refused at startup.
     /// </summary>
     /// <remarks>
     /// This governs <c>BridgeCleanupService</c> only, and only for bridges that are NOT
@@ -20,13 +21,15 @@ public class DataPlaneConfiguration
 
     /// <summary>
     /// Timeout in seconds before a transfer showing no activity at all is terminated.
-    /// Default: 60 seconds.
+    /// Default: 60 seconds. Zero or less is refused at startup.
     /// </summary>
     /// <remarks>
-    /// Activity means anything that reaches the hub for this transfer: heartbeats, and Ping
-    /// keep-alives during reconnection. A peer that is connected but making no progress keeps
-    /// refreshing this, on purpose — it is what stops a network glitch from killing a healthy
-    /// transfer. Use <see cref="StalledProgressTimeoutSeconds"/> to bound that case as well.
+    /// Activity means anything that reaches the hub for this transfer: heartbeats, Ping
+    /// keep-alives during reconnection, and the bytes that pass on either of its streams, counted
+    /// at the hub and never read (<c>CountingStream</c>). A peer that is connected but making no
+    /// progress keeps refreshing this, on purpose — it is what stops a network glitch from killing
+    /// a healthy transfer. Use <see cref="StalledProgressTimeoutSeconds"/> to bound that case as
+    /// well.
     /// </remarks>
     public int TransferInactivityTimeoutSeconds { get; set; } = 60;
 
@@ -42,9 +45,9 @@ public class DataPlaneConfiguration
     /// </para>
     /// <para>
     /// <b>Opt-in, and deliberately so.</b> No progress is also what a reconnection looks like from
-    /// the hub, so a value at or below <see cref="BridgeTimeoutSeconds"/> will kill transfers that
-    /// would have recovered. Set it comfortably above the longest outage the deployment intends to
-    /// survive; if you cannot name that number, leave it off.
+    /// the hub, so a value at or below <see cref="BridgeTimeoutSeconds"/> would kill transfers that
+    /// would have recovered, and is refused at startup. Set it comfortably above the longest outage
+    /// the deployment intends to survive; if you cannot name that number, leave it off.
     /// </para>
     /// </remarks>
     public int? StalledProgressTimeoutSeconds { get; set; }

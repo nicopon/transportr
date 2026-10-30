@@ -14,15 +14,59 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 
 ## Key Timings
 
-| Component | Delay | Description |
-|-----------|-------|---------|
-| **Reconnect probe** | ≤ 15 s, then 2 s | While `Reconnecting`: up to 10 s for the control connection, 5 s for the hub's SignalR `Pong`; 2 s pause after a failed probe (hard-coded) |
-| **Pong Wait** | 10 s timeout | HTTP stream Ping/Pong Handshake |
-| **SignalR connect backoff** | 500 ms → 4 s | Doubling between 5 attempts, on the initial hub connection only (hard-coded). Restarting a data stream is not backed off. |
-| **SignalR restart backoff** | 1 s → 30 s | After a closed hub connection: exponential with jitter (half to full delay), no limit (hard-coded) |
-| **Bridge Timeout** | 300 s | Hub cancels a non-active bridge waiting for a peer, and ends its transfer (`BridgeTimeoutSeconds`) |
-| **Transfer Inactivity** | 60 s | Hub terminates a transfer gone fully silent (`TransferInactivityTimeoutSeconds`) |
-| **Stalled Progress** | disabled | Opt-in: alive but not advancing (`StalledProgressTimeoutSeconds`) |
+The one table of timings. A value the code keeps in a constant names its `file:line`; a client value that is **fixed** has no
+route from the builder, and a hub value is set on the options class named in the *Settable* column.
+
+| Side | Name | Default | Settable | What it bounds |
+|---|---|---|---|---|
+| client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
+| client | Reconnect probe, control connection (`ReconnectionHandler.cs:33`) | 21 × 500 ms | **fixed** | Wait for the control connection to be `Connected` while `Reconnecting` |
+| client | Reconnect probe, `Pong` (`ReconnectionHandler.cs:45`) | 5 s | **fixed** | Wait for the hub's SignalR `Pong` to the probe's `Ping` |
+| client | Reconnect pause (`DataSession.cs:613`) | 2 s | **fixed** | Pause after a failed probe |
+| client | Closing-phase retry (`DataSession.cs:29`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
+| client | Session loop error pause (`DataSession.cs:640`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
+| client | `Complete` resend (`DataSession.cs:25`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
+| client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
+| client | Abort write (`DataSession.cs:33`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
+| client | Abort request (`DataSession.cs:36`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
+| client | Handshake (`SignalRDataClient.cs:50`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
+| client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat, which only runs while a transfer does |
+| client | `ClientOptions.PresenceHeartbeatInterval` | 60 s | **fixed** | `Heartbeat()`, which keeps the registration alive between transfers |
+| client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write |
+| client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`BatchAccumulator.cs:166`) |
+| client | `ClientOptions.TokenRefreshThreshold` | 5 min | `WithTokenRefreshThreshold` | How long before its expiry a token is renewed, and no more than half of what is left of it |
+| client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
+| client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
+| client | Renewal retry (`TokenRenewer.cs:30-31`) | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
+| client | Connect backoff (`HubConnectionManager.cs:209-224`) | 500 ms → 4 s | **fixed** | Five attempts to open the first hub connection. Restarting a data stream is not backed off |
+| client | Restart backoff (`HubConnectionManager.cs:40-41`) | 1 s → 30 s | **fixed** | After a closed hub connection: doubling, half to full delay, no limit |
+| hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
+| hub | `TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
+| hub | `StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
+| hub | Bridge sweep (`BridgeCleanupService.cs:22`) | 5 s | **fixed** | Interval between two `BridgeTimeoutSeconds` checks |
+| hub | Bridge sweep error pause (`BridgeCleanupService.cs:56`) | 10 s | **fixed** | Pause after a failed sweep |
+| hub | Transfer sweep (`TransferCleanupService.cs:22`) | 10 s | **fixed** | Interval between two inactivity and stalled-progress checks |
+| hub | Session TTL (`TransferManager.cs:19`) | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats |
+| hub | Session extension (`TransferManager.cs:20`) | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
+| hub | `DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose connection dropped is kept |
+| hub | `ConnectedTtlSeconds` | 3600 s | `ClientRegistryConfiguration` | A connected registration the hub has not heard from at all (stores with server-side expiry) |
+| hub | `AccessSweepIntervalSeconds` | 5 s | `AccessOptions` | Interval between two passes that judge every registered client again |
+| hub | `TokenExpiryMarginSeconds` | 0 s | `AccessOptions` | How long a token is still honoured after its `exp` |
+
+### Cross-process invariants
+
+- `StalledProgressTimeoutSeconds`, when set, is greater than `BridgeTimeoutSeconds`: a reconnection looks like a stall from the hub. Refused when the
+  hub starts (`AddDataHub`).
+- `DisconnectedGraceSeconds` equals `BridgeTimeoutSeconds` (300 s) on purpose: a registration is not kept longer than the transfer it would resume.
+  Nothing checks it (`ClientRegistryConfiguration`).
+- The per-transfer heartbeat (1 s, fixed) is far below `TransferInactivityTimeoutSeconds` (60 s) (`ClientOptions.HeartbeatInterval`). The hub
+  checks only that its own value is positive.
+- The presence heartbeat (60 s, fixed) is below `ConnectedTtlSeconds` (3600 s), which it refreshes (`ClientOptions.PresenceHeartbeatInterval`).
+  The hub checks only that its own value is positive.
+- The completion stall bound (60 s, fixed) equals the default `TransferInactivityTimeoutSeconds`, because the hub has ended the transfer by then
+  (`ClientOptions.CompleteStallTimeout`). It holds at the defaults only.
+- A client renews `min(TokenRefreshThreshold, half of what is left)` before its token's expiry (`TokenRenewer.Advance`); the hub closes it at most
+  `AccessSweepIntervalSeconds` after the expiry plus `TokenExpiryMarginSeconds` (`AccessOptions`). Nothing compares the two.
 
 ---
 
@@ -175,7 +219,7 @@ The Hub employs a **TransferCleanupService** that monitors all active transfers.
 -   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
 -   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
--   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the deployment has to name the longest outage it intends to survive before enabling it.
+-   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the hub refuses it when it starts, and the deployment has to name the longest outage it intends to survive before enabling it.
 -   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request below) is cancelled on both clients with `CancelTransfer`. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
 -   **Not a liveness check**: a transfer whose participant's token ran out, or whose groups may no longer reach each other, is ended by the access sweep instead (see "Token Renewal" in `SecurityArchitecture.md`).
 
@@ -202,7 +246,7 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 
 A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
 
-The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does. An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB. The one thing that still gets through a full stream is a request of its own, so the sender then sends `POST /api/stream/{id}/abort` (HTTP, not SignalR, and for this case only) and the hub ends the transfer as a host terminating a run does: both participants are told to cancel. The receiver fails as for any transfer the hub ends, not with the `Abort`'s reason. Only the replica that carried the transfer's streams acts on the request: it holds the bridges and the connections to tell. Behind a proxy with affinity the request has to follow the streams' cookie, which the client's `HttpClient` does (it shares the connection's cookie container); a hub that holds none of the transfer's bridges answers 404 and leaves it alone. Where the request cannot be made (the hub is unreachable, a proxy blocks the path, the hub predates the route) only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which the code keeps equal on purpose.
+The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does. An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB. The one thing that still gets through a full stream is a request of its own, so the sender then sends `POST /api/stream/{id}/abort` (HTTP, not SignalR, and for this case only) and the hub ends the transfer as a host terminating a run does: both participants are told to cancel. The receiver fails as for any transfer the hub ends, not with the `Abort`'s reason. Only the replica that carried the transfer's streams acts on the request: it holds the bridges and the connections to tell. Behind a proxy with affinity the request has to follow the streams' cookie, which the client's `HttpClient` does (it shares the connection's cookie container); a hub that holds none of the transfer's bridges answers 404 and leaves it alone. Where the request cannot be made (the hub is unreachable, a proxy blocks the path, the hub predates the route) only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
 
 The sender's window is taken **by the producer, before serialization**. Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
 

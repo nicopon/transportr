@@ -125,9 +125,20 @@ public static class TransportRHubExtensions
         // Affinity options (disabled by default)
         services.Configure<AffinityOptions>(options => options.Enabled = false);
         
-        // Data plane configuration (bridge timeout)
-        services.Configure<DataPlaneConfiguration>(_ => { });
-        services.Configure<ClientRegistryConfiguration>(_ => { });
+        // A timeout of zero or less would end every transfer on the first check, and a stalled-progress
+        // bound at or below the bridge timeout reads a reconnection as a stall and kills transfers that
+        // would have recovered. Both are refused when the host starts rather than found in production.
+        services.AddOptions<DataPlaneConfiguration>()
+            .Validate(o => o.BridgeTimeoutSeconds > 0, "DataPlaneConfiguration.BridgeTimeoutSeconds must be positive.")
+            .Validate(o => o.TransferInactivityTimeoutSeconds > 0, "DataPlaneConfiguration.TransferInactivityTimeoutSeconds must be positive.")
+            .Validate(
+                o => o.StalledProgressTimeoutSeconds is not { } stalled || stalled > o.BridgeTimeoutSeconds,
+                "DataPlaneConfiguration.StalledProgressTimeoutSeconds must be greater than BridgeTimeoutSeconds, or left unset.")
+            .ValidateOnStart();
+        services.AddOptions<ClientRegistryConfiguration>()
+            .Validate(o => o.DisconnectedGraceSeconds > 0, "ClientRegistryConfiguration.DisconnectedGraceSeconds must be positive.")
+            .Validate(o => o.ConnectedTtlSeconds > 0, "ClientRegistryConfiguration.ConnectedTtlSeconds must be positive.")
+            .ValidateOnStart();
 
         // The one decision on tokens, groups and identities. A negative margin would make a token
         // outlive its expiry by a sign error, so it is refused when the host starts.
