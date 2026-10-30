@@ -56,7 +56,8 @@ public class TestProxyStateStore : IStateStore
 
     public async Task DeleteClientAsync(Guid clientId)
     {
-        await _httpClient.DeleteAsync($"/api/state/clients/{clientId}");
+        var response = await _httpClient.DeleteAsync($"/api/state/clients/{clientId}");
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<ClientRegistration?> RenewClientAsync(
@@ -94,11 +95,13 @@ public class TestProxyStateStore : IStateStore
 
     public async Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
-        await _httpClient.PutAsJsonAsync($"/api/state/sessions/{transferId}/expiry", newExpiry);
+        var response = await _httpClient.PutAsJsonAsync($"/api/state/sessions/{transferId}/expiry", newExpiry);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task DeleteSessionAsync(string transferId)
     {
-        await _httpClient.DeleteAsync($"/api/state/sessions/{transferId}");
+        var response = await _httpClient.DeleteAsync($"/api/state/sessions/{transferId}");
+        response.EnsureSuccessStatusCode();
     }
 }
