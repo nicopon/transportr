@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # scripts/lint-comments.sh - Refuse deliberation left in committed code
 #
-# Two comment habits this repository has decided against, both checkable:
+# Three comment habits this repository has decided against, all checkable:
 #
 #   1. Deliberation. A comment that asks a question, weighs options or says "for now" is
 #      thinking, not documentation. Left in place it tells the next reader the matter is settled
 #      when it is not, and it is indistinguishable from a note that was resolved.
 #   2. Doc comments with no member under them. Documentation for an API that no longer exists
 #      survives every search for the API it names.
+#   3. History. A comment that tells what the code used to do describes a version nobody reads
+#      any more; the commit log keeps it.
 #
 # Resolve it, or move it to the working notes and leave a one-line pointer to the decision.
-# Nothing here judges volume or style: only these two are mechanical enough to enforce.
+# Nothing here judges volume or style: only these are mechanical enough to enforce.
 
 set -u
 
@@ -59,6 +61,19 @@ HITS=$(awk '
 if [ -n "$HITS" ]; then
     echo "Doc comment describing nothing:"
     report d "$HITS"
+fi
+
+# 4. History. Three markers, no more: "old" and "previously" are too often a plain adjective
+#    ("the old token"). "used to" is history only in the active voice; "is used to probe" says
+#    what a thing is for, and "Used to verify" opening a member's doc is a purpose too. "^" appears
+#    only at the start of an expression: grep implementations disagree on it mid-pattern.
+AT='(^|[[:space:]])//(.*[^[:alnum:]_])?'
+END='([^[:alnum:]_]|$)'
+HITS=$(grep -nE "${AT}(DECISION:|[Ww]e now${END}|used to${END})" $SOURCES \
+    | grep -vE "[^[:alnum:]_](is|are|was|were|be|been|being|get|gets|got) used to${END}" || true)
+if [ -n "$HITS" ]; then
+    echo "History left in code — a comment that tells what the code used to do:"
+    report h "$HITS"
 fi
 
 if [ $FAILED -ne 0 ]; then

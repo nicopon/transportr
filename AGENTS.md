@@ -229,7 +229,8 @@ happen: see "Token Renewal" in `SecurityArchitecture.md`.
   it in quietly.
 - **Comments say why, not what.** A comment restating the line below it is deleted, not reworded.
   A doc comment carries what a caller cannot read off the signature — ownership, threading, what
-  breaks if it is ignored — and stops there.
+  breaks if it is ignored — and stops there. Nor does a comment tell what the code used to do: a
+  version nobody reads any more belongs to the commit log.
 - **No deliberation in committed code.** A comment that asks a question, weighs two options, or
   opens with "for now" / "let's assume" / "actually" / "wait" is thinking, not documentation: it
   tells the next reader the matter is settled when it is not. Resolve it, or move it to `.notes/`

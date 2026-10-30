@@ -88,8 +88,8 @@ internal class HubConnectionManager : IAsyncDisposable
     /// is already registered rather than replacing it. A host hooking its own handlers onto this
     /// connection (<c>TransportRClientBuilder.WithControlConnection</c>) and TransportR's own
     /// registration (<see cref="TransportR.Client.SignalR.Services.SignalRTransferSignaling{T}"/>)
-    /// both have to survive an affinity redirect's rebuild - the single field this used to be let
-    /// whichever called last silently drop the other.
+    /// both have to survive an affinity redirect's rebuild; a single callback would let whichever
+    /// registered last silently drop the other.
     /// </summary>
     public void AddRegistrationCallback(Action<HubConnection> callback)
     {

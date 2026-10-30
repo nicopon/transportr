@@ -208,9 +208,9 @@ public class RedisStateStoreTests : IAsyncLifetime
     [RedisAvailableFact]
     public async Task MarkDisconnected_AfterTheClientReconnected_LeavesTheLiveRegistrationAlone()
     {
-        // Same race as in memory, and the one this store used to lose outright: it keeps the
-        // stale conn: index, so a resurrected ConnectionId still answers Heartbeat with true and
-        // the client never learns it has to register again.
+        // Same race as in memory. A store that kept the stale conn: index would let a resurrected
+        // ConnectionId still answer Heartbeat with true, and the client would never learn it has to
+        // register again.
         var clientId = Guid.NewGuid();
         var oldConnection = $"conn-old-{Guid.NewGuid()}";
         var newConnection = $"conn-new-{Guid.NewGuid()}";

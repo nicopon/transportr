@@ -270,9 +270,8 @@ public class BridgeStateMachineTests
     #region Invariant Tests
 
     /// <summary>
-    /// The booleans ConnectionBridge used to carry alongside the state are now derived from it.
-    /// This walks every event from every reachable state and checks the pair never contradicts the
-    /// state it came from — the property nothing guarded while the two were stored separately.
+    /// ConnectionBridge derives SenderConnected and ReceiverConnected from the state. This walks every
+    /// event from every reachable state and checks the pair never contradicts the state it came from.
     /// </summary>
     [Fact]
     public void FlagsAgreeWithState_AfterEveryEventSequence()

@@ -90,7 +90,8 @@ prints the sender's throughput for each. The runs are sequential, not interleave
 
 ### `lint-comments.sh`
 
-Refuses deliberation left in comments and doc comments with no member under them. CI runs it ahead of the build.
+Refuses deliberation and history left in comments, and doc comments with no member under them. CI runs it ahead of
+the build.
 
 ---
 

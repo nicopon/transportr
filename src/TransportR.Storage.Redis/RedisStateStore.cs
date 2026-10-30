@@ -24,8 +24,8 @@ public class RedisStateStore : IStateStore
     private const int MaxWriteAttempts = 5;
 
     // A connected registration and a dropped one are not kept for the same reason, so they do not
-    // get the same TTL. The old fixed 5 minutes applied to both, which meant a client that was
-    // simply idle between transfers vanished from discovery while still connected.
+    // get the same TTL: one short enough for a dropped client would remove a client that is merely
+    // idle between transfers from discovery while it is still connected.
     private readonly TimeSpan _connectedTtl;
     private readonly TimeSpan _disconnectedGrace;
     private readonly TimeProvider _time;
@@ -90,11 +90,9 @@ public class RedisStateStore : IStateStore
         // 1. Update TTL
         await _db.KeyExpireAsync(key, ttl);
         
-        // 2. We also need to update the payload's ExpiresAtUtc if we want GetSession to be accurate.
-        // However, fetching+deserializing+serializing+saving is expensive for a heartbeat.
-        // DECISION: We blindly extend TTL. GetSession might show an old ExpiresAtUtc but the key is alive.
-        // If exact consistency is required, we should use a Lua script or just accept the trade-off.
-        // Given this is for Liveness, TTL is what counts.
+        // 2. The payload's ExpiresAtUtc is left as written: rewriting it would fetch, deserialize
+        // and save the session on every heartbeat. Nothing reads it back from this store; the
+        // key's TTL is what decides whether the session is alive.
     }
 
     public async Task DeleteSessionAsync(string transferId)

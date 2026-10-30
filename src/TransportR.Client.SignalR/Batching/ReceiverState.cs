@@ -163,8 +163,8 @@ internal class ReceiverState<T>
     /// <remarks>
     /// Called when a reconnection replaces this state. Dropping them is correct — the sender
     /// resends everything from <see cref="NextExpectedBatchId"/>, which is below every id held
-    /// here — but the buffers they sit in come from a pool and were previously abandoned with
-    /// the instance, one leak per reconnection that had chunks in hand.
+    /// here — but the buffers they sit in come from a pool, and abandoning them with the
+    /// instance would leak one set per reconnection that had chunks in hand.
     /// </remarks>
     public void DiscardReordered()
     {
