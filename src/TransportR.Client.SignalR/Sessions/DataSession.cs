@@ -288,7 +288,9 @@ internal class DataSession<T> : IDataSession<T>
             throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
         }
 
-        await AwaitOrTranslateAsync(_batchProcessor.CompleteSenderAsync(cancellationToken), cancellationToken);
+        // The partial batch handed off here takes a slot like any other, so a full window parks this
+        // call as it parks SendAsync, and under the same bound.
+        await WhileAcknowledgingAsync(_batchProcessor.CompleteSenderAsync(cancellationToken), cancellationToken);
 
         // Complete goes out with batches still in flight rather than after them: the receiver refuses
         // it while one is missing, and the loop below sends it again until the tail is in.

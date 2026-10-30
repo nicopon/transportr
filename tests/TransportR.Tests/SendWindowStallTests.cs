@@ -34,6 +34,30 @@ public class SendWindowStallTests
     }
 
     [Fact]
+    public async Task CompleteAsync_LastBatchParkedWithNothingAcknowledged_FailsOnceTheStallTimeoutElapses()
+    {
+        // CompleteAsync hands the accumulator's partial batch off first, and that batch needs a slot
+        // like any other: the producer parked on the window is CompleteAsync itself.
+        var context = new StubSessionContext(new HttpClient(new NeverAnswers()));
+        context.Options.MaxInFlightBatches = 1;
+        context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
+
+        await using var session = new DataSession<string>(
+            context, Guid.NewGuid().ToString(), batchSize: 2, dataUrl: "http://test/data");
+        await session.StartSenderAsync();
+
+        await session.SendAsync("a", CancellationToken.None);
+        await session.SendAsync("b", CancellationToken.None);
+        await session.SendAsync("c", CancellationToken.None);
+
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(
+            () => session.CompleteAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(session.TransferId, failure.TransferId);
+        Assert.Equal(SessionState.Failed, session.State);
+    }
+
+    [Fact]
     public async Task SendAsync_ParkedAndCancelled_DoesNotReportTheTransferAsFailed()
     {
         var context = new StubSessionContext(new HttpClient(new NeverAnswers()));
