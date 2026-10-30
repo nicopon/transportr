@@ -75,6 +75,10 @@ the hub ends those the new groups no longer allow. It raises `InvalidOperationEx
 not connected, and the hub's refusal when the identity holds no group (the registration stays as it was).
 The hub must be of the same release.
 
+`IsRegisteredAsync()` asks the hub whether it still knows the client. It answers `false` when the hub has
+forgotten it (a restart, an eviction); the next presence heartbeat registers it again, and
+`RefreshRegistrationAsync()` does so at once.
+
 ### Serialization
 MessagePack is the recommended default: on par with Protobuf in our benchmark, and it takes any POCO
 without attributes or schema. Protobuf needs annotated contracts and produces the most compact payload;

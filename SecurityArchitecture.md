@@ -51,6 +51,9 @@ A source may reach a target when, for **every** group of the target, one of the 
 `"*"`). The same rule filters `GetReceivers`, admits `InitTransfer`, and is re-applied to running transfers by
 the access sweep (see Token Renewal).
 
+A host that opens every transfer itself sets `AccessOptions.ClientsMayOpenTransfers` to `false`: a client is then
+refused `GetReceivers` and `InitTransfer`, and transfers open only through `ITransferInitiator`.
+
 ---
 
 ## Security Guarantees
