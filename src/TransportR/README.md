@@ -56,5 +56,5 @@ The chunk types and the protocol flow are described in [TransportRArchitecture.m
 
 ## Dependencies
 
-- `Microsoft.Extensions.Hosting.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options` - abstractions only
+None: the core references no package beyond the .NET base library.
 
