@@ -33,8 +33,8 @@ public class TransferTerminatorTests
 
         var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
         var controlKey = IBridgeManager.KeyFor(transferId, ConnectionType.Control);
-        _bridgeManager.GetOrCreate(dataKey);
-        _bridgeManager.GetOrCreate(controlKey);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Control);
 
         await _terminator.TerminateAsync(transferId);
 
@@ -65,8 +65,8 @@ public class TransferTerminatorTests
 
         var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
         var controlKey = IBridgeManager.KeyFor(transferId, ConnectionType.Control);
-        _bridgeManager.GetOrCreate(dataKey);
-        _bridgeManager.GetOrCreate(controlKey);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Control);
 
         await _terminator.RetireAsync(transferId);
 
@@ -90,7 +90,7 @@ public class TransferTerminatorTests
         var terminator = new TransferTerminator(
             transfers, _bridgeManager, _stateStore, _notifier, NullLogger<TransferTerminator>.Instance);
         await _transferManager.RegisterParticipantsAsync(transferId, Guid.NewGuid(), Guid.NewGuid());
-        _bridgeManager.GetOrCreate(dataKey);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
 
         await terminator.RetireAsync(transferId);
 
@@ -108,7 +108,7 @@ public class TransferTerminatorTests
         var transfers = new TransferManagerSpy(_transferManager, () => throw new IOException("the store is down"));
         var terminator = new TransferTerminator(
             transfers, _bridgeManager, _stateStore, _notifier, NullLogger<TransferTerminator>.Instance);
-        _bridgeManager.GetOrCreate(dataKey);
+        _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
 
         await terminator.RetireAsync(transferId);
 
@@ -125,6 +125,7 @@ public class TransferTerminatorTests
 
         public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => inner.RegisterParticipantsAsync(transferId, senderId, receiverId);
         public Task<TransferParticipants?> GetParticipantsAsync(string transferId) => inner.GetParticipantsAsync(transferId);
+        public Task<TransferState?> TrackAsync(string transferId) => inner.TrackAsync(transferId);
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => inner.UpdateSenderStatsAsync(transferId, itemsSent, acksReceived);
         public Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent) => inner.UpdateReceiverStatsAsync(transferId, itemsReceived, acksSent);
         public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants() => inner.GetAllParticipants();

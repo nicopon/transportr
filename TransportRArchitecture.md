@@ -152,9 +152,10 @@ TransportR supports horizontal scaling (Active/Active) for Hubs:
 
 **What is *not* shared, and why sticky sessions are a requirement rather than an optimisation**:
 the per-transfer progress counters (`TransferState`: items sent, acks, last activity) live in a
-dictionary local to the hub instance, never in `IStateStore`. `TransferCleanupService` kills a
-transfer on those counters, so a deployment where the sender's and the receiver's heartbeats reach
-different instances gives each one a half-silent transfer and invites both to reap it. Moving the
+dictionary local to the hub instance that registered the transfer or accepted one of its streams,
+never in `IStateStore`. `TransferCleanupService` kills a transfer on those counters, so a deployment
+where a transfer's heartbeats and streams reach different instances gives each one a half-silent
+transfer and invites both to reap it. Moving the
 counters into Redis would buy a case the deployment already excludes, at the price of a write per
 heartbeat — so the constraint is written here instead: **HA requires effective affinity, not merely
 preferred affinity.**

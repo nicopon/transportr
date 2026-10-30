@@ -1,3 +1,4 @@
+using TransportR.Interfaces;
 using TransportR.Services;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +22,7 @@ public class ConnectionBridge
     private readonly BridgeStateMachine _fsm;
     private readonly TimeProvider _time;
 
+    public string TransferId { get; }
     public string BridgeKey { get; }
     public BridgeState State => _fsm.CurrentState;
     public DateTime LastActivity { get; private set; }
@@ -45,10 +47,11 @@ public class ConnectionBridge
 
     public Task CompletionTask => _completionTcs.Task;
 
-    public ConnectionBridge(string bridgeKey, ILogger logger, TimeProvider? timeProvider = null)
+    public ConnectionBridge(string transferId, ConnectionType type, ILogger logger, TimeProvider? timeProvider = null)
     {
-        BridgeKey = bridgeKey;
-        _fsm = new BridgeStateMachine(bridgeKey, logger);
+        TransferId = transferId;
+        BridgeKey = IBridgeManager.KeyFor(transferId, type);
+        _fsm = new BridgeStateMachine(BridgeKey, logger);
         _time = timeProvider ?? TimeProvider.System;
         LastActivity = Now;
     }

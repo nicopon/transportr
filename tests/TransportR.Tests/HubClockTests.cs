@@ -28,7 +28,7 @@ public class HubClockTests
         await using var provider = services.BuildServiceProvider();
 
         var transfers = provider.GetRequiredService<ITransferManager>();
-        await transfers.UpdateSenderStatsAsync("transfer-1", itemsSent: 1, acksReceived: 0);
+        await transfers.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid());
 
         Assert.Equal(clock.GetUtcNow().UtcDateTime, transfers.GetTransfer("transfer-1")!.LastActivityUtc);
     }
@@ -53,8 +53,11 @@ public class HubClockTests
 
     [Fact]
     public Task InactiveTransfer_IsTerminatedWhenTheClockPassesTheTimeout() =>
-        AssertTerminatedOnTheClockAsync(transfers =>
-            transfers.UpdateSenderStatsAsync("transfer-1", itemsSent: 1, acksReceived: 0));
+        AssertTerminatedOnTheClockAsync(async transfers =>
+        {
+            await transfers.RegisterParticipantsAsync("transfer-1", Guid.NewGuid(), Guid.NewGuid());
+            await transfers.UpdateSenderStatsAsync("transfer-1", itemsSent: 1, acksReceived: 0);
+        });
 
     [Fact]
     public Task ATransferThatNeverReported_IsTerminatedWhenTheClockPassesTheTimeout() =>

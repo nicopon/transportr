@@ -12,9 +12,9 @@ public interface IBridgeManager
     /// Builds the key a transfer's bridge for <paramref name="type"/> is held under.
     /// </summary>
     /// <remarks>
-    /// The format is the only thing tying together the code that creates a bridge and the code
-    /// that reaps it, and the two live in different assemblies. Composed here so that changing it
-    /// cannot leave one of them behind.
+    /// The format is the only thing tying together the code that creates a bridge, the code that
+    /// looks one up and the code that reaps it, and they live in different assemblies. Composed here
+    /// so that changing it cannot leave one of them behind.
     /// </remarks>
     static string KeyFor(string transferId, ConnectionType type) => $"{transferId}:{type}";
 
@@ -24,11 +24,9 @@ public interface IBridgeManager
     IReadOnlyDictionary<string, ConnectionBridge> Bridges { get; }
 
     /// <summary>
-    /// Gets or creates a bridge for the specified key.
+    /// Gets or creates <paramref name="transferId"/>'s bridge for <paramref name="type"/>.
     /// </summary>
-    /// <param name="bridgeKey">The bridge key (format: "transferId:connectionType").</param>
-    /// <returns>The existing or newly created bridge.</returns>
-    ConnectionBridge GetOrCreate(string bridgeKey);
+    ConnectionBridge GetOrCreate(string transferId, ConnectionType type);
 
     /// <summary>
     /// Attempts to remove a bridge.

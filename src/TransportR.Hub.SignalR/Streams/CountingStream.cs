@@ -1,8 +1,8 @@
 namespace TransportR.Hub.SignalR.Streams;
 
 /// <summary>
-/// A Stream wrapper that counts bytes read and invokes a callback for monitoring.
-/// Useful for tracking transfer progress and updating metrics.
+/// Reports how many bytes each read returned, without looking at them: the hub counts what crosses
+/// its streams and never reads it.
 /// </summary>
 public class CountingStream(Stream inner, Action<long> onBytesRead) : Stream
 {

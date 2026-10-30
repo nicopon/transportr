@@ -1,3 +1,4 @@
+using TransportR.Interfaces;
 using TransportR.Services;
 
 namespace TransportR.Tests;
@@ -14,7 +15,7 @@ public class BridgeManagerTests
         var manager = new BridgeManager(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
         // Act
-        var bridge = manager.GetOrCreate("transfer-1:Data");
+        var bridge = manager.GetOrCreate("transfer-1", ConnectionType.Data);
 
         // Assert
         Assert.NotNull(bridge);
@@ -28,8 +29,8 @@ public class BridgeManagerTests
         var manager = new BridgeManager(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
         // Act
-        var bridge1 = manager.GetOrCreate("transfer-1:Data");
-        var bridge2 = manager.GetOrCreate("transfer-1:Data");
+        var bridge1 = manager.GetOrCreate("transfer-1", ConnectionType.Data);
+        var bridge2 = manager.GetOrCreate("transfer-1", ConnectionType.Data);
 
         // Assert
         Assert.Same(bridge1, bridge2);
@@ -40,7 +41,7 @@ public class BridgeManagerTests
     {
         // Arrange
         var manager = new BridgeManager(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
-        manager.GetOrCreate("transfer-1:Data");
+        manager.GetOrCreate("transfer-1", ConnectionType.Data);
 
         // Act
         var removed = manager.TryRemove("transfer-1:Data");
@@ -68,8 +69,8 @@ public class BridgeManagerTests
     {
         // Arrange
         var manager = new BridgeManager(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
-        manager.GetOrCreate("transfer-1:Data");
-        manager.GetOrCreate("transfer-2:Control");
+        manager.GetOrCreate("transfer-1", ConnectionType.Data);
+        manager.GetOrCreate("transfer-2", ConnectionType.Control);
 
         // Act
         var bridges = manager.Bridges;

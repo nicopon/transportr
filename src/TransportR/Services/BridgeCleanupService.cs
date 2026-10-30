@@ -8,15 +8,14 @@ using TransportR.Models;
 namespace TransportR.Services;
 
 /// <summary>
-/// Background service that cleans up stale bridges after timeout.
-/// Sends CancelTransfer to both parties when a bridge times out.
+/// Cancels a bridge left short of <see cref="BridgeState.Active"/> for <c>BridgeTimeoutSeconds</c>,
+/// which releases the requests parked on it, and ends its transfer through
+/// <see cref="ITransferTerminator"/>.
 /// </summary>
 public class BridgeCleanupService : BackgroundService
 {
     private readonly ILogger<BridgeCleanupService> _logger;
-    private readonly ITransferNotifier _notifier;
-    private readonly IStateStore _stateStore;
-    private readonly ITransferManager _transferManager;
+    private readonly ITransferTerminator _terminator;
     private readonly IBridgeManager _bridgeManager;
     private readonly DataPlaneConfiguration _config;
     private readonly TimeProvider _time;
@@ -24,18 +23,14 @@ public class BridgeCleanupService : BackgroundService
 
     public BridgeCleanupService(
         ILogger<BridgeCleanupService> logger,
-        ITransferNotifier notifier,
-        IStateStore stateStore,
-        ITransferManager transferManager,
+        ITransferTerminator terminator,
         IBridgeManager bridgeManager,
         IOptions<DataPlaneConfiguration> config,
         TimeProvider? timeProvider = null)
     {
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
-        _notifier = notifier;
-        _stateStore = stateStore;
-        _transferManager = transferManager;
+        _terminator = terminator;
         _bridgeManager = bridgeManager;
         _config = config.Value;
     }
@@ -83,48 +78,11 @@ public class BridgeCleanupService : BackgroundService
             if (idleTime < timeout)
                 continue;
             
-            _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Cancelling.", 
+            _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Ending its transfer.", 
                 bridge.BridgeKey, idleTime.TotalSeconds);
             
             bridge.Cancel();
-            _bridgeManager.TryRemove(bridge.BridgeKey);
-            
-            var transferId = bridge.BridgeKey.Split(':')[0];
-            await NotifyCancelTransferAsync(transferId, ct).ConfigureAwait(false);
-        }
-    }
-
-    private async Task NotifyCancelTransferAsync(string transferId, CancellationToken ct)
-    {
-        try
-        {
-            var participants = await _transferManager.GetParticipantsAsync(transferId);
-            if (participants == null)
-            {
-                _logger.LogWarning("Cannot notify CancelTransfer: no participants found for transfer {TransferId}", transferId);
-                return;
-            }
-
-            var senderClient = await _stateStore.GetClientAsync(participants.SenderId);
-            if (senderClient != null)
-            {
-                await _notifier.NotifyCancelTransferAsync(senderClient.ConnectionId, transferId, ct);
-                _logger.LogInformation("Sent CancelTransfer to sender {SenderId} for transfer {TransferId}", 
-                    participants.SenderId, transferId);
-            }
-
-            var receiverClient = await _stateStore.GetClientAsync(participants.ReceiverId);
-            if (receiverClient != null)
-            {
-                await _notifier.NotifyCancelTransferAsync(receiverClient.ConnectionId, transferId, ct);
-                _logger.LogInformation("Sent CancelTransfer to receiver {ReceiverId} for transfer {TransferId}", 
-                    participants.ReceiverId, transferId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send CancelTransfer for transfer {TransferId}", transferId);
+            await _terminator.TerminateAsync(bridge.TransferId, ct).ConfigureAwait(false);
         }
     }
 }
-

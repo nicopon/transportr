@@ -6,10 +6,12 @@ namespace TransportR.Interfaces;
 /// </summary>
 /// <remarks>
 /// The callers of <see cref="TerminateAsync"/> are <see cref="Services.TransferCleanupService"/> (a
-/// transfer gone stale or stalled), the access reconciler (a participant lost its right to act) and a
-/// host terminating a run it owns. The hub's data server calls <see cref="RetireAsync"/> when a data
-/// stream ends cleanly. One implementation, on the model of the single handshake extracted in C0: the
-/// sequence cannot drift between them the way a hand-rolled copy in each caller would let it.
+/// transfer gone silent or stalled), <see cref="Services.BridgeCleanupService"/> (a bridge left
+/// waiting for a peer), the access reconciler (a participant lost its right to act), the stream
+/// route's abort request (a participant whose in-stream Abort cannot reach the wire) and a host
+/// terminating a run it owns. The hub's data server calls <see cref="RetireAsync"/> when a data
+/// stream ends cleanly. One implementation, so the sequence cannot drift between them the way a
+/// hand-rolled copy in each caller would let it.
 /// </remarks>
 public interface ITransferTerminator
 {

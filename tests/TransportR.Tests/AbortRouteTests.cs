@@ -206,8 +206,8 @@ public class AbortRouteTests
         if (holdsTheBridges)
         {
             var bridges = host.Services.GetRequiredService<IBridgeManager>();
-            bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, ConnectionType.Data));
-            bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, ConnectionType.Control));
+            bridges.GetOrCreate(TransferId, ConnectionType.Data);
+            bridges.GetOrCreate(TransferId, ConnectionType.Control);
         }
 
         return host;

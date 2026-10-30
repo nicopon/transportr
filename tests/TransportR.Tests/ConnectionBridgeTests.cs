@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Tests;
@@ -12,7 +13,7 @@ namespace TransportR.Tests;
 public class ConnectionBridgeTests
 {
     private static ConnectionBridge NewBridge() =>
-        new("transfer-1:Data", NullLogger.Instance);
+        new("transfer-1", ConnectionType.Data, NullLogger.Instance);
 
     [Fact]
     public async Task ReceiverThenSender_ReachesActive_AndBothRegistrationsSucceed()

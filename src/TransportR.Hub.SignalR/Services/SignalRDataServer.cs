@@ -41,15 +41,14 @@ public class SignalRDataServer : ITransportRServer
         string bridgeKey = IBridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Source Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
         
-        // HA Validation: Ensure transfer exists in distributed state
-        var participants = await _transferManager.GetParticipantsAsync(transferId).ConfigureAwait(false);
-        if (participants == null)
+        var transfer = await _transferManager.TrackAsync(transferId).ConfigureAwait(false);
+        if (transfer == null)
         {
             _logger.LogWarning("BRIDGE: Transfer {TransferId} not found in state store (expired or invalid). Rejecting connection.", transferId);
             throw new KeyNotFoundException($"Transfer {transferId} not found or expired.");
         }
 
-        var bridge = _bridgeManager.GetOrCreate(bridgeKey);
+        var bridge = _bridgeManager.GetOrCreate(transferId, type);
 
         if (bridge.State == BridgeState.Cancelled)
         {
@@ -81,11 +80,14 @@ public class SignalRDataServer : ITransportRServer
             }
             _logger.LogInformation("BRIDGE: Piping {BridgeKey}", bridgeKey);
 
-            Stream inputToCopy = input;
-            if (type == ConnectionType.Data)
-            {
-                inputToCopy = new CountingStream(input, bytes => _progressMonitor.OnBytesTransferred(bytes));
-            }
+            // Bytes on either stream show the transfer alive, whatever its SignalR connections say.
+            var inputToCopy = type == ConnectionType.Data
+                ? new CountingStream(input, bytes =>
+                {
+                    transfer.Touch();
+                    _progressMonitor.OnBytesTransferred(bytes);
+                })
+                : new CountingStream(input, _ => transfer.Touch());
 
             // The bridge does not reach across to the source when its destination leaves; a source
             // parked on an input that stays silent learns of it only through this token.
@@ -191,7 +193,15 @@ public class SignalRDataServer : ITransportRServer
         string bridgeKey = IBridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Sink Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
 
-        var bridge = _bridgeManager.GetOrCreate(bridgeKey);
+        // Admitted a moment ago, so a transfer missing now ended in between. The response ends empty,
+        // and the client's next attempt meets the 404 that says so.
+        if (await _transferManager.TrackAsync(transferId).ConfigureAwait(false) == null)
+        {
+            _logger.LogInformation("BRIDGE: Sink for transfer {TransferId} closed: the hub no longer holds the transfer.", transferId);
+            return;
+        }
+
+        var bridge = _bridgeManager.GetOrCreate(transferId, type);
 
         if (bridge.State == BridgeState.Cancelled)
         {

@@ -79,11 +79,11 @@ over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GE
 /api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
 without deserializing them. Reliability, the resume point and even transfer-completion detection are
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid SignalR-vs-stream
-race conditions. Two things still lean on SignalR, and the docs say so: a reconnecting session waits
-for a SignalR `Ping` to answer before reopening its streams, and the hub judges a transfer's activity
-on its SignalR heartbeats only — don't reintroduce a control-plane message for something the data plane already
-decides (see "Why Not Control Plane?" in `ResilienceArchitecture.md`). The one request that is not
-a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a sender whose in-stream `Abort`
+race conditions. One thing still leans on SignalR, and the docs say so: a reconnecting session waits
+for a SignalR `Ping` to answer before reopening its streams. The hub judges a transfer's activity on
+its heartbeats and on the bytes its streams carry, counted and never read. Don't reintroduce a
+control-plane message for something the data plane already decides (see "Why Not Control Plane?"
+in `ResilienceArchitecture.md`). The one request that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a sender whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
 transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
 cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
@@ -170,12 +170,13 @@ A transfer ends well when the sender's data POST ends cleanly: the bridge takes 
 `ITransferTerminator.RetireAsync` removes the state and both bridges, telling nobody. Only that
 signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
-`BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s) and **skips `Active`
-bridges entirely**; `TransferCleanupService` terminates a transfer with no activity at all for
-`TransferInactivityTimeoutSeconds` (60s) — it knows a transfer from its registration, not from its first
-heartbeat — and, only if `StalledProgressTimeoutSeconds` is set,
-off by default — one that is alive but making no progress. Heartbeats refresh activity but not
-progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
+`BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer
+through `ITransferTerminator`, and **skips `Active` bridges entirely**; `TransferCleanupService`
+terminates a transfer with no activity at all for
+`TransferInactivityTimeoutSeconds` (60s) — it knows a transfer from its registration or the first stream
+it accepts, never from a heartbeat or a lookup — and, only if `StalledProgressTimeoutSeconds` is set,
+off by default — one that is alive but making no progress. Heartbeats and stream bytes refresh activity but
+not progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
 stall from the hub). The other place the hub unilaterally ends a transfer is `AccessSweepService`/
 `AccessReconciler`, which judge a participant's right to act, not its liveness (see "Auth").
 

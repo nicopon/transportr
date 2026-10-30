@@ -24,9 +24,11 @@ public class BridgeManager : IBridgeManager
 
     public IReadOnlyDictionary<string, ConnectionBridge> Bridges => _bridges;
 
-    public ConnectionBridge GetOrCreate(string bridgeKey)
+    public ConnectionBridge GetOrCreate(string transferId, ConnectionType type)
     {
-        return _bridges.GetOrAdd(bridgeKey, key => new ConnectionBridge(key, _loggerFactory.CreateLogger<ConnectionBridge>(), _time));
+        return _bridges.GetOrAdd(
+            IBridgeManager.KeyFor(transferId, type),
+            _ => new ConnectionBridge(transferId, type, _loggerFactory.CreateLogger<ConnectionBridge>(), _time));
     }
 
     public bool TryRemove(string bridgeKey)

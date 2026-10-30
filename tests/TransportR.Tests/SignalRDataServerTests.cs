@@ -45,7 +45,7 @@ public class SignalRDataServerTests
         }
 
         public ConnectionBridge BridgeFor(ConnectionType type) =>
-            Bridges.GetOrCreate(IBridgeManager.KeyFor(TransferId, type));
+            Bridges.GetOrCreate(TransferId, type);
     }
 
     [Fact]
@@ -568,6 +568,9 @@ public class SignalRDataServerTests
 
         public Task<TransferParticipants?> GetParticipantsAsync(string transferId) =>
             Task.FromResult<TransferParticipants?>(_forgotten ? null : new TransferParticipants(Guid.NewGuid(), Guid.NewGuid()));
+
+        public Task<TransferState?> TrackAsync(string transferId) =>
+            Task.FromResult<TransferState?>(_forgotten ? null : new TransferState(transferId));
 
         public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => throw new NotSupportedException();
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => throw new NotSupportedException();

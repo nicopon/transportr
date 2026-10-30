@@ -43,39 +43,44 @@ public class TransferManager : ITransferManager
 
     public async Task<TransferParticipants?> GetParticipantsAsync(string transferId)
     {
-        // 1. Check local cache (Fast path)
-        if (_participants.TryGetValue(transferId, out var p))
+        if (_participants.TryGetValue(transferId, out var participants))
         {
-            return p;
-        }
-
-        // 2. Check distributed store (HA / Failover path)
-        var session = await _stateStore.GetSessionAsync(transferId).ConfigureAwait(false);
-        if (session != null)
-        {
-            // Hydrate local cache
-            var participants = new TransferParticipants(session.SenderId, session.ReceiverId);
-            _participants.TryAdd(transferId, participants);
-            
-            // Also ensure we have a TransferState object locally
-            _transfers.TryAdd(transferId, new TransferState(transferId, _time));
-            
             return participants;
         }
 
-        return null;
+        var session = await _stateStore.GetSessionAsync(transferId).ConfigureAwait(false);
+        return session == null ? null : new TransferParticipants(session.SenderId, session.ReceiverId);
+    }
+
+    public async Task<TransferState?> TrackAsync(string transferId)
+    {
+        if (_transfers.TryGetValue(transferId, out var state))
+        {
+            return state;
+        }
+
+        var session = await _stateStore.GetSessionAsync(transferId).ConfigureAwait(false);
+        if (session == null)
+        {
+            return null;
+        }
+
+        _participants.TryAdd(transferId, new TransferParticipants(session.SenderId, session.ReceiverId));
+        return _transfers.GetOrAdd(transferId, id => new TransferState(id, _time));
     }
 
     public async Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived)
     {
-        var state = _transfers.GetOrAdd(transferId, _ => new TransferState(transferId, _time));
+        if (!_transfers.TryGetValue(transferId, out var state)) return;
+
         state.UpdateSender(itemsSent, acksReceived);
         await CheckHeartbeatAsync(transferId).ConfigureAwait(false);
     }
 
     public async Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent)
     {
-        var state = _transfers.GetOrAdd(transferId, _ => new TransferState(transferId, _time));
+        if (!_transfers.TryGetValue(transferId, out var state)) return;
+
         state.UpdateReceiver(itemsReceived, acksSent);
         await CheckHeartbeatAsync(transferId).ConfigureAwait(false);
     }
