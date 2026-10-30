@@ -9,23 +9,7 @@ namespace TransportR.Tests;
 public class HubConnectionManagerTests
 {
     [Fact]
-    public async Task AddRegistrationCallback_ComposesWithInitialize_RatherThanReplacingIt()
-    {
-        var options = new ClientOptions();
-        await using var manager = new HubConnectionManager("http://unused", options, NullLogger.Instance);
-
-        var calls = new List<string>();
-        manager.AddRegistrationCallback(_ => calls.Add("app"));
-        manager.Initialize(_ => calls.Add("transportr"));
-
-        // A single field, overwritten by whichever call came last, is exactly the bug this
-        // guards: the application's own registration and TransportR's handshake registration
-        // (SignalRTransferSignaling) both have to end up on the connection.
-        Assert.Equal(["app", "transportr"], calls);
-    }
-
-    [Fact]
-    public async Task HandleAffinityRedirectAsync_ReappliesEveryRegisteredCallback()
+    public async Task HandleAffinityRedirectAsync_ReappliesTheRegistrationCallback()
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
@@ -37,18 +21,14 @@ public class HubConnectionManagerTests
             NullLogger.Instance,
             configureHttpConnection: o => o.HttpMessageHandlerFactory = _ => handler);
 
-        var appCalls = 0;
-        var transportRCalls = 0;
-        manager.AddRegistrationCallback(_ => appCalls++);
-        manager.Initialize(_ => transportRCalls++);
+        var calls = 0;
+        manager.Initialize(_ => calls++);
 
-        Assert.Equal(1, appCalls);
-        Assert.Equal(1, transportRCalls);
+        Assert.Equal(1, calls);
 
         await manager.HandleAffinityRedirectAsync("test-cookie", "token-1", () => Task.CompletedTask);
 
-        Assert.Equal(2, appCalls);
-        Assert.Equal(2, transportRCalls);
+        Assert.Equal(2, calls);
     }
 
     [Fact]

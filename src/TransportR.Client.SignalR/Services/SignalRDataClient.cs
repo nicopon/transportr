@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
@@ -20,11 +21,9 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
 
     /// <summary>
     /// The single connection this client carries, current across reconnects and affinity
-    /// redirects. For a host extending the hub (<c>DataHubBuilder.UseHub&lt;THub&gt;</c>) and
-    /// hooking its own handlers on via <c>TransportRClientBuilder.WithControlConnection</c>, this
-    /// is what its own invocations go through.
+    /// redirects. Internal so that the tests can stop it or probe a hub through it.
     /// </summary>
-    public HubConnection ControlConnection => _connectionManager.Connection;
+    internal HubConnection ControlConnection => _connectionManager.Connection;
 
     // Dependencies
     private readonly HubConnectionManager _connectionManager;
@@ -154,7 +153,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     /// <para>
     /// It returns once the hub has recorded both the registration and the token. Nothing has been
     /// written when the token provider fails (its exception is raised) or when the identity holds no
-    /// group (a <see cref="Microsoft.AspNetCore.SignalR.HubException"/>): the registration the hub had
+    /// group (a <see cref="HubRequestFailedException"/>): the registration the hub had
     /// stays. A hub that turns the token away after the registration is raised as an
     /// <see cref="HttpRequestException"/>, and the client keeps presenting the token it holds, as it does
     /// after a restart. Refreshes, the registration a restart, a reconnection or a redirect makes, and
@@ -200,6 +199,43 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         }
     }
 
+    /// <summary>
+    /// Asks the hub whether it still holds a registration for this client's connection: the answer
+    /// the presence heartbeat acts on, for a host that wants it now.
+    /// </summary>
+    /// <returns>
+    /// <c>false</c> when the hub has forgotten the connection (a hub that restarted, a registration
+    /// evicted, a reconnection under a new connection id). The next presence heartbeat registers the
+    /// client again; <see cref="RefreshRegistrationAsync"/> does it at once.
+    /// </returns>
+    /// <remarks>
+    /// Waits for a registration under way, so that a client being registered again is not reported
+    /// as unknown in the middle of it.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The client is not connected: it has not connected, has disconnected, or its connection is being
+    /// started again.
+    /// </exception>
+    public async Task<bool> IsRegisteredAsync(CancellationToken cancellationToken = default)
+    {
+        await _registration.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_registered || _connectionManager.Connection.State != HubConnectionState.Connected)
+            {
+                throw new InvalidOperationException(
+                    "The registration can only be checked while the client is connected to the hub.");
+            }
+
+            return await InvokeHubAsync(() =>
+                _connectionManager.Connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat), cancellationToken));
+        }
+        finally
+        {
+            _registration.Release();
+        }
+    }
+
     // The caller holds _registration.
     private Task InvokeConnectAsync(string what, CancellationToken cancellationToken = default)
     {
@@ -207,7 +243,24 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         _logger.LogInformation("{What} (ClientId={ClientId}, Groups=[{Groups}])...",
             what, ClientId, groupsList != null ? string.Join(", ", groupsList) : "none");
 
-        return _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, cancellationToken);
+        return InvokeHubAsync(async () =>
+        {
+            await _connectionManager.Connection.InvokeAsync(nameof(ICommandHub.Connect), ClientId, groupsList, cancellationToken);
+            return true;
+        });
+    }
+
+    // The hub's refusals reach this side as SignalR's HubException; no public member names it.
+    private static async Task<TResult> InvokeHubAsync<TResult>(Func<Task<TResult>> invoke)
+    {
+        try
+        {
+            return await invoke();
+        }
+        catch (HubException ex)
+        {
+            throw new HubRequestFailedException(ex.Message, ex);
+        }
     }
 
     private void StartTokenRenewal()
@@ -324,9 +377,10 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
         await _connectionManager.DisposeAsync();
     }
 
-    public async Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default)
+    public Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default)
     {
-        return await _connectionManager.Connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers), cancellationToken);
+        return InvokeHubAsync(() =>
+            _connectionManager.Connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers), cancellationToken));
     }
 
     public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null)
@@ -364,6 +418,11 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
             // Re-invoke Connect is handled by the callback above.
             // Now retry InitTransfer on new connection
             return await InitTransferAsync(targetClientId, batchSize);
+        }
+        catch (HubException ex)
+        {
+            // Below the redirect, which arrives as a HubException as well.
+            throw new HubRequestFailedException(ex.Message, ex);
         }
     }
 

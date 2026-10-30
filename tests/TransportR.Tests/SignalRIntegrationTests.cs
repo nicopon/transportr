@@ -250,7 +250,7 @@ public class SignalRIntegrationTests
         // its clients named one. A client of its own: one refused cannot connect again.
         await using (var anonymous = CreateClient(handler, "http://localhost"))
         {
-            await Assert.ThrowsAsync<HubException>(() => anonymous.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+            await Assert.ThrowsAsync<HubRequestFailedException>(() => anonymous.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
         }
 
         await sender.ConnectAsync(["senders"]).WaitAsync(TimeSpan.FromSeconds(10));
@@ -836,8 +836,8 @@ public class SignalRIntegrationTests
         await receiver.ConnectAsync();
 
         // Refused, not served an empty list: a caller that finds nobody fails for another reason.
-        await Assert.ThrowsAsync<HubException>(() => sender.GetReceiversAsync());
-        await Assert.ThrowsAsync<HubException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.GetReceiversAsync());
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
         Assert.Empty(receiver.GetTransfers());
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
@@ -916,7 +916,7 @@ public class SignalRIntegrationTests
         //    no longer exists. SignalR always prefixes its generic sentence, but it appends a
         //    HubException's own message after it - so an untranslated IOException here leaves the
         //    caller with the prefix and nothing else.
-        var ex = await Assert.ThrowsAsync<HubException>(
+        var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiverId, batchSize: 100));
 
         Assert.Contains("not reachable", ex.Message, StringComparison.OrdinalIgnoreCase);
@@ -949,6 +949,25 @@ public class SignalRIntegrationTests
         // 4. Connected but unknown. This is what discovery sees, and why the answer has to carry
         //    more than a keep-alive: the client must know to register again.
         Assert.False(await connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat)));
+    }
+
+    [Fact]
+    public async Task IsRegistered_CarriesTheHeartbeatsAnswer_AndIsAnInvalidOperationOnceDisconnected()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        await using var client = CreateClient(host.GetTestServer().CreateHandler(), "http://localhost");
+        var store = host.Services.GetRequiredService<IStateStore>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.IsRegisteredAsync());
+
+        await client.ConnectAsync();
+        Assert.True(await client.IsRegisteredAsync());
+
+        await store.DeleteClientAsync(client.ClientId);
+        Assert.False(await client.IsRegisteredAsync());
+
+        await client.DisconnectAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.IsRegisteredAsync());
     }
 
     [Fact]

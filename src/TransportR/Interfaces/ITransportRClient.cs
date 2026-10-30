@@ -20,6 +20,7 @@ public interface IDataClient
     /// </summary>
     /// <param name="groups">Optional groups. When authenticated and null, derived from JWT scopes.</param>
     /// <param name="cancellationToken">Token to cancel the connection attempt.</param>
+    /// <exception cref="HubRequestFailedException">The hub refused the registration.</exception>
     Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -63,6 +64,10 @@ public interface IDataSender<T> : IDataClient
     /// <param name="targetClientId">The ID of the receiver client.</param>
     /// <param name="batchSize">Optional batch size override. Uses default if not specified.</param>
     /// <returns>A Send handle to transmit items through.</returns>
+    /// <exception cref="HubRequestFailedException">
+    /// The hub refused the transfer, or the handshake failed: the receiver is unknown, unreachable or
+    /// refused it, or it timed out.
+    /// </exception>
     Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
 
     /// <summary>
@@ -82,6 +87,7 @@ public interface IDataSender<T> : IDataClient
     /// </summary>
     /// <param name="cancellationToken">Token to cancel the request.</param>
     /// <returns>List of authorized receiver clients.</returns>
+    /// <exception cref="HubRequestFailedException">The hub refused the request.</exception>
     Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default);
 }
 

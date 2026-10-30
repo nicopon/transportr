@@ -4,8 +4,10 @@ namespace TransportR.Abstractions;
 /// Thrown when the hub refuses a request, or cannot carry it out.
 /// </summary>
 /// <remarks>
-/// Raised by <see cref="Interfaces.ITransferInitiator.InitTransferAsync"/>. The message is the one a
-/// client is given, generic on purpose; the detail is in the hub log.
+/// Raised on the hub by <see cref="Interfaces.ITransferInitiator.InitTransferAsync"/>, and on a client
+/// by each request it makes of the hub: registering, listing receivers, opening a transfer, and
+/// checking or refreshing its registration. The message is the one the hub gives a client, generic
+/// on purpose; the detail is in the hub log.
 /// </remarks>
 public class HubRequestFailedException : Exception
 {

@@ -33,7 +33,6 @@ public class TransportRClientBuilder<T>
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
     private TimeSpan? _tokenRefreshThreshold;
-    private Action<HubConnection>? _controlConnectionCallback;
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
@@ -169,20 +168,6 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Registers handlers on the single connection this client carries - the same one TransportR's
-    /// own handshake uses - for a hub extended with the host's own vocabulary
-    /// (<c>DataHubBuilder.UseHub&lt;THub&gt;</c>). Composes with TransportR's own registration
-    /// rather than replacing it, and is reapplied whenever the connection is rebuilt (an affinity
-    /// redirect). <see cref="SignalRDataClient{T}.ControlConnection"/> is the connection to invoke
-    /// methods on afterward.
-    /// </summary>
-    public TransportRClientBuilder<T> WithControlConnection(Action<HubConnection> configure)
-    {
-        _controlConnectionCallback = configure;
-        return this;
-    }
-
-    /// <summary>
     /// Builds the <see cref="SignalRDataClient{T}"/>.
     /// </summary>
     public SignalRDataClient<T> Build()
@@ -237,15 +222,6 @@ public class TransportRClientBuilder<T>
             _tokenProvider
         );
         
-        // Composes with TransportR's own registration (SignalRTransferSignaling, added below by
-        // SignalRDataClient's constructor) rather than replacing it - and has to be added first, so
-        // that the very first BuildAndConfigureConnection call (triggered by that constructor)
-        // already carries it.
-        if (_controlConnectionCallback != null)
-        {
-            connectionManager.AddRegistrationCallback(_controlConnectionCallback);
-        }
-
         var sessionRegistry = new SessionRegistry<T>(logger);
 
         // Create Infrastructure dependencies

@@ -108,7 +108,7 @@ public class RegistrationRefreshTests
         var already = node.Store.Writes.Count;
 
         node.Rights.Set(Sender);
-        await Assert.ThrowsAsync<HubException>(() => node.Client.RefreshRegistrationAsync());
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => node.Client.RefreshRegistrationAsync());
 
         Assert.Equal(already, node.Store.Writes.Count);
         Assert.Equal(before, await node.RegistrationAsync());
@@ -170,6 +170,31 @@ public class RegistrationRefreshTests
         await node.Client.ControlConnection.StopAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => node.Client.RefreshRegistrationAsync());
+    }
+
+    [Fact]
+    public async Task AConnectionThatRestarts_RegistersWithTheGroupsOfTheMoment_UnderTheSameSubject()
+    {
+        // What a host refused a refresh while the connection is down relies on: the client comes
+        // back by itself, and with what the identity holds then.
+        await using var node = await Node.StartAsync(["alpha"], outlive: false);
+        var before = await node.RegistrationAsync();
+
+        node.Rights.Set(Sender, "beta");
+        await node.Client.ControlConnection.StopAsync();
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        var after = await node.RegistrationAsync();
+        while ((after.ConnectionId == before.ConnectionId || after.DisconnectedAtUtc != null) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+            after = await node.RegistrationAsync();
+        }
+
+        Assert.NotEqual(before.ConnectionId, after.ConnectionId);
+        Assert.Null(after.DisconnectedAtUtc);
+        Assert.Equal(["beta"], after.Groups.Order());
+        Assert.Equal(before.Subject, after.Subject);
     }
 
     [Fact]

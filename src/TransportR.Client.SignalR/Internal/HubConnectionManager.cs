@@ -77,31 +77,14 @@ internal class HubConnectionManager : IAsyncDisposable
         }
     }
 
+    /// <param name="registrationCallback">
+    /// Run on every connection this manager builds, the first and each one an affinity redirect
+    /// rebuilds: the handlers it registers would not survive the rebuild otherwise.
+    /// </param>
     public void Initialize(Action<HubConnection> registrationCallback)
     {
-        AddRegistrationCallback(registrationCallback);
+        _registrationCallback = registrationCallback;
         BuildAndConfigureConnection();
-    }
-
-    /// <summary>
-    /// Adds another callback invoked whenever the connection is (re)built, composing with whatever
-    /// is already registered rather than replacing it. A host hooking its own handlers onto this
-    /// connection (<c>TransportRClientBuilder.WithControlConnection</c>) and TransportR's own
-    /// registration (<see cref="TransportR.Client.SignalR.Services.SignalRTransferSignaling{T}"/>)
-    /// both have to survive an affinity redirect's rebuild; a single callback would let whichever
-    /// registered last silently drop the other.
-    /// </summary>
-    public void AddRegistrationCallback(Action<HubConnection> callback)
-    {
-        _registrationCallback += callback;
-
-        // The connection may already exist (the application hooks in after TransportR's own
-        // Initialize call): apply the new callback to it now rather than waiting for a rebuild
-        // that might never come.
-        if (_hubConnection != null)
-        {
-            callback(_hubConnection);
-        }
     }
 
     private void BuildAndConfigureConnection()
