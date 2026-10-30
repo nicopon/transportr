@@ -5,7 +5,7 @@ using DataHub.Middleware;
 using DataHub.Adapters;
 using Microsoft.AspNetCore.ResponseCompression;
 using OpenTelemetry.Metrics;
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 using TransportR.FlowControl;
 using TransportR.Interfaces;
 using TransportR.Auth.SimpleIdp;

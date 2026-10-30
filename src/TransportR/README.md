@@ -5,7 +5,7 @@ Core library containing interfaces, protocols, and abstractions for the Transpor
 ## Purpose
 
 This project defines the contracts and the binary protocol shared by the client, the hub and the state stores. It
-references no SignalR or ASP.NET Core package and holds no hub service: those live in `TransportR.Hub.SignalR`.
+references no SignalR or ASP.NET Core package and holds no hub service: those live in `TransportR.Hub`.
 
 ## Key Interfaces
 

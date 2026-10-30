@@ -11,9 +11,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{B2C3D4E5
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransportR", "src\TransportR\TransportR.csproj", "{6F139B4C-1B0E-4657-9F88-91C9D8DA5842}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransportR.Client.SignalR", "src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj", "{CEA5741F-E19A-490E-8706-CC49B3C60D69}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransportR.Client", "src\TransportR.Client\TransportR.Client.csproj", "{CEA5741F-E19A-490E-8706-CC49B3C60D69}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransportR.Hub.SignalR", "src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj", "{4E62F82E-F7E9-4F53-9049-176C571A803C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TransportR.Hub", "src\TransportR.Hub\TransportR.Hub.csproj", "{4E62F82E-F7E9-4F53-9049-176C571A803C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shared", "samples\Shared\Shared.csproj", "{E2D0DEBA-E582-49CB-A364-CC715930CE44}"
 EndProject

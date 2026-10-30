@@ -5,10 +5,10 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Services;
-using TransportR.Hub.SignalR;
-using TransportR.Hub.SignalR.Access;
-using TransportR.Hub.SignalR.Configuration;
+using TransportR.Client.Services;
+using TransportR.Hub;
+using TransportR.Hub.Access;
+using TransportR.Hub.Configuration;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 
@@ -29,12 +29,12 @@ public class FailClosedTests
     }
 
     private sealed class Pair(
-        LoopbackHost host, SignalRDataClient<string> sender, SignalRDataClient<string> receiver,
+        LoopbackHost host, TransportRClient<string> sender, TransportRClient<string> receiver,
         Send<string> send, Receive<string> receive) : IAsyncDisposable
     {
         public LoopbackHost Host { get; } = host;
-        public SignalRDataClient<string> Sender { get; } = sender;
-        public SignalRDataClient<string> Receiver { get; } = receiver;
+        public TransportRClient<string> Sender { get; } = sender;
+        public TransportRClient<string> Receiver { get; } = receiver;
         public Send<string> Send { get; } = send;
         public Receive<string> Receive { get; } = receive;
 
@@ -79,7 +79,7 @@ public class FailClosedTests
         return await OpenAsync(host, sender, receiver);
     }
 
-    private static async Task<Pair> OpenAsync(LoopbackHost host, SignalRDataClient<string> sender, SignalRDataClient<string> receiver)
+    private static async Task<Pair> OpenAsync(LoopbackHost host, TransportRClient<string> sender, TransportRClient<string> receiver)
     {
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);

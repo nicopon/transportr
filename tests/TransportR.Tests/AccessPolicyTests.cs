@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using TransportR.Hub.SignalR.Access;
-using TransportR.Hub.SignalR.Configuration;
+using TransportR.Hub.Access;
+using TransportR.Hub.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Tests.Infrastructure;

@@ -5,10 +5,10 @@ using Serilog;
 using Sender.Configuration;
 using Sender.Services;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension
@@ -252,7 +252,7 @@ static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extens
 static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
     Send<Order> transfer, 
     OrderFileReader dataService,
-    SignalRDataClient<Order> broker,
+    TransportRClient<Order> broker,
     bool showProgress,
     Microsoft.Extensions.Logging.ILogger logger,
     CancellationToken cancellationToken)

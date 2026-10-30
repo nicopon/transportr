@@ -1,5 +1,5 @@
 using System.Net;
-using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 

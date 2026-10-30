@@ -5,9 +5,9 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Services;
-using TransportR.Hub.SignalR.Access;
-using TransportR.Hub.SignalR.Configuration;
+using TransportR.Client.Services;
+using TransportR.Hub.Access;
+using TransportR.Hub.Configuration;
 using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -103,8 +103,8 @@ public class HostRevocationTests
 
         public required LoopbackHost Host { get; init; }
         public required Rights Rights { get; init; }
-        public required SignalRDataClient<string> Sender { get; init; }
-        public required SignalRDataClient<string> Receiver { get; init; }
+        public required TransportRClient<string> Sender { get; init; }
+        public required TransportRClient<string> Receiver { get; init; }
         public required Send<string> Send { get; init; }
         public required Receive<string> Receive { get; init; }
         public required string ConnectionId { get; init; }

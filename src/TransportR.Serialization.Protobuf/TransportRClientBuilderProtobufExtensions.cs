@@ -1,4 +1,4 @@
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Serialization.Protobuf.Services;
 
 namespace TransportR.Serialization.Protobuf;

@@ -1,0 +1,198 @@
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Logging;
+using TransportR.Abstractions;
+using TransportR.Client.Internal;
+using TransportR.Client.Sessions;
+using TransportR.Interfaces;
+
+namespace TransportR.Client.Services;
+
+/// <summary>
+/// Handles SignalR events and coordinating session lifecycle (creation/removal)
+/// based on Hub signals.
+/// </summary>
+internal class SignalRTransferSignaling<T>
+{
+    private readonly HubConnectionManager _connectionManager;
+    private readonly SessionRegistry<T> _sessionRegistry;
+    private readonly ISessionContext<T> _context;
+    private readonly ILogger _logger;
+    private readonly int _defaultBatchSize;
+    private readonly string _dataUrl;
+    private readonly Func<Receive<T>, Task>? _onTransferStarted;
+    private readonly Func<Func<Send<T>, Task>?> _sendRequestedHandler;
+    private readonly Func<string, Task>? _onReconnected;
+
+    /// <param name="sendRequestedHandler">
+    /// Returns the handler currently attached for transfers the host opens, or null when there is
+    /// none. Asked on every request, because the answer decides whether the transfer is refused
+    /// before a session exists.
+    /// </param>
+    public SignalRTransferSignaling(
+        HubConnectionManager connectionManager,
+        SessionRegistry<T> sessionRegistry,
+        ISessionContext<T> context,
+        ILogger logger,
+        int defaultBatchSize,
+        string dataUrl,
+        Func<Receive<T>, Task>? onTransferStarted,
+        Func<Func<Send<T>, Task>?> sendRequestedHandler,
+        Func<string, Task>? onReconnected = null)
+    {
+        _sendRequestedHandler = sendRequestedHandler;
+        _onReconnected = onReconnected;
+        _connectionManager = connectionManager;
+        _sessionRegistry = sessionRegistry;
+        _context = context;
+        _logger = logger;
+        _defaultBatchSize = defaultBatchSize;
+        _dataUrl = dataUrl;
+        _onTransferStarted = onTransferStarted;
+    }
+
+    public void Initialize()
+    {
+        _connectionManager.Initialize(RegisterHubHandlers);
+    }
+
+    private void RegisterHubHandlers(HubConnection connection)
+    {
+        // Handler for GetReadyToReceive
+        connection.On<string, Guid, bool>(nameof(ICommandClient.GetReadyToReceive), async (transferId, senderId) =>
+        {
+            _logger.LogInformation("Client: Received GetReadyToReceive request for Transfer={TransferId} from SenderId={SenderId}", transferId, senderId);
+            return await HandleGetReadyToReceive(transferId, senderId);
+        });
+
+        connection.On<string, int, Guid, bool>(nameof(ICommandClient.RequestSend), async (transferId, size, receiverId) =>
+        {
+            _logger.LogInformation("Client: Received RequestSend request for Transfer={TransferId} to ReceiverId={ReceiverId}", transferId, receiverId);
+            return await HandleRequestSend(transferId, size, receiverId);
+        });
+
+        connection.On<string>(nameof(ICommandClient.CancelTransfer), async (transferId) =>
+        {
+             _logger.LogInformation("Client: Received CancelTransfer request for {TransferId}", transferId);
+             await HandleCancelTransfer(transferId);
+        });
+
+        // Handler for Pong
+        connection.On<string>(nameof(ICommandClient.Pong), (transferId) =>
+        {
+            _logger.LogDebug("Client: Received Pong for {TransferId}", transferId);
+            if (_sessionRegistry.TryGetSession(transferId, out var session) && session != null)
+            {
+                session.OnPongReceived();
+            }
+        });
+
+
+        // Handler for SignalR reconnection
+        connection.Reconnected += async (connectionId) =>
+        {
+            _logger.LogInformation("SignalR reconnected (ConnectionId={ConnectionId}). Triggering stream restart for {Count} active sessions.", 
+                connectionId, _sessionRegistry.Count);
+            
+            foreach (var session in _sessionRegistry.Sessions)
+            {
+                try
+                {
+                    session.TriggerReconnect();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to trigger reconnect for session {TransferId}", session.TransferId);
+                }
+            }
+
+            // The registration still points at the old connection id, so the client is connected
+            // and invisible to discovery until it registers again. Registered here rather than in
+            // the client because this callback is re-applied when the connection is rebuilt, which
+            // an affinity redirect does.
+            if (_onReconnected != null)
+            {
+                await _onReconnected(connectionId ?? string.Empty);
+            }
+        };
+    }
+
+    private async Task<bool> HandleGetReadyToReceive(string transferId, Guid senderId)
+    {
+        _logger.LogDebug("Starting receive session: TransferId={TransferId}, SenderId={SenderId}", transferId, senderId);
+        
+        // Create session
+        var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, _defaultBatchSize, _dataUrl));
+        await session.StartReceiverAsync();
+        
+        // HttpReceive is likely in TransportR.Client.Internal
+        var transfer = new HttpReceive<T>(session);
+        if (_onTransferStarted != null)
+        {
+            await _onTransferStarted(transfer);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The send session of a transfer this client asked for, started from the id the hub returned
+    /// from <c>InitTransfer</c>: the hub never calls the sender back during the handshake.
+    /// </summary>
+    public async Task<IDataSession<T>> StartRequestedSendAsync(string transferId, int size, Guid receiverId)
+    {
+        _logger.LogDebug("Starting send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
+        
+        if (_sessionRegistry.ContainsKey(transferId))
+        {
+            throw new InvalidOperationException($"Session {transferId} already exists. Cannot overwrite.");
+        }
+
+        var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, size, _dataUrl));
+        await session.StartSenderAsync();
+        return session;
+    }
+
+    private async Task<bool> HandleRequestSend(string transferId, int size, Guid receiverId)
+    {
+        var handler = _sendRequestedHandler();
+        if (handler == null)
+        {
+            _logger.LogWarning("Refusing Transfer {TransferId}: it was opened by the host, and no OnSendRequested handler is attached.", transferId);
+            return false;
+        }
+
+        if (_sessionRegistry.ContainsKey(transferId))
+        {
+            throw new InvalidOperationException($"Session {transferId} already exists. Cannot overwrite.");
+        }
+
+        _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
+
+        var session = _sessionRegistry.GetOrAdd(transferId, id => new DataSession<T>(_context, id, size, _dataUrl));
+        await session.StartSenderAsync();
+
+        var transfer = new HttpSend<T>(session);
+        try
+        {
+            await handler(transfer);
+        }
+        catch
+        {
+            // The hub abandons the transfer on this failure and cancels the receiver. The handle's
+            // owner is the handler that just failed, so nothing else would release this side;
+            // should the handler dispose it later, a second dispose does nothing.
+            await transfer.DisposeAsync();
+            throw;
+        }
+
+        return true;
+    }
+
+    private async Task HandleCancelTransfer(string transferId)
+    {
+        if (_sessionRegistry.TryRemove(transferId, out var session) && session != null)
+        {
+            _logger.LogWarning("Cancelling Transfer {TransferId} as requested by Hub.", transferId);
+            await session.EndByHubAsync();
+        }
+    }
+}

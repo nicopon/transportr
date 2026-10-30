@@ -1,8 +1,8 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.Configuration;
+using TransportR.Client.Sessions;
 using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
@@ -144,7 +144,7 @@ public class HubEndedSessionTests
     }
 
     private static DataSession<string> NewSession(
-        HttpMessageHandler hub, out LogRecorder logs, Action<TransportR.Client.SignalR.Configuration.ClientOptions>? configure = null)
+        HttpMessageHandler hub, out LogRecorder logs, Action<TransportR.Client.Configuration.ClientOptions>? configure = null)
     {
         logs = new LogRecorder();
         var context = new StubSessionContext(new HttpClient(hub), logs.Factory.CreateLogger("session"));

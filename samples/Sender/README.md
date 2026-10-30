@@ -4,7 +4,7 @@ Sample TransportR sender application that reads data and sends it to a receiver 
 
 ## Purpose
 
-Demonstrates how to use `SignalRDataClient<T>` as a data sender to:
+Demonstrates how to use `TransportRClient<T>` as a data sender to:
 1. Connect to a TransportR hub
 2. Discover available receivers
 3. Initiate a transfer

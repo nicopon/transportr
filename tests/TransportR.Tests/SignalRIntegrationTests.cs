@@ -10,11 +10,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Internal;
-using TransportR.Client.SignalR.Services;
-using TransportR.Hub.SignalR;
-using TransportR.Hub.SignalR.Configuration;
+using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
+using TransportR.Client.Services;
+using TransportR.Hub;
+using TransportR.Hub.Configuration;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 using Xunit.Abstractions;
@@ -849,7 +849,7 @@ public class SignalRIntegrationTests
         Assert.Equal(transferId, receive.TransferId);
     }
 
-    private static async Task AssertEventuallyEmptyAsync(SignalRDataClient<string> client)
+    private static async Task AssertEventuallyEmptyAsync(TransportRClient<string> client)
     {
         // CancelTransfer is sent without waiting for the client to act on it.
         var deadline = DateTime.UtcNow.AddSeconds(10);
@@ -1054,7 +1054,7 @@ public class SignalRIntegrationTests
 
     /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>
     /// <param name="networkHandler">What carries the data streams over the network; the default socket handler if null.</param>
-    private SignalRDataClient<string> CreateClient(
+    private TransportRClient<string> CreateClient(
         HttpMessageHandler? handler, string url, Action<ClientOptions>? configure = null,
         HttpMessageHandler? networkHandler = null, IBatchSerializer<string>? serializer = null)
     {
@@ -1089,7 +1089,7 @@ public class SignalRIntegrationTests
             ? new HttpClient(handler) { BaseAddress = new Uri(url) }
             : new HttpClient(networkHandler ?? new SocketsHttpHandler()) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
 
-        return new SignalRDataClient<string>(
+        return new TransportRClient<string>(
             connectionManager,
             registry,
             serializer,

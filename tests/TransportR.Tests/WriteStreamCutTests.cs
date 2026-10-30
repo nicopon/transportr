@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 

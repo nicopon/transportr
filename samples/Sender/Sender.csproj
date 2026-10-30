@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shared\Shared.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Client\TransportR.Client.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Protobuf\TransportR.Serialization.Protobuf.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Json\TransportR.Serialization.Json.csproj" />

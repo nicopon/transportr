@@ -15,8 +15,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Client\TransportR.Client.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub\TransportR.Hub.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
   </ItemGroup>
 

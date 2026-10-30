@@ -9,8 +9,8 @@ dotnet build src/TransportR.Serialization.MessagePack/TransportR.Serialization.M
 dotnet build src/TransportR.Serialization.Protobuf/TransportR.Serialization.Protobuf.csproj -c Release
 dotnet build src/TransportR.Serialization.Json/TransportR.Serialization.Json.csproj -c Release
 dotnet build src/TransportR.Serialization.Arrow/TransportR.Serialization.Arrow.csproj -c Release
-dotnet build src/TransportR.Hub.SignalR/TransportR.Hub.SignalR.csproj -c Release
-dotnet build src/TransportR.Client.SignalR/TransportR.Client.SignalR.csproj -c Release
+dotnet build src/TransportR.Hub/TransportR.Hub.csproj -c Release
+dotnet build src/TransportR.Client/TransportR.Client.csproj -c Release
 dotnet build src/TransportR.Storage.Redis/TransportR.Storage.Redis.csproj -c Release
 
 # Sample projects

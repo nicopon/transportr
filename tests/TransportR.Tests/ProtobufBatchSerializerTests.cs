@@ -1,4 +1,4 @@
-using TransportR.Client.SignalR.Batching;
+using TransportR.Client.Batching;
 using TransportR.Serialization.Protobuf.Services;
 
 namespace TransportR.Tests;

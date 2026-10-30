@@ -1,4 +1,4 @@
-using TransportR.Client.SignalR.Batching;
+using TransportR.Client.Batching;
 using Xunit;
 
 namespace POC_DataProxy.Tests;

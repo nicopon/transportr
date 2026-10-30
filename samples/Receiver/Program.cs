@@ -5,7 +5,7 @@ using Shared.Models;
 using Serilog;
 using Receiver.Configuration;
 using TransportR.Interfaces;
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension

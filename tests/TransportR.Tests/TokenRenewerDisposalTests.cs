@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Internal;
+using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
 
 namespace TransportR.Tests;
 

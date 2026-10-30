@@ -6,9 +6,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Services;
-using TransportR.Hub.SignalR.Access;
+using TransportR.Client.Configuration;
+using TransportR.Client.Services;
+using TransportR.Hub.Access;
 using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -459,7 +459,7 @@ public class RegistrationRefreshTests
         public required Rights Rights { get; init; }
         public required RecordingStateStore Store { get; init; }
         public required Tokens Tokens { get; init; }
-        public required SignalRDataClient<string> Client { get; init; }
+        public required TransportRClient<string> Client { get; init; }
 
         public static Action<IServiceCollection> Replacing(Rights rights, RecordingStateStore store) =>
             services =>
@@ -525,7 +525,7 @@ public class RegistrationRefreshTests
             return node;
         }
 
-        public SignalRDataClient<string> NewClient(string subject, params string[] groups)
+        public TransportRClient<string> NewClient(string subject, params string[] groups)
         {
             Rights.Set(subject, groups);
             return TestClients.Create(null, Host.BaseUrl, new Tokens(subject).GetAsync);

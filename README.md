@@ -60,8 +60,8 @@ last batch, a memory bound at each end for a caller that sets one, and groups th
 ## Quick Start
 
 ```bash
-dotnet add package TransportR.Hub.SignalR                # the hub
-dotnet add package TransportR.Client.SignalR             # each application
+dotnet add package TransportR.Hub                # the hub
+dotnet add package TransportR.Client             # each application
 dotnet add package TransportR.Serialization.MessagePack  # a serializer, the same at both ends
 ```
 
@@ -71,7 +71,7 @@ Any ASP.NET Core application can host it:
 
 ```csharp
 // Program.cs
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -89,7 +89,7 @@ The hub picks no serializer: it forwards opaque bytes and never decodes a payloa
 ### 2. A sender
 
 ```csharp
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
 // Connect to hub
@@ -118,7 +118,7 @@ otherwise.
 ### 3. A receiver
 
 ```csharp
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
 var receiver = new TransportRClientBuilder<Order>()

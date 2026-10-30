@@ -38,5 +38,5 @@ builder.Services.AddDataHub()
 
 ## Dependencies
 
-- `TransportR.Hub.SignalR` — DataHubBuilder
+- `TransportR.Hub` — DataHubBuilder
 - `StackExchange.Redis` — Redis client

@@ -1,6 +1,6 @@
 using System.Buffers;
-using TransportR.Client.SignalR.Batching;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Batching;
+using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 
 namespace POC_DataProxy.Tests;

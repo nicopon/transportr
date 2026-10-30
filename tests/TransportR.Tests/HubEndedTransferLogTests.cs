@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 

@@ -20,7 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shared\Shared.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub\TransportR.Hub.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Auth.SimpleIdp\TransportR.Auth.SimpleIdp.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Storage.Redis\TransportR.Storage.Redis.csproj" />
   </ItemGroup>

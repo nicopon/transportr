@@ -3,10 +3,10 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Hub.SignalR.Access;
-using TransportR.Hub.SignalR.Configuration;
-using TransportR.Hub.SignalR.Hubs;
-using TransportR.Hub.SignalR.Services;
+using TransportR.Hub.Access;
+using TransportR.Hub.Configuration;
+using TransportR.Hub.Hubs;
+using TransportR.Hub.Services;
 using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 

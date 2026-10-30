@@ -1,5 +1,5 @@
 using System.Text.Json;
-using TransportR.Client.SignalR;
+using TransportR.Client;
 using TransportR.Serialization.Json.Services;
 
 namespace TransportR.Serialization.Json;

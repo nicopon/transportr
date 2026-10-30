@@ -1,7 +1,7 @@
 using MessagePack;
 using Microsoft.AspNetCore.Builder;
-using TransportR.Client.SignalR;
-using TransportR.Hub.SignalR;
+using TransportR.Client;
+using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
 
 namespace TransportR.DocSnippets;

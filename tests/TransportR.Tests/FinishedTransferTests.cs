@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Tests.Infrastructure;

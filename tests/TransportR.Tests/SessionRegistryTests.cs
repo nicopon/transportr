@@ -1,5 +1,5 @@
-using TransportR.Client.SignalR.Internal;
-using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.Internal;
+using TransportR.Client.Sessions;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

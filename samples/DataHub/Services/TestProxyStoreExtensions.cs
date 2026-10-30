@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TransportR.Hub.SignalR;
+using TransportR.Hub;
 using TransportR.Interfaces;
 
 namespace DataHub.Services;

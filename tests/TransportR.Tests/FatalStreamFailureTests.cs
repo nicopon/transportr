@@ -1,6 +1,6 @@
 using System.Net;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Sessions;
+using TransportR.Client.Sessions;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;
@@ -70,7 +70,7 @@ public class FatalStreamFailureTests
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"CompleteAsync took {clock.Elapsed} to report a stream the hub refused for good.");
     }
 
-    private static DataSession<string> NewSession(ForgetfulHub hub, Action<TransportR.Client.SignalR.Configuration.ClientOptions>? configure = null)
+    private static DataSession<string> NewSession(ForgetfulHub hub, Action<TransportR.Client.Configuration.ClientOptions>? configure = null)
     {
         var context = new StubSessionContext(new HttpClient(hub));
         // Long enough that reaching the stall bound would be a hang, not a verdict.

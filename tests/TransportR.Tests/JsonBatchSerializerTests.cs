@@ -1,5 +1,5 @@
 using System.Text;
-using TransportR.Client.SignalR.Batching;
+using TransportR.Client.Batching;
 using TransportR.Serialization.Json.Services;
 
 namespace TransportR.Tests;

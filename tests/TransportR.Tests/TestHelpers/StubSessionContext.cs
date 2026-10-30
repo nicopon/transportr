@@ -3,8 +3,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Interfaces;
-using TransportR.Client.SignalR.Sessions;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Sessions;
+using TransportR.Client.Configuration;
 
 namespace TransportR.Tests.TestHelpers;
 

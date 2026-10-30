@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Http.Connections.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Client.SignalR.Configuration;
-using TransportR.Client.SignalR.Internal;
-using TransportR.Client.SignalR.Services;
+using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
+using TransportR.Client.Services;
 using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
 
@@ -16,7 +16,7 @@ namespace TransportR.Tests.Infrastructure;
 /// </summary>
 internal static class TestClients
 {
-    public static SignalRDataClient<string> Create(
+    public static TransportRClient<string> Create(
         HttpMessageHandler? handler,
         string baseUrl,
         Func<Task<string>>? tokenProvider = null,
@@ -50,7 +50,7 @@ internal static class TestClients
             ? new HttpClient(handler) { BaseAddress = new Uri(baseUrl) }
             : new HttpClient(new SocketsHttpHandler()) { BaseAddress = new Uri(baseUrl), Timeout = Timeout.InfiniteTimeSpan };
 
-        return new SignalRDataClient<string>(
+        return new TransportRClient<string>(
             connectionManager,
             new SessionRegistry<string>(logger),
             new MessagePackBatchSerializer<string>(),

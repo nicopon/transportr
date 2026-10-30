@@ -72,7 +72,7 @@ handoff.
 ### Control plane vs data plane
 
 This split is the central design decision and shows up everywhere: SignalR (`CommandHub` /
-`TransportR.Hub.SignalR/Hubs/CommandHub.cs`) only ever does presence/discovery/handshake
+`TransportR.Hub/Hubs/CommandHub.cs`) only ever does presence/discovery/handshake
 (`Connect`, `GetReceivers`, `InitTransfer`, the heartbeats, and the `Ping` a reconnecting session
 probes it with) — it never touches bulk bytes. Data itself moves
 over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
@@ -117,8 +117,8 @@ but `RecordBatch`) is a compile error rather than a throw on the first batch —
 
 ```
 src/TransportR                          # Protocol, interfaces, models — no SignalR/hub deps
-src/TransportR.Client.SignalR           # Client: SignalRDataClient<T>, HubConnectionManager, batching, OAuth2 client credentials
-src/TransportR.Hub.SignalR              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
+src/TransportR.Client           # Client: TransportRClient<T>, HubConnectionManager, batching, OAuth2 client credentials
+src/TransportR.Hub              # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
 src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
 src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
 src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
@@ -142,7 +142,7 @@ they only exist while a transfer does and they feed `TransferState`, not the reg
 
 ### Sender/receiver client model
 
-`SignalRDataClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`
+`TransportRClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`
 (`src/TransportR/Interfaces/ITransportRClient.cs`). A sender calls `InitTransferAsync` to get a
 `Send<T>` handle (`src/TransportR/Abstractions/Send.cs`); a receiver registers `OnTransferStarted`
 and consumes a `Receive<T>` handle via `IAsyncEnumerable`. A transfer the host opens reaches the

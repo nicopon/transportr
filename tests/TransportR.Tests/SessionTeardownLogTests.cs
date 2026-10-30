@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Configuration;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

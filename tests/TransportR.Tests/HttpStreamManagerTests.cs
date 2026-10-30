@@ -1,7 +1,7 @@
 using System.Net;
-using TransportR.Client.SignalR.Internal;
-using TransportR.Client.SignalR.Sessions;
-using TransportR.Client.SignalR.Configuration;
+using TransportR.Client.Internal;
+using TransportR.Client.Sessions;
+using TransportR.Client.Configuration;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.SignalR.Client;

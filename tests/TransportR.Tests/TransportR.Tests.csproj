@@ -32,8 +32,8 @@
     <ProjectReference Include="..\..\samples\Shared\Shared.csproj" />
     <ProjectReference Include="..\..\samples\DataHub\DataHub.csproj" />
     <ProjectReference Include="..\..\src\TransportR\TransportR.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Client.SignalR\TransportR.Client.SignalR.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Client\TransportR.Client.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub\TransportR.Hub.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Storage.Redis\TransportR.Storage.Redis.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Arrow\TransportR.Serialization.Arrow.csproj" />

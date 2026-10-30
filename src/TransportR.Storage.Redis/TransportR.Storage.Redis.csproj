@@ -2,7 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TransportR\TransportR.csproj" />
-    <ProjectReference Include="..\TransportR.Hub.SignalR\TransportR.Hub.SignalR.csproj" />
+    <ProjectReference Include="..\TransportR.Hub\TransportR.Hub.csproj" />
   </ItemGroup>
 
   <ItemGroup>

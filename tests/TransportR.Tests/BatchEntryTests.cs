@@ -1,5 +1,5 @@
 using System.Buffers;
-using TransportR.Client.SignalR.Internal;
+using TransportR.Client.Internal;
 
 namespace TransportR.Tests;
 
