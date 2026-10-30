@@ -31,9 +31,9 @@ Provides the hub services that:
 │  ClientController (HTTP)                                    │
 │  └── PUT /api/client/{id}/token                             │
 ├─────────────────────────────────────────────────────────────┤
-│  Services (via interfaces for testability)                  │
-│  ├── IStateStore → InMemory/Redis/TestProxy                 │
-│  ├── ITransferManager → TransferManager                     │
+│  Services                                                   │
+│  ├── IStateStore → InMemoryStateStore or RedisStateStore    │
+│  ├── TransferManager                                        │
 │  └── SignalRDataServer (dumb pipe bridge)                   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -65,26 +65,35 @@ app.Run();
 
 ## Testability
 
-Hub components take their collaborators through interfaces and a `TimeProvider`, so a test can
-build one by hand and move the clock instead of waiting:
+Every hub-side clock and timer reads the `TimeProvider` in the container. A test registers its own
+next to `AddDataHub()`, before or after it, and moves it instead of waiting. Most of the hub's
+collaborators are internal, and `CommandHub` takes a `CommandHubDependencies` that only the container
+builds, so a test gets the hub as production does and drives it through its endpoints, over an
+ASP.NET Core `TestServer`:
 
 ```csharp
-var clock = new FakeTimeProvider();
-var stateStore = new InMemoryStateStore(timeProvider: clock);
-var transferManager = new TransferManager(stateStore, clock);
-var policy = new AccessPolicy(Options.Create(new AccessOptions()), clock);   // IFlowControlService is optional
+var clock = new FakeTimeProvider();                  // Microsoft.Extensions.TimeProvider.Testing
 
-var hub = new CommandHub(
-    stateStore,
-    transferManager,
-    identityProvider,        // IClientIdentityProvider
-    initiator,               // SignalRTransferInitiator
-    policy,
-    new ConnectionRegistry(),
-    Options.Create(new AffinityOptions()),
-    logger,                  // ILogger<CommandHub>
-    clock);
+using var host = new HostBuilder()
+    .ConfigureWebHost(web => web
+        .UseTestServer()                             // Microsoft.AspNetCore.TestHost
+        .ConfigureServices(services =>
+        {
+            services.AddSingleton<TimeProvider>(clock);
+            services.AddDataHub().UseDevMode().Build();
+        })
+        .Configure(app =>
+        {
+            app.UseRouting();
+            app.UseEndpoints(endpoints => endpoints.MapDataHub());
+        }))
+    .Start();
+
+// Clients connect through host.GetTestServer().CreateHandler(); clock.Advance(...) runs the hub's timeouts.
 ```
+
+A hub derived from `CommandHub` and registered with `UseHub<THub>()` receives `CommandHubDependencies`
+from the container and passes it to `base` unopened.
 
 ## Dumb Pipe Design
 

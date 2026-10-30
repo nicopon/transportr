@@ -40,16 +40,20 @@ by every sender: N × M paths.          only the hub is reachable: N + M paths.
 
 ### Compared with what you may use today
 
-| | gRPC streaming | File drop (SFTP, MFT) | Kafka | **TransportR** |
-|--|--|--|--|--|
-| **Must be reachable** | The server end | The file server | The brokers | The hub |
-| **Data at rest in between** | None | Files, until picked up and deleted | Retained per topic | None |
-| **Receiver starts consuming** | As data is sent | Once the file is complete | As data is produced | As data is sent |
-| **Sender learns delivery** | If the application builds it | No — only that the upload ended | No — only that the brokers have it | Yes — every batch is acknowledged by the receiver |
-| **After a network cut** | Up to the application | Per file, where client and server support it | From the consumer's committed offset | From the receiver's last batch |
-| **Replay, fan-out** | No | Several readers can fetch a file | Yes | No |
-| **Languages** | Many | Any | Many | .NET only |
-| **To operate** | Nothing | A file server | A cluster | One ASP.NET Core app (+ Redis and a sticky load balancer for HA) |
+| | gRPC streaming | Outbound relay + gRPC | File drop (SFTP, MFT) | Kafka | **TransportR** |
+|--|--|--|--|--|--|
+| **Must be reachable** | The server end | The relay; both ends connect out to it | The file server | The brokers | The hub |
+| **Data at rest in between** | None | None | Files, until picked up and deleted | Retained per topic | None |
+| **Receiver starts consuming** | As data is sent | As data is sent | Once the file is complete | As data is produced | As data is sent |
+| **Sender learns delivery** | If the application builds it | If the application builds it | No — only that the upload ended | No — only that the brokers have it | Yes — every batch is acknowledged by the receiver |
+| **After a network cut** | Up to the application | Up to the application | Per file, where client and server support it | From the consumer's committed offset | From the receiver's last batch |
+| **Replay, fan-out** | No | No | Several readers can fetch a file | Yes | No |
+| **Languages** | Many | Many | Any | Many | .NET only |
+| **To operate** | Nothing | A relay: a managed service (Azure Relay Hybrid Connections) or a reverse tunnel you host | A file server | A cluster | One ASP.NET Core app (+ Redis and a sticky load balancer for HA) |
+
+An outbound relay that carries gRPC gives the same N + M topology, with outbound connections only. What it leaves
+to each application is what TransportR is for: an acknowledgement for every batch, resumption from the receiver's
+last batch, bounded memory at both ends, and groups that decide who may send to whom.
 
 ---
 
@@ -165,6 +169,11 @@ On one machine over loopback, the `default` scenario moves 2 million orders (abo
 450,000 to 630,000 items per second on the sender side, whichever of MessagePack, Protobuf or JSON carries them
 (five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
 135,000 items per second. Over a real network, bandwidth and item size decide.
+
+One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one HTTP stream on
+each hop, sender to hub and hub to receiver. Over a long round trip, one TCP connection's window bounds the rate,
+and nothing spreads a transfer over several connections. No scenario measures that rate under latency yet: `chaos`
+injects latency but asserts only that every row arrives.
 
 ---
 

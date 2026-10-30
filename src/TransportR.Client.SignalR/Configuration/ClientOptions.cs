@@ -57,8 +57,12 @@ internal class ClientOptions
     /// acknowledges nothing, and that is what this bounds.
     /// </para>
     /// <para>
-    /// It matches the hub's <c>TransferInactivityTimeoutSeconds</c> on purpose: past that point the
-    /// hub has terminated the transfer anyway, so waiting longer waits on nothing.
+    /// The bound is the client's own, and at the hub's defaults it is reached first. While
+    /// <c>CompleteAsync</c> waits, the sender's per-transfer heartbeats keep the transfer active, so
+    /// <c>TransferInactivityTimeoutSeconds</c> does not end it. A receiver that went away leaves its
+    /// bridges short of <c>Active</c>, which the hub ends no sooner than <c>BridgeTimeoutSeconds</c>
+    /// (300 s by default) later; one still connected but no longer reading keeps them <c>Active</c>,
+    /// and only <c>StalledProgressTimeoutSeconds</c>, where it is set, ends that transfer at the hub.
     /// </para>
     /// <para>
     /// The same clock bounds a producer parked on a full <see cref="MaxInFlightBatches"/> window:

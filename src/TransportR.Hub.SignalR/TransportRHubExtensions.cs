@@ -66,12 +66,19 @@ public class DataHubBuilder
     /// hub and map another.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// TransportR's own services resolve <see cref="IHubContext{CommandHub}"/>
     /// (<c>SignalRTransferInitiator</c>, <c>SignalRTransferNotifier</c>); redirecting that
     /// resolution to <typeparamref name="THub"/>'s own context - valid because
     /// <see cref="IHubContext{THub}"/> is covariant in <c>THub</c> - is what puts the host's own
     /// hub methods and TransportR's handshake on the one connection a client has, instead of a
     /// second hub the client would have to connect to as well.
+    /// </para>
+    /// <para>
+    /// The connection extended this way carries the host's coordination of its own clients.
+    /// TransportR adds no routing or broadcast to it: groups and fan-out written there are the
+    /// host's code, and a transfer still has one sender and one receiver.
+    /// </para>
     /// </remarks>
     public DataHubBuilder UseHub<THub>() where THub : CommandHub
     {

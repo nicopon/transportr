@@ -209,7 +209,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | Complete | 0x03 | Transfer complete signal (requires CompleteAck) |
 | CompleteAck | 0x04 | Acknowledgment of Complete (ensures reliable termination) |
 | Ping | 0x05 | Connection probe (sender → receiver) |
-| Pong | 0x06 | Connection probe response |
+| Pong | 0x06 | Connection probe response; `BatchId` carries the receiver's next expected batch, the resume point |
 | Abort | 0x07 | The sending end gave up; `BatchId` carries an `AbortReason` |
 
 > **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. A batch body the receiver cannot decode fails its session instead of being resent: it arrived whole, and a resend would decode no better.
@@ -241,10 +241,8 @@ Run: `dotnet test`
 
 ## Performance
 
-On one machine over loopback, the `default` scenario moves 2 million orders (about 500 bytes each as JSON) at
-450 000 to 630 000 items per second on the sender side, whichever of MessagePack, Protobuf or JSON carries them
-(five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
-135 000 items per second. Over a real network, bandwidth and item size decide.
+The measured rates, their conditions and what caps one transfer are in the README, under
+["Performance, and its conditions"](./README.md#performance-and-its-conditions).
 
 Run benchmarks: `./scripts/run-benchmark.sh`
 

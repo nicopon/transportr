@@ -63,8 +63,10 @@ route from the builder, and a hub value is set on the options class named in the
   checks only that its own value is positive.
 - The presence heartbeat (60 s, fixed) is below `ConnectedTtlSeconds` (3600 s), which it refreshes (`ClientOptions.PresenceHeartbeatInterval`).
   The hub checks only that its own value is positive.
-- The completion stall bound (60 s, fixed) equals the default `TransferInactivityTimeoutSeconds`, because the hub has ended the transfer by then
-  (`ClientOptions.CompleteStallTimeout`). It holds at the defaults only.
+- The completion stall bound (60 s, fixed) is the client's own (`ClientOptions.CompleteStallTimeout`), and at the hub's defaults it is reached
+  first. While `CompleteAsync` waits, the sender's per-transfer heartbeats keep the transfer active, so `TransferInactivityTimeoutSeconds` does
+  not end it. The hub ends the transfer of a receiver that went away no sooner than `BridgeTimeoutSeconds` (300 s) later, and that of a receiver
+  still connected but no longer reading only on `StalledProgressTimeoutSeconds`, where it is set. Nothing compares the client's bound with them.
 - A client renews `min(TokenRefreshThreshold, half of what is left)` before its token's expiry (`TokenRenewer.Advance`); the hub closes it at most
   `AccessSweepIntervalSeconds` after the expiry plus `TokenExpiryMarginSeconds` (`AccessOptions`). Nothing compares the two.
 
@@ -262,15 +264,9 @@ That placement is also why the sender's window cannot count bytes: the serialize
 
 ## Protocol Chunk Types
 
-| Type | Code | Description |
-|------|------|-------------|
-| `Batch` | 0x01 | Data payload |
-| `BatchAck` | 0x02 | Batch acknowledgment |
-| `Complete` | 0x03 | Transfer completion signal |
-| `CompleteAck` | 0x04 | Acknowledgment of Complete |
-| `Ping` | 0x05 | Stream Handshake Request |
-| `Pong` | 0x06 | Stream Handshake Response (+ Resume Offset) |
-| `Abort` | 0x07 | The sending end gave up; `BatchId` carries an `AbortReason` |
+The chunk types are listed once, under "ChunkType Values" in
+[TransportRArchitecture.md](./TransportRArchitecture.md#chunktype-values). This document relies on
+`Ping` and `Pong`, the stream handshake of section 2, and on `Complete` and `CompleteAck` below.
 
 ---
 

@@ -4,9 +4,8 @@ Core library containing interfaces, protocols, and abstractions for the Transpor
 
 ## Purpose
 
-This project defines the foundational contracts and the binary protocol, and holds the hub services that need no
-network stack: the in-memory state store, the bridge and session state machines, the transfer manager and the
-cleanup services. It references no SignalR or ASP.NET Core package.
+This project defines the contracts and the binary protocol shared by the client, the hub and the state stores. It
+references no SignalR or ASP.NET Core package and holds no hub service: those live in `TransportR.Hub.SignalR`.
 
 ## Key Interfaces
 
@@ -39,13 +38,6 @@ public interface IDataReceiver<T> : IDataClient
 {
     event Func<Receive<T>, Task> OnTransferStarted;
 }
-```
-
-### ITransferManager
-
-```csharp
-// For unit testing hub components
-public interface ITransferManager { ... }
 ```
 
 ## Protocols

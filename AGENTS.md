@@ -77,7 +77,9 @@ This split is the central design decision and shows up everywhere: SignalR (`Com
 probes it with) — it never touches bulk bytes. Data itself moves
 over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
 /api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
-without deserializing them. Reliability, the resume point and even transfer-completion detection are
+without deserializing them or parsing their headers: only the clients read a `ChunkHeader`, and a
+change that has the hub read one (to see a `Complete` or an `Abort`, say) reverses this decision
+rather than extending it. Reliability, the resume point and even transfer-completion detection are
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid SignalR-vs-stream
 race conditions. One thing still leans on SignalR, and the docs say so: a reconnecting session waits
 for a SignalR `Ping` to answer before reopening its streams. The hub judges a transfer's activity on
@@ -248,5 +250,9 @@ happen: see "Token Renewal" in `SecurityArchitecture.md`.
 - **Scope discipline**: TransportR is deliberately not a message broker. Flag (rather than silently
   implement) anything that pushes it toward pub/sub, hub-side persistence/replay, or topic routing —
   point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces before
-  building it.
+  building it. The control connection a host extends (`UseHub<THub>()` on the hub,
+  `WithControlConnection` on the client) carries the host's coordination of its own clients:
+  TransportR adds no routing or broadcast to it, and SignalR groups or fan-out proposed there are
+  the same drift toward pub/sub. Ask of each addition a consumer requests whether it is transport or
+  orchestration; orchestration belongs to the host.
 - No generation dates in documentation.
