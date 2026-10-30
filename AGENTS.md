@@ -85,7 +85,7 @@ race conditions. One thing still leans on SignalR, and the docs say so: a reconn
 for a SignalR `Ping` to answer before reopening its streams. The hub judges a transfer's activity on
 its heartbeats and on the bytes its streams carry, counted and never read. Don't reintroduce a
 control-plane message for something the data plane already decides (see "Why Not Control Plane?"
-in `ResilienceArchitecture.md`). The one request that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a sender whose in-stream `Abort`
+in `ResilienceArchitecture.md`). The one request that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
 transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
 cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.

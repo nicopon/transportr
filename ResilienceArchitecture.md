@@ -14,8 +14,9 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 
 ## Key Timings
 
-The one table of timings. A value the code keeps in a constant names its `file:line`; a client value that is **fixed** has no
-route from the builder, and a hub value is set on the options class named in the *Settable* column.
+The one table of timings. A value the code keeps in a constant names its `file:line`. A **fixed** value has no setting:
+no route from the builder on the client, no options property on the hub. Any other is set where the *Settable* column
+says: a builder method on the client, an options class on the hub.
 
 | Side | Name | Default | Settable | What it bounds |
 |---|---|---|---|---|
@@ -219,7 +220,7 @@ The Hub employs a **TransferCleanupService** that monitors all active transfers.
 -   **LastActivityUtc**: Updates on the per-transfer heartbeats, on `Ping`, and on every read the hub makes from one of the transfer's streams: the bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' control connections are silent.
 -   **Which hub instance judges**: the one that registered the transfer, or that accepted one of its streams. An instance that only looks the transfer up in the shared store (a misrouted request, a check whether the hub still holds it) starts no state, so its sweep never ends a transfer it does not carry.
 -   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
--   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
+-   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration, or from the first of its streams it accepts. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
 -   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the hub refuses it when it starts, and the deployment has to name the longest outage it intends to survive before enabling it.
 -   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request below) is cancelled on both clients with `CancelTransfer`. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
@@ -301,7 +302,7 @@ The Hub detects completion via `CopyAndFlushAsync()` which returns `StreamEndRea
 
 ```csharp
 var endReason = await CopyAndFlushAsync(inputStream, receiverOutput, bufferSize, token);
-if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Triggers Step 6
+if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Step 5
 {
     await retirer.RetireAsync(transferId); // state, session and both bridges; nobody is told
 }
@@ -309,7 +310,7 @@ if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Triggers Step
 
 That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control POST ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a receiver in its closing phase reads as the end.
 
-The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep below.
+The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep ("3. Hub-Driven Timeout", above).
 
 ### Why Not Control Plane?
 

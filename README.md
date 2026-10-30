@@ -53,7 +53,7 @@ by every sender: N × M paths.          only the hub is reachable: N + M paths.
 
 An outbound relay that carries gRPC gives the same N + M topology, with outbound connections only. What it leaves
 to each application is what TransportR is for: an acknowledgement for every batch, resumption from the receiver's
-last batch, bounded memory at both ends, and groups that decide who may send to whom.
+last batch, a memory bound at each end for a caller that sets one, and groups that decide who may send to whom.
 
 ---
 
@@ -173,7 +173,7 @@ On one machine over loopback, the `default` scenario moves 2 million orders (abo
 One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one HTTP stream on
 each hop, sender to hub and hub to receiver. Over a long round trip, one TCP connection's window bounds the rate,
 and nothing spreads a transfer over several connections. No scenario measures that rate under latency yet: `chaos`
-injects latency but asserts only that every row arrives.
+injects latency and asserts that the transfer completes, not how fast.
 
 ---
 
