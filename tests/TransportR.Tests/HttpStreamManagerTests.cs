@@ -40,8 +40,7 @@ public class HttpStreamManagerTests
         var result = await manager.SenderTask!;
 
         // Assert
-        Assert.True(result.IsSuccess);
-        Assert.False(result.IsRetryable);
+        Assert.Equal(StreamOutcome.Ended, result.Outcome);
     }
 
     [Fact]
@@ -61,9 +60,7 @@ public class HttpStreamManagerTests
         var result = await manager.SenderTask!;
 
         // Assert
-        Assert.False(result.IsSuccess);
-        Assert.False(result.IsRetryable); // Fatal
-        Assert.Contains("Transfer Gone", result.ErrorMessage);
+        Assert.Equal(StreamOutcome.Gone, result.Outcome);
     }
 
     [Fact]
@@ -83,8 +80,7 @@ public class HttpStreamManagerTests
         var result = await manager.SenderTask!;
 
         // Assert
-        Assert.False(result.IsSuccess);
-        Assert.True(result.IsRetryable); // Retryable
+        Assert.Equal(StreamOutcome.Retryable, result.Outcome);
     }
 
     [Fact]
@@ -104,8 +100,7 @@ public class HttpStreamManagerTests
         var result = await manager.SenderTask!;
 
         // Assert: a protocol violation is never worth retrying - reconnecting repeats it.
-        Assert.False(result.IsSuccess);
-        Assert.False(result.IsRetryable);
+        Assert.Equal(StreamOutcome.Fatal, result.Outcome);
     }
 
     [Theory]

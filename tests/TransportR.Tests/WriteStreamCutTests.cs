@@ -60,8 +60,7 @@ public class WriteStreamCutTests
 
         var result = await manager.SenderTask!.WaitAsync(Bound);
 
-        Assert.False(result.IsSuccess);
-        Assert.True(result.IsRetryable);
+        Assert.Equal(StreamOutcome.Retryable, result.Outcome);
     }
 
     [Fact]
@@ -96,8 +95,7 @@ public class WriteStreamCutTests
 
         var result = await manager.ReceiverTask!.WaitAsync(Bound);
 
-        Assert.False(result.IsSuccess);
-        Assert.True(result.IsRetryable);
+        Assert.Equal(StreamOutcome.Retryable, result.Outcome);
     }
 
     [Fact]
@@ -131,9 +129,7 @@ public class WriteStreamCutTests
 
         var result = await manager.SenderTask!.WaitAsync(Bound);
 
-        Assert.False(result.IsSuccess);
-        Assert.False(result.IsRetryable);
-        Assert.Contains("Transfer Gone", result.ErrorMessage);
+        Assert.Equal(StreamOutcome.Gone, result.Outcome);
     }
 
     [Fact]

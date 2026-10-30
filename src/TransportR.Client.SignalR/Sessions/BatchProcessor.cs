@@ -46,6 +46,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private long _itemsSent;
     private long _itemsReceived;
     private long _acksReceived;
+    private long _lastAckAtMs = Environment.TickCount64;
     private long _acksSent;
     private long _payloadBytes;
 
@@ -53,6 +54,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public long ItemsSent => Interlocked.Read(ref _itemsSent);
     public long ItemsReceived => Interlocked.Read(ref _itemsReceived);
     public long AcksReceived => Interlocked.Read(ref _acksReceived);
+
+    /// <summary>
+    /// When the last acknowledgement arrived, on the <see cref="Environment.TickCount64"/> clock, or
+    /// when this processor was created if none has.
+    /// </summary>
+    public long LastAckAtMs => Volatile.Read(ref _lastAckAtMs);
     public long AcksSent => Interlocked.Read(ref _acksSent);
 
     /// <summary>
@@ -60,12 +67,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// headers excluded.
     /// </summary>
     public long PayloadBytes => Interlocked.Read(ref _payloadBytes);
-
-    /// <summary>
-    /// Counts payload bytes written by the session's own write loop, which owns the outgoing stream
-    /// and so cannot be counted from here.
-    /// </summary>
-    public void CountPayloadBytes(int bytes) => Interlocked.Add(ref _payloadBytes, bytes);
     public int PendingBatches => _pendingBatches;
     public bool HasUnackedBatches => !_unackedBatches.IsEmpty;
     public int UnackedCount => _unackedBatches.Count;
@@ -321,7 +322,13 @@ internal class BatchProcessor<T> : IAsyncDisposable
              Interlocked.Decrement(ref _pendingBatches);
              ReleaseInFlightSlot();
         }
+        CountAck();
+    }
+
+    private void CountAck()
+    {
         Interlocked.Increment(ref _acksReceived);
+        Volatile.Write(ref _lastAckAtMs, Environment.TickCount64);
     }
 
     /// <summary>
@@ -474,7 +481,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
                     removedEntry.Release();
                     // Implicit ACK: Update stats and pending/unacked counters
                     Interlocked.Decrement(ref _pendingBatches);
-                    Interlocked.Increment(ref _acksReceived);
+                    CountAck();
                     // Same as an explicit ack: the batch is done, give the slot back. Without this
                     // the window shrinks by one on every resumed batch and never reopens.
                     ReleaseInFlightSlot();
@@ -484,23 +491,14 @@ internal class BatchProcessor<T> : IAsyncDisposable
                 continue;
             }
             
-            // Try retain payload for usage
-            var memoryOwner = kvp.Value.TryRetain();
-            if (memoryOwner == null) 
-            {
-                 // Reference count was 0 or disposed, means it was Acked/Removed concurrently
-                 _context.Logger.LogDebug("Race condition avoided: Batch {BatchId} was disposed/acked concurrently during resend (Transfer={TransferId})", kvp.Key, _transferId);
-                 continue;
-            }
-
             try
             {
-                var payloadMem = memoryOwner.Memory;
-                var count = BinaryPrimitives.ReadInt32LittleEndian(payloadMem.Span[..4]);
-                var body = payloadMem[4..];
-                
-                await ChunkIO.WriteBatchAsync(outputStream, transferGuid, kvp.Key, count, body, token);
-                Interlocked.Add(ref _payloadBytes, payloadMem.Length);
+                if (!await WriteBatchAsync(outputStream, transferGuid, kvp.Key, kvp.Value, token))
+                {
+                    _context.Logger.LogDebug("Race condition avoided: Batch {BatchId} was disposed/acked concurrently during resend (Transfer={TransferId})", kvp.Key, _transferId);
+                    continue;
+                }
+
                 await outputStream.FlushAsync(token);
                 _context.Logger.LogInformation("Resent unacked batch {BatchId} on reconnect (Transfer={TransferId})", kvp.Key, _transferId);
             }
@@ -509,10 +507,29 @@ internal class BatchProcessor<T> : IAsyncDisposable
                 _context.Logger.LogWarning("Failed to resend unacked batch {BatchId}: {Message}", kvp.Key, ex.Message);
                 throw;
             }
-            finally
-            {
-                kvp.Value.Release();
-            }
+        }
+    }
+
+    /// <summary>
+    /// Writes a batch from its entry, under a reference of its own. An entry its acknowledgement
+    /// released in the meantime has nothing left to write: that returns false.
+    /// </summary>
+    public async Task<bool> WriteBatchAsync(Stream outputStream, Guid transferGuid, int batchId, BatchEntry entry, CancellationToken token)
+    {
+        var payload = entry.TryRetain();
+        if (payload == null) return false;
+
+        try
+        {
+            var memory = payload.Memory;
+            var count = BinaryPrimitives.ReadInt32LittleEndian(memory.Span[..4]);
+            await ChunkIO.WriteBatchAsync(outputStream, transferGuid, batchId, count, memory[4..], token);
+            Interlocked.Add(ref _payloadBytes, memory.Length);
+            return true;
+        }
+        finally
+        {
+            entry.Release();
         }
     }
     

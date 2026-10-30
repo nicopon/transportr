@@ -57,6 +57,37 @@ public class DataSessionStateMachineTests
     }
 
     [Fact]
+    public void Sender_GoesFromStreamingToCompleted_WithoutAClosingPhase()
+    {
+        _fsm.TransitionTo(SessionState.Starting);
+        _fsm.TransitionTo(SessionState.Streaming);
+        Assert.False(_fsm.IsCompleting);
+
+        Assert.True(_fsm.TransitionTo(SessionState.Completed));
+
+        Assert.False(_fsm.IsCompleting);
+        Assert.False(_fsm.Completing.IsCompleted);
+        Assert.True(_fsm.Stopped.IsCompleted);
+    }
+
+    [Fact]
+    public void Receiver_ClosesBetweenAcceptingCompleteAndCompleted()
+    {
+        _fsm.TransitionTo(SessionState.Starting);
+        _fsm.TransitionTo(SessionState.Streaming);
+        Assert.False(_fsm.Completing.IsCompleted);
+
+        _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
+        Assert.True(_fsm.IsCompleting);
+        Assert.True(_fsm.Completing.IsCompleted);
+        Assert.False(_fsm.Stopped.IsCompleted);
+
+        _fsm.TransitionTo(SessionState.Completed);
+        Assert.False(_fsm.IsCompleting);
+        Assert.True(_fsm.Stopped.IsCompleted);
+    }
+
+    [Fact]
     public void Stopped_IsPending_UntilAFinalStateIsReached()
     {
         _fsm.TransitionTo(SessionState.Starting);
@@ -192,16 +223,14 @@ public class DataSessionStateMachineTests
         Assert.Equal(SessionState.Failed, _fsm.CurrentState);
     }
 
-    [Theory]
-    [InlineData(SessionState.ReceiverCompleteReceived)]
-    [InlineData(SessionState.ReceiverAckSent)]
-    public void OnAborted_FromAReceiverClosingState_MovesToFailed(SessionState state)
+    [Fact]
+    public void OnAborted_FromTheReceiverClosingState_MovesToFailed()
     {
         // A sender that gave up on its stall bound sends this Abort to a receiver that may already
         // hold every batch but whose CompleteAck never arrived. That receiver fails with the sender
         // rather than reaching Completed on the hub's closing EOF: the two ends agree on a failure
         // instead of a sender reporting one and a receiver reporting success.
-        _fsm.TransitionTo(state);
+        _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
 
         var result = _fsm.OnAborted();
 

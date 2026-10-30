@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
@@ -123,10 +122,9 @@ internal class DataSession<T> : IDataSession<T>
             _reconnectionHandler.HandleStreamPong(id);
         };
         _batchProcessor.OnCompleteReceived += () => {
-            // Receiver received Complete from Sender (Domino Step 2)
+            // Not Completed yet: the acknowledgement is only queued, and the session has to stay up
+            // until the hub has read it.
             _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
-            // Do NOT transition to Completed yet. We must wait for EOF signals from hub.
-            // This ensures we stay alive long enough to flush the CompleteAck and for Sender to receive it.
             return Task.CompletedTask;
         };
         _batchProcessor.OnAbortReceived += (reason) => {
@@ -206,40 +204,52 @@ internal class DataSession<T> : IDataSession<T>
     private async Task WhileAcknowledgingAsync(Task send, CancellationToken cancellationToken)
     {
         var stallTimeout = _config.Options.CompleteStallTimeout;
-        var pollInterval = TimeSpan.FromMilliseconds(Math.Min(CompleteRetryMs, stallTimeout.TotalMilliseconds));
+        var parkedAtMs = Environment.TickCount64;
 
-        var lastAcks = _batchProcessor.AcksReceived;
-        var lastProgressUtc = DateTime.UtcNow;
-
-        while (await Task.WhenAny(send, Task.Delay(pollInterval, cancellationToken)) != send)
+        while (!send.IsCompleted)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var acks = _batchProcessor.AcksReceived;
-            if (acks != lastAcks)
+            var silence = AcknowledgementSilence(parkedAtMs);
+            if (silence >= stallTimeout)
             {
-                lastAcks = acks;
-                lastProgressUtc = DateTime.UtcNow;
-                continue;
+                FailOnAcknowledgementStall();
+
+                // The parked producer unwinds with a cancellation; the failure is reported below.
+                try { await send; } catch (OperationCanceledException) { }
+
+                throw new TransferFailedException(
+                    TransferId,
+                    $"The send window stayed full: nothing was acknowledged for {silence.TotalSeconds:N0}s.");
             }
 
-            var stalledFor = DateTime.UtcNow - lastProgressUtc;
-            if (stalledFor < stallTimeout) continue;
+            // Wakes when an acknowledgement reopens the window, or when the receiver will have been
+            // silent for the whole bound: no moment in between can change the verdict.
+            await send.WaitAsync(stallTimeout - silence, cancellationToken)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
-            _fsm.TransitionTo(SessionState.Failed);
-            AbortPeer(AbortReason.AcknowledgementTimeout);
-            _batchProcessor.CompleteSenderChannel();
-            _batchProcessor.AbandonSender();
-
-            // The parked producer unwinds with a cancellation; the failure is reported below.
-            try { await send; } catch (OperationCanceledException) { }
-
-            throw new TransferFailedException(
-                TransferId,
-                $"The send window stayed full: nothing was acknowledged for {stalledFor.TotalSeconds:N0}s.");
+            if (!send.IsCompleted) cancellationToken.ThrowIfCancellationRequested();
         }
 
         await AwaitOrTranslateAsync(send, cancellationToken);
+    }
+
+    /// <summary>
+    /// How long the receiver has acknowledged nothing, counted from <paramref name="sinceMs"/>
+    /// (<see cref="Environment.TickCount64"/>) at the earliest. The one clock for both waits that only
+    /// an acknowledgement ends, a producer on a full window and <see cref="CompleteAsync"/>.
+    /// </summary>
+    private TimeSpan AcknowledgementSilence(long sinceMs) =>
+        TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(sinceMs, _batchProcessor.LastAckAtMs));
+
+    /// <summary>
+    /// Fails a transfer whose receiver stopped acknowledging. The Abort is queued before the channel
+    /// completes, as <see cref="AbortPeer"/> requires, and a producer still parked on the window is let go.
+    /// </summary>
+    private void FailOnAcknowledgementStall()
+    {
+        _fsm.TransitionTo(SessionState.Failed);
+        AbortPeer(AbortReason.AcknowledgementTimeout);
+        _batchProcessor.CompleteSenderChannel();
+        _batchProcessor.AbandonSender();
     }
 
     /// <summary>
@@ -279,13 +289,9 @@ internal class DataSession<T> : IDataSession<T>
         }
 
         await AwaitOrTranslateAsync(_batchProcessor.CompleteSenderAsync(cancellationToken), cancellationToken);
-        
-        // We used to wait for PendingBatches > 0 here, but that causes deadlocks if ACKs are buffered.
-        // We now rely on the "Complete" signal to flush the pipe.
-        // The Receiver checks for missing batches before accepting Complete.
-        // If it rejects it (missing data), the Sender loops below ensuring retry.
-        
-        // Just log the status for debugging
+
+        // Complete goes out with batches still in flight rather than after them: the receiver refuses
+        // it while one is missing, and the loop below sends it again until the tail is in.
         if (_batchProcessor.PendingBatches > 0)
         {
              _config.Logger.LogInformation("CompleteAsync entered with {Pending} pending batches. Proceeding to SendComplete to flush...", _batchProcessor.PendingBatches);
@@ -299,10 +305,9 @@ internal class DataSession<T> : IDataSession<T>
 
         // The receiver refuses Complete while batches are still missing, so re-sending it is how the
         // tail of a transfer drains and a retry on its own says nothing is wrong. What bounds the
-        // loop is therefore the acknowledgement count, not the number of attempts: a peer still
-        // acknowledging is still working, one that has gone away stops moving it.
-        var lastAcks = _batchProcessor.AcksReceived;
-        var lastProgressUtc = DateTime.UtcNow;
+        // loop is therefore the acknowledgements, not the number of attempts: a peer still
+        // acknowledging is still working, one that has gone away stops sending them.
+        var startedAtMs = Environment.TickCount64;
 
         while (!IsStopped)
         {
@@ -338,31 +343,27 @@ internal class DataSession<T> : IDataSession<T>
             // follows the loop says why, and a retry of Complete would be sent to nobody.
             if (IsStopped) break;
 
-            var acks = _batchProcessor.AcksReceived;
-            if (acks != lastAcks)
+            var silence = AcknowledgementSilence(startedAtMs);
+            if (silence >= stallTimeout)
             {
-                lastAcks = acks;
-                lastProgressUtc = DateTime.UtcNow;
+                FailOnAcknowledgementStall();
+                throw new TransferFailedException(
+                    TransferId,
+                    $"Transfer did not complete: nothing was acknowledged for {silence.TotalSeconds:N0}s.");
+            }
+
+            if (silence < retryInterval)
+            {
                 _config.Logger.LogInformation(
                     "Complete not acknowledged yet, {Unacked} batches still in flight - retrying (Transfer={TransferId})",
                     _batchProcessor.UnackedCount, TransferId);
-                continue;
             }
-
-            var stalledFor = DateTime.UtcNow - lastProgressUtc;
-            if (stalledFor >= stallTimeout)
+            else
             {
-                _fsm.TransitionTo(SessionState.Failed);
-                AbortPeer(AbortReason.AcknowledgementTimeout);
-                _batchProcessor.CompleteSenderChannel();
-                throw new TransferFailedException(
-                    TransferId,
-                    $"Transfer did not complete: nothing was acknowledged for {stalledFor.TotalSeconds:N0}s.");
+                _config.Logger.LogWarning(
+                    "Complete not acknowledged and nothing acknowledged for {Stalled:N0}s (Transfer={TransferId})",
+                    silence.TotalSeconds, TransferId);
             }
-
-            _config.Logger.LogWarning(
-                "Complete not acknowledged and nothing acknowledged for {Stalled:N0}s (Transfer={TransferId})",
-                stalledFor.TotalSeconds, TransferId);
         }
 
         // Only reachable when something else stopped the session under us.
@@ -416,25 +417,22 @@ internal class DataSession<T> : IDataSession<T>
         // not a delivered one — the stream carrying it can fail, and the resend that follows needs
         // the session the caller is about to release. What says the acknowledgement arrived is the
         // hub ending this session's streams, which is the terminal state itself.
-        DateTime? completingSince = null;
+        await Task.WhenAny(_fsm.Completing, _fsm.Stopped).WaitAsync(cancellationToken);
 
-        while (!IsStopped)
+        if (!IsStopped)
         {
-            if (IsInCompletingPhase)
+            // Only the ending is bounded, never the transfer: before the completing phase the
+            // peer is still working and the caller's token is the only clock that applies.
+            try
             {
-                completingSince ??= DateTime.UtcNow;
-
-                // Only the ending is bounded, never the transfer: before the completing phase the
-                // peer is still working and the caller's token is the only clock that applies.
-                if (DateTime.UtcNow - completingSince >= _config.Options.CompleteStallTimeout)
-                {
-                    throw new TransferFailedException(
-                        TransferId,
-                        "All data was received, but the transfer never finished closing; the sender cannot know it completed.");
-                }
+                await _fsm.Stopped.WaitAsync(_config.Options.CompleteStallTimeout, cancellationToken);
             }
-
-            await Task.Delay(100, cancellationToken);
+            catch (TimeoutException)
+            {
+                throw new TransferFailedException(
+                    TransferId,
+                    "All data was received, but the transfer never finished closing; the sender cannot know it completed.");
+            }
         }
 
         if (_fsm.CurrentState is SessionState.Disposed or SessionState.Failed)
@@ -574,7 +572,7 @@ internal class DataSession<T> : IDataSession<T>
     /// neither.
     /// </summary>
     private static bool AbortConfirmed(HttpStreamManager.StreamResult written) =>
-        written is { IsSuccess: true, ErrorMessage: null } or { IsSuccess: false, IsRetryable: false };
+        written.Outcome is StreamOutcome.Ended or StreamOutcome.Gone or StreamOutcome.Fatal;
 
     #endregion
 
@@ -584,7 +582,7 @@ internal class DataSession<T> : IDataSession<T>
     {
         _config.Logger.LogInformation("Session Loop {TransferId} Starting. IsSender={IsSender}", TransferId, IsSender);
 
-        while (!token.IsCancellationRequested && _fsm.CurrentState != SessionState.Completed && _fsm.CurrentState != SessionState.Failed)
+        while (!token.IsCancellationRequested && !IsStopped)
         {
             try
             {
@@ -614,20 +612,19 @@ internal class DataSession<T> : IDataSession<T>
                          }
                          break;
 
+                    case SessionState.ReceiverCompleteReceived:
+                         // The closing phase is not a resting place: what ends a transfer is the
+                         // hub reading the acknowledgement, so the streams have to stay open until
+                         // it does. A receiver whose control stream failed just after it accepted
+                         // Complete would otherwise sit on an acknowledgement it never re-sends, and
+                         // its sender retry a transfer that was in fact delivered.
+                         await RunStreamsUntilOneEndsAsync(token);
+                         break;
+
                     default:
-                         // The domino states are not a resting place: what ends a transfer is the
-                         // hub closing these streams, so they have to stay open until it does.
-                         // Sleeping here instead left a receiver whose control stream failed just
-                         // after it accepted Complete sitting on an acknowledgement it would never
-                         // re-send, and a sender retrying a transfer that was in fact delivered.
-                         if (IsInCompletingPhase)
-                         {
-                             await RunStreamsUntilOneEndsAsync(token);
-                         }
-                         else
-                         {
-                             await Task.Delay(100, token);
-                         }
+                         // Idle, which the session leaves before this loop starts: there is nothing
+                         // to run, and waiting beats spinning.
+                         await _fsm.Stopped.WaitAsync(token);
                          break;
                 }
             }
@@ -667,40 +664,32 @@ internal class DataSession<T> : IDataSession<T>
         {
             var finished = await Task.WhenAny(activeTasks);
             var result = await finished;
-            
-            if (!result.IsSuccess)
+
+            if (result.Outcome == StreamOutcome.Retryable)
             {
-                if (result.IsRetryable)
+                _config.Logger.LogWarning("Stream failed (Retryable): {Error}. Transitioning to Reconnecting.", result.ErrorMessage);
+                if (!IsInCompletingPhase)
                 {
-                    _config.Logger.LogWarning("Stream failed (Retryable): {Error}. Transitioning to Reconnecting.", result.ErrorMessage);
-                    if (!IsInCompletingPhase)
-                    {
-                        _fsm.OnStreamsLost();
-                    }
-                    else
-                    {
-                        _config.Logger.LogInformation("Retrying stream connection while in completing phase.");
-                        await Task.Delay(CompletingPhaseRetryMs, token);
-                    }
+                    _fsm.OnStreamsLost();
                 }
                 else
                 {
-                    _config.Logger.LogError("Stream failed (Fatal): {Error}. Sessions FAILED.", result.ErrorMessage);
-                    // If we are in completing phase and the server says "Transfer Gone" (404),
-                    // it means the transfer finished successfully and was cleaned up before we could reconnect.
-                    // This is a valid "Success" signal in the completing phase.
-                    if (IsInCompletingPhase && 
-                        result.ErrorMessage != null && 
-                        result.ErrorMessage.Contains("Transfer Gone"))
-                    {
-                        _config.Logger.LogInformation("Transfer Gone (404) received while in completing phase. Transfer confirmed Completed.");
-                        _fsm.TransitionTo(SessionState.Completed);
-                    }
-                    else
-                    {
-                        FailTransfer($"The data stream failed permanently: {result.ErrorMessage}");
-                    }
+                    _config.Logger.LogInformation("Retrying stream connection while in completing phase.");
+                    await Task.Delay(CompletingPhaseRetryMs, token);
                 }
+            }
+            else if (result.Outcome == StreamOutcome.Gone && IsInCompletingPhase)
+            {
+                // The hub forgets a transfer when the sender's data POST ends cleanly, which comes after
+                // the acknowledgement: a stream reopened in the closing phase that finds the transfer
+                // gone has found it finished.
+                _config.Logger.LogInformation("Transfer Gone (404) received while in completing phase. Transfer confirmed Completed.");
+                _fsm.TransitionTo(SessionState.Completed);
+            }
+            else if (!result.IsSuccess)
+            {
+                _config.Logger.LogError("Stream failed (Fatal): {Error}. Sessions FAILED.", result.ErrorMessage);
+                FailTransfer($"The data stream failed permanently: {result.ErrorMessage}");
             }
             else
             {
@@ -782,31 +771,13 @@ internal class DataSession<T> : IDataSession<T>
             {
                 if (message is BatchControlMessage batchMsg)
                 {
-                    // Attempt to retain the payload. 
-                    // If it returns null, it means the batch was already ACKed and disposed (Race condition avoided).
-                    var memoryOwner = batchMsg.Entry.TryRetain();
-                    
-                    try 
+                    try
                     {
-                        // If retained successfully for THIS operation
-                        if (memoryOwner != null)
-                        {
-                             var payloadMem = memoryOwner.Memory;
-                             var count = BinaryPrimitives.ReadInt32LittleEndian(payloadMem.Span[..4]);
-                             var body = payloadMem[4..];
-                             await ChunkIO.WriteBatchAsync(outputStream, transferGuid, batchMsg.BatchId, count, body, token);
-                             _batchProcessor.CountPayloadBytes(payloadMem.Length);
-                        }
+                        await _batchProcessor.WriteBatchAsync(outputStream, transferGuid, batchMsg.BatchId, batchMsg.Entry, token);
                     }
                     finally
                     {
-                        // Release the reference we took with TryRetain()
-                        if (memoryOwner != null)
-                        {
-                            batchMsg.Entry.Release();
-                        }
-
-                        // Release the reference held by the Message itself (passed from BatchProcessor)
+                        // The message holds a reference of its own, taken when it was queued.
                         batchMsg.Entry.Release();
                     }
                 }

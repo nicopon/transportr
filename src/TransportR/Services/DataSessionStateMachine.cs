@@ -13,6 +13,7 @@ public class DataSessionStateMachine
     private readonly string _transferId;
     private readonly object _lock = new();
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _completing = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public SessionState CurrentState => _currentState;
 
@@ -23,11 +24,17 @@ public class DataSessionStateMachine
     public Task Stopped => _stopped.Task;
 
     /// <summary>
-    /// True while the session is in one of the domino states, sender or receiver side: the data is
-    /// through and what is left is the closing exchange. The streams have to stay open here, so
-    /// callers use this to tell the closing sequence apart from a session that lost its peer.
+    /// Completes when a receiver enters <see cref="SessionState.ReceiverCompleteReceived"/>, and never
+    /// for a sender. It stays completed: what a wait on it starts is the bound on the closing phase.
     /// </summary>
-    public bool IsCompleting => IsCompletingPhase(_currentState);
+    public Task Completing => _completing.Task;
+
+    /// <summary>
+    /// True while a receiver is closing: it accepted Complete, and what is left is the hub reading its
+    /// acknowledgement. The streams have to stay open here, so callers use this to tell the closing
+    /// sequence apart from a session that lost its peer. Always false on a sender.
+    /// </summary>
+    public bool IsCompleting => _currentState == SessionState.ReceiverCompleteReceived;
 
     public DataSessionStateMachine(string transferId, ILogger logger)
     {
@@ -128,6 +135,11 @@ public class DataSessionStateMachine
         _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, state, _transferId);
         _currentState = state;
 
+        if (state == SessionState.ReceiverCompleteReceived)
+        {
+            _completing.TrySetResult();
+        }
+
         if (IsFinal(state))
         {
             _stopped.TrySetResult();
@@ -140,17 +152,4 @@ public class DataSessionStateMachine
         state == SessionState.Completed ||
         state == SessionState.Failed ||
         state == SessionState.Disposed;
-
-    private static bool IsCompletingPhase(SessionState state) => state switch
-    {
-        SessionState.SenderCompleteSent => true,
-        SessionState.SenderAckReceived => true,
-        SessionState.SenderTerminatingDataPost => true,
-        SessionState.SenderAwaitingControlGetEOF => true,
-        SessionState.ReceiverCompleteReceived => true,
-        SessionState.ReceiverAckSent => true,
-        SessionState.ReceiverAwaitingDataGetEOF => true,
-        SessionState.ReceiverTerminatingControlPost => true,
-        _ => false
-    };
 }

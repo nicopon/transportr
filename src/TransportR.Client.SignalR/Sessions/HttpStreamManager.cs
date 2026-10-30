@@ -8,6 +8,27 @@ using TransportR.Interfaces;
 namespace TransportR.Client.SignalR.Sessions;
 
 /// <summary>
+/// How a stream attempt ended, which is what the session picks its next state on.
+/// </summary>
+internal enum StreamOutcome
+{
+    /// <summary>The request ran to its end, or the read side stopped reading.</summary>
+    Ended,
+
+    /// <summary>The attempt was cancelled, by the session or by its other stream failing.</summary>
+    Cancelled,
+
+    /// <summary>The hub does not know the transfer (404 or 410).</summary>
+    Gone,
+
+    /// <summary>The connection failed, and a new attempt may get past it.</summary>
+    Retryable,
+
+    /// <summary>A new attempt would fail the same way.</summary>
+    Fatal,
+}
+
+/// <summary>
 /// Manages the underlying HTTP streams for a data session.
 /// Handles connection establishment and the single token-refresh retry; a stream that fails
 /// for any other reason is handed back to the session, which decides whether to reconnect.
@@ -19,7 +40,10 @@ internal class HttpStreamManager : IAsyncDisposable
     private readonly string _transferId;
     private readonly string _dataUrl;
     
-    public record struct StreamResult(bool IsSuccess, bool IsRetryable, string? ErrorMessage = null);
+    public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null)
+    {
+        public bool IsSuccess => Outcome is StreamOutcome.Ended or StreamOutcome.Cancelled;
+    }
 
     private CancellationTokenSource _streamCts;
     private Task<StreamResult>? _senderTask;
@@ -116,8 +140,7 @@ internal class HttpStreamManager : IAsyncDisposable
              }
          }
          
-         // Both completed successfully
-         return new StreamResult(true, false);
+         return new StreamResult(StreamOutcome.Ended);
     }
 
     public void CancelStreams()
@@ -161,7 +184,7 @@ internal class HttpStreamManager : IAsyncDisposable
                 // 1. Handle Gone/NotFound (Fatal)
                 if (response.StatusCode == HttpStatusCode.Gone || response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    return new StreamResult(false, false, $"Transfer Gone ({response.StatusCode})");
+                    return new StreamResult(StreamOutcome.Gone, $"Transfer Gone ({response.StatusCode})");
                 }
                 
                 // 2. Handle Unauthorized (401) - Token expired
@@ -177,7 +200,7 @@ internal class HttpStreamManager : IAsyncDisposable
                     else
                     {
                          // Second failure -> Retryable (force Session reconnect)
-                         return new StreamResult(false, true, "Unauthorized (401) - Check credentials");
+                         return new StreamResult(StreamOutcome.Retryable, "Unauthorized (401) - Check credentials");
                     }
                 }
 
@@ -191,24 +214,24 @@ internal class HttpStreamManager : IAsyncDisposable
                 }
                 
                 // If Write, the request.Content callback has finished
-                return new StreamResult(true, false);
+                return new StreamResult(StreamOutcome.Ended);
             }
             catch (OperationCanceledException)
             {
-                 return new StreamResult(true, false, "Canceled");
+                 return new StreamResult(StreamOutcome.Cancelled);
             }
             catch (WireProtocolViolationException ex)
             {
                  // The peer sent something this version cannot interpret; reconnecting would only
                  // repeat the violation, so this is fatal rather than retryable.
                  _config.Logger.LogError("Protocol violation: {Message}. Session failed.", ex.Message);
-                 return new StreamResult(false, false, ex.Message);
+                 return new StreamResult(StreamOutcome.Fatal, ex.Message);
             }
             catch (Exception ex)
             {
                  // Network errors allow retry
                  _config.Logger.LogWarning("Stream failed: {Message}. Returning Retryable.", ex.Message);
-                 return new StreamResult(false, true, ex.Message);
+                 return new StreamResult(StreamOutcome.Retryable, ex.Message);
             }
             
             // Only a 401 loops here, to retry once with a refreshed token. Every other path
@@ -216,7 +239,7 @@ internal class HttpStreamManager : IAsyncDisposable
             // that the decision to retry is taken where the session state is known.
         }
         
-        return new StreamResult(true, false, "Canceled");
+        return new StreamResult(StreamOutcome.Cancelled);
     }
 
     /// <summary>

@@ -233,7 +233,7 @@ That placement is also why the sender's window cannot count bytes: the serialize
 
 TransportR uses **pure dataplane signals** for transfer completion. No SignalR control plane messages are used.
 
-### 8-Step Domino Sequence
+### The Sequence
 
 ```mermaid
 sequenceDiagram
@@ -241,22 +241,18 @@ sequenceDiagram
     participant H as Hub
     participant R as Receiver
 
-    Note over S,R: Application Protocol (in-stream)
-    S->>R: 1. Complete chunk (LastBatchId)
-    R->>S: 2. CompleteAck (LastBatchId)
-    
-    Note over S: 3. Sender knows receiver got all data
-    Note over R: 4. Receiver knows sender finished
-    
-    Note over S,R: Dataplane EOF (HTTP stream close)
-    S->>H: 5. POST Data: Close stream (EOF)
-    Note over H: Detects EOF → Complete(), forgets the transfer
-    H->>R: 6. GET Data: Close stream (EOF)
-    Note over R: Detects EOF → Confirms completion
-    R->>H: 7. POST Control: Close stream (EOF)
-    H->>S: 8. GET Control: Close stream (EOF)
-    Note over S: Transfer fully complete
+    S->>R: 1. Complete (LastBatchId), on the data stream
+    Note over R: Ignored while a batch up to LastBatchId is missing; the sender re-sends it every 5 s
+    R->>S: 2. CompleteAck, on the control stream
+    Note over R: Stops reading data, and ends its control POST after the ack
+    H-->>R: 3. Control POST answered: the hub has read the ack
+    Note over R: Completed
+    Note over S: 4. CompleteAck read: Completed, the outgoing channel closes
+    S->>H: 5. Data POST ends cleanly (EOF)
+    Note over H: CleanEOF: bridge.Complete(), then RetireAsync
 ```
+
+Steps 3 and 4 have no order between them. A receiver whose stream fails before step 3 reopens both and writes the acknowledgement again first; a reopened stream answered `404` means step 5 has happened, which is the end as well. A consumer waits for that closing phase at most `CompleteStallTimeout` (`WaitForCompletionAsync`).
 
 ### Hub Detection
 
@@ -270,20 +266,9 @@ if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Triggers Step
 }
 ```
 
-That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control POST ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a client in its closing phase reads as the end.
+That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control POST ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a receiver in its closing phase reads as the end.
 
 The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep below.
-
-### Client State Transitions
-
-| State | Sender | Receiver |
-|-------|--------|----------|
-| Streaming | Normal operation | Normal operation |
-| SenderCompleteSent | Sent Complete, waiting ACK | - |
-| ReceiverCompleteReceived | - | Got Complete chunk |
-| SenderAckReceived | Got CompleteAck | - |
-| ReceiverAckSent | - | Sent CompleteAck |
-| Completed | All streams closed | All streams closed |
 
 ### Why Not Control Plane?
 
@@ -300,47 +285,40 @@ The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Starting: StartAsync()
-    Starting --> Streaming: Streams connected
-    Starting --> Reconnecting: Connection failed
-    
-    Streaming --> Reconnecting: IOException
-    Reconnecting --> Streaming: Reconnected + Pong
-    Streaming --> Failed: Fatal stream failure, or no acknowledgement for CompleteStallTimeout
-    
-    state "Sender Completion" as SenderCompletion {
-        Streaming --> SenderCompleteSent: Send Complete
-        SenderCompleteSent --> SenderAckReceived: Got CompleteAck
-        SenderAckReceived --> Completed: Streams closed
-    }
-    
-    state "Receiver Completion" as ReceiverCompletion {
-        Streaming --> ReceiverCompleteReceived: Got Complete
-        ReceiverCompleteReceived --> ReceiverAckSent: Sent CompleteAck
-        ReceiverAckSent --> Completed: GET EOF received
-    }
-    
-    Completed --> Disposed: DisposeAsync()
-    Failed --> Disposed: DisposeAsync()
-    Disposed --> [*]
+    Idle --> Starting: StartSenderAsync / StartReceiverAsync
+    Starting --> Streaming: session loop opens the streams
+    Streaming --> Reconnecting: a stream ended or failed retryably
+    Reconnecting --> Streaming: SignalR probe answered
+    Streaming --> Completed: [sender] CompleteAck read
+    Streaming --> ReceiverCompleteReceived: [receiver] Complete accepted
+    ReceiverCompleteReceived --> Completed: both requests ended, or 404 on a reopened stream
+    Completed --> [*]
 ```
 
-### State Descriptions
+`DataSessionStateMachine` holds the state. The endings are events (`OnStreamsLost`, `OnReleased`, `OnAborted`, `OnEndedByHub`) and the rest goes through `TransitionTo`, which refuses only a move out of a final state. Every state that is not final can end in:
 
-| State | Description |
-|-------|-------------|
-| `Idle` | Initial state before starting |
-| `Starting` | Establishing HTTP streams |
-| `Streaming` | Normal data transfer |
-| `Reconnecting` | Stream broken: probes the hub over SignalR until it answers, 2 s apart after a failed probe. No retry limit |
-| `SenderCompleteSent` | Sender: Complete sent, awaiting ACK |
-| `SenderAckReceived` | Sender: Got CompleteAck |
-| `ReceiverCompleteReceived` | Receiver: Got Complete chunk |
-| `ReceiverAckSent` | Receiver: Sent CompleteAck |
-| `SenderTerminatingDataPost` | [Sender] Step 5: closing the POST (data) stream |
-| `SenderAwaitingControlGetEOF` | [Sender] Step 8: waiting for the GET (control) stream to end |
-| `ReceiverAwaitingDataGetEOF` | [Receiver] Step 6: waiting for the GET (data) stream to end |
-| `ReceiverTerminatingControlPost` | [Receiver] Step 7: closing the POST (control) stream |
-| `Completed` | Transfer finished successfully |
-| `Failed` | Unrecoverable error |
-| `Disposed` | Session disposed |
+- `Failed`: a fatal stream (protocol violation, `404` outside the closing phase), the peer's `Abort`, the hub ending the transfer, nothing acknowledged for `CompleteStallTimeout`, or a batch that does not serialize or decode;
+- `Disposed`: the handle was released first, which queues an `Abort` for the peer.
+
+`Completed`, `Failed` and `Disposed` are final, and `Stopped` completes on the first of them. A released handle keeps an outcome it already has: releasing a completed session leaves it `Completed`.
+
+`Reconnecting` probes the hub over SignalR until it answers, 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
+
+### Client Internals
+
+One `DataSession<T>` per transfer. What runs, and who owns it:
+
+| Part | Owns | Runs on |
+|------|------|---------|
+| `DataSession<T>` | The session loop (open the streams, reconnect, close), the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
+| `HttpStreamManager` | One attempt at a time: two requests (data, control) under one cancellation source. It reports how each attempt ended as a `StreamOutcome` (`Ended`, `Cancelled`, `Gone`, `Retryable`, `Fatal`), and sends the `abort` request | Two request tasks per attempt |
+| `BatchProcessor<T>` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, the dispatch of incoming chunks, the receiver's `ReceiverState` and `ReceiveBuffer` | The serialization worker (sender); the read loop (both) |
+| `BatchAccumulator<T>` | Items not yet in a batch; flushes by size or `BatchFlushIntervalMs`, and takes an in-flight slot per batch | The caller's thread, and a flush timer |
+| `ReconnectionHandler` | The SignalR probe while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
+
+Each side writes one stream and reads the other. The write loop drains the outgoing channel and flushes once per drain; the read loop hands each chunk to `BatchProcessor<T>`.
+
+| Role | Writes (POST) | Reads (GET) |
+|------|---------------|-------------|
+| Sender | Data: handshake `Ping`, unacknowledged batches again, then `Batch`, `Complete`, `Abort` | Control: `BatchAck`, `Pong`, `CompleteAck`, `Abort` |
+| Receiver | Control: `BatchAck`, `Pong`, `CompleteAck` (written again first on a stream reopened in the closing phase), `Abort` | Data: `Batch`, `Ping`, `Complete`, `Abort` |

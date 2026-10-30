@@ -20,7 +20,7 @@ public enum TransferStatus
     /// <summary>Transfer is actively processing data.</summary>
     Active,
     
-    /// <summary>Transfer is completing (flushing remaining data).</summary>
+    /// <summary>A receiver holds every batch and the hub has yet to read its acknowledgement. A sender never reports it.</summary>
     Completing,
     
     /// <summary>Transfer completed successfully.</summary>

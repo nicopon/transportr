@@ -163,7 +163,7 @@ the state rather than stored beside it. Its client-side counterpart, `DataSessio
 (driven by `DataSession`), takes events for the endings (`OnStreamsLost`, `OnReleased`, `OnAborted`,
 `OnEndedByHub`) and `TransitionTo` for the rest, which refuses only a move out of a terminal state. They
 are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.cs`,
-`DataSessionStateMachineTests.cs`, `DominoStateTransitionTests.cs` for the completion sequence) — a
+`DataSessionStateMachineTests.cs`) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
 `ConnectionBridge`/`TransferManager`.
 A transfer ends well when the sender's data POST ends cleanly: the bridge takes `OnCompleted` and

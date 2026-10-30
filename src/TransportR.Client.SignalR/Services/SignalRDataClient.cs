@@ -391,14 +391,7 @@ public partial class SignalRDataClient<T> : IDataSender<T>, IDataReceiver<T>, IS
     {
         SessionState.Completed => TransferStatus.Completed,
         SessionState.Failed => TransferStatus.Failed,
-        SessionState.SenderCompleteSent
-            or SessionState.SenderAckReceived
-            or SessionState.SenderTerminatingDataPost
-            or SessionState.SenderAwaitingControlGetEOF
-            or SessionState.ReceiverCompleteReceived
-            or SessionState.ReceiverAckSent
-            or SessionState.ReceiverAwaitingDataGetEOF
-            or SessionState.ReceiverTerminatingControlPost => TransferStatus.Completing,
+        SessionState.ReceiverCompleteReceived => TransferStatus.Completing,
         _ => TransferStatus.Active
     };
 
