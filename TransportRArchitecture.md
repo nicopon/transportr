@@ -89,8 +89,8 @@ TransportR clearly separates responsibilities between coordination and transfer:
 | Channel | Transport | Usage |
 |---------|-----------|-------|
 | **Control** | SignalR (`/hub/command`) | Handshake, discovery, heartbeat |
-| **Data Send** | HTTP POST (`/api/stream/{id}/send`) | Sender → Hub |
-| **Data Receive** | HTTP GET (`/api/stream/{id}/receive`) | Hub → Receiver |
+| **Data Send** | HTTP POST (`/api/stream/{id}/send`, Header: `X-Connection-Type: Data`) | Sender → Hub |
+| **Data Receive** | HTTP GET (`/api/stream/{id}/receive`, Header: `X-Connection-Type: Data`) | Hub → Receiver |
 | **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
 | **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |

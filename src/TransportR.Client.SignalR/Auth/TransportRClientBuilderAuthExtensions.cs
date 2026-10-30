@@ -9,8 +9,6 @@ namespace TransportR.Auth.ClientCredentials;
 /// </summary>
 public static class TransportRClientBuilderAuthExtensions
 {
-    private static ClientCredentialsTokenProvider? _provider;
-
     /// <summary>
     /// Configures the client to acquire tokens using OAuth2 client credentials flow.
     /// </summary>
@@ -30,10 +28,10 @@ public static class TransportRClientBuilderAuthExtensions
             Scope = scope
         };
         
-        _provider = new ClientCredentialsTokenProvider(
+        var provider = new ClientCredentialsTokenProvider(
             options, 
             loggerFactory?.CreateLogger<ClientCredentialsTokenProvider>() ?? NullLogger<ClientCredentialsTokenProvider>.Instance);
         
-        return builder.WithTokenProvider(_provider.AsTokenProvider());
+        return builder.WithTokenProvider(provider.AsTokenProvider());
     }
 }

@@ -129,6 +129,38 @@ public class DataPlaneAuthorizationTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("receive", null)]
+    [InlineData("send", null)]
+    [InlineData("receive", "")]
+    [InlineData("receive", "7")]
+    [InlineData("send", "1")]
+    [InlineData("send", "Data,Control")]
+    [InlineData("send", "Both")]
+    public async Task MissingOrUndefinedConnectionType_IsRefusedAsBadRequest(string route, string? header)
+    {
+        // The role a caller must prove depends on this header, so it is never guessed.
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+
+        var method = route == "send" ? HttpMethod.Post : HttpMethod.Get;
+        var request = new HttpRequestMessage(method, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/{route}");
+        if (header != null)
+        {
+            request.Headers.TryAddWithoutValidation("X-Connection-Type", header);
+        }
+
+        request.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {ReceiverSubject}");
+        if (method == HttpMethod.Post)
+        {
+            request.Content = new ByteArrayContent([]);
+        }
+
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static async Task<HttpResponseMessage> WithTimeoutAsync(Task<HttpResponseMessage> request)
     {
         var finished = await Task.WhenAny(request, Task.Delay(TimeSpan.FromSeconds(30)));

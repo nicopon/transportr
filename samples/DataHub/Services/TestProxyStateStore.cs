@@ -19,7 +19,8 @@ public class TestProxyStateStore : IStateStore
 
     public async Task SaveClientAsync(ClientRegistration client)
     {
-        await _httpClient.PostAsJsonAsync("/api/state/clients", client);
+        var response = await _httpClient.PostAsJsonAsync("/api/state/clients", client);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<ClientRegistration?> GetClientAsync(Guid clientId)
@@ -49,7 +50,8 @@ public class TestProxyStateStore : IStateStore
 
     public async Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
     {
-        await _httpClient.PostAsJsonAsync($"/api/state/connections/{connectionId}/disconnected", whenUtc);
+        var response = await _httpClient.PostAsJsonAsync($"/api/state/connections/{connectionId}/disconnected", whenUtc);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task DeleteClientAsync(Guid clientId)
@@ -74,7 +76,8 @@ public class TestProxyStateStore : IStateStore
 
     public async Task SaveSessionAsync(TransferSession session)
     {
-        await _httpClient.PostAsJsonAsync("/api/state/sessions", session);
+        var response = await _httpClient.PostAsJsonAsync("/api/state/sessions", session);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<TransferSession?> GetSessionAsync(string transferId)

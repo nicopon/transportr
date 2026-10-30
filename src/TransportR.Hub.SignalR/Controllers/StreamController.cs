@@ -133,7 +133,11 @@ internal class StreamController : ControllerBase
     [DisableRequestSizeLimit]
     public async Task Send(string transferId)
     {
-        var type = ParseConnectionType(Request);
+        if (!TryParseConnectionType(Request, transferId, out var type))
+        {
+            Response.StatusCode = 400;
+            return;
+        }
 
         if (!await ValidateTransfer(transferId, type, isWrite: true))
         {
@@ -195,7 +199,11 @@ internal class StreamController : ControllerBase
     [HttpGet("{transferId}/receive")]
     public async Task Receive(string transferId)
     {
-        var type = ParseConnectionType(Request);
+        if (!TryParseConnectionType(Request, transferId, out var type))
+        {
+            Response.StatusCode = 400;
+            return;
+        }
 
         if (!await ValidateTransfer(transferId, type, isWrite: false))
         {
@@ -232,10 +240,23 @@ internal class StreamController : ControllerBase
         _bridgeManager.Bridges.TryGetValue(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
         && bridge.State == BridgeState.Completed;
 
-    private ConnectionType ParseConnectionType(HttpRequest request)
+    // Matched by name: Enum.TryParse also takes a number, defined or not, and a comma-separated list
+    // that it folds into one value.
+    private bool TryParseConnectionType(HttpRequest request, string transferId, out ConnectionType type)
     {
-        var connectionTypeString = request.Headers["X-Connection-Type"].ToString();
-        return Enum.TryParse<ConnectionType>(connectionTypeString, true, out var type) ? type : ConnectionType.Data;
+        var header = request.Headers["X-Connection-Type"].ToString();
+        foreach (var candidate in Enum.GetValues<ConnectionType>())
+        {
+            if (string.Equals(candidate.ToString(), header, StringComparison.OrdinalIgnoreCase))
+            {
+                type = candidate;
+                return true;
+            }
+        }
+
+        _logger.LogWarning("Stream request for transfer {TransferId} refused: X-Connection-Type '{Header}' does not name a connection type", transferId, header);
+        type = default;
+        return false;
     }
 
     /// <summary>

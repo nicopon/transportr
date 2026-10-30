@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using TransportR.Hub.SignalR;
 using TransportR.Interfaces;
@@ -18,8 +19,8 @@ public static class DataHubRedisExtensions
         builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
             ConnectionMultiplexer.Connect(connectionString));
 
-        // Register RedisStateStore
-        builder.Services.AddSingleton<IStateStore, RedisStateStore>();
+        // Replaces the in-memory store AddDataHub registered, so a hub never holds two.
+        builder.Services.Replace(ServiceDescriptor.Singleton<IStateStore, RedisStateStore>());
 
         return builder;
     }

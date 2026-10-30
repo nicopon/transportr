@@ -112,8 +112,9 @@ public static class TransportRHubExtensions
         // before or after this call keeps it.
         services.TryAddSingleton(TimeProvider.System);
 
-        // Default state store (in-memory)
-        services.AddSingleton<IStateStore, InMemoryStateStore>();
+        // Default state store (in-memory). TryAdd, so a store the host registered before this call is
+        // kept; UseRedisStore and the other store extensions replace it.
+        services.TryAddSingleton<IStateStore, InMemoryStateStore>();
         
         // TransferManager
         services.AddSingleton<ITransferManager, TransferManager>();
@@ -141,9 +142,6 @@ public static class TransportRHubExtensions
         // the host calls it.
         services.AddSingleton<IAccessReconciler, AccessReconciler>();
         services.AddHostedService<AccessSweepService>();
-        
-        // HttpContextAccessor needed for affinity token extraction
-        services.AddHttpContextAccessor();
         
         // Bridge cleanup service
         services.AddHostedService<BridgeCleanupService>();
