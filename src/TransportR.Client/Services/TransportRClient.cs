@@ -210,11 +210,13 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// </returns>
     /// <remarks>
     /// Waits for a registration under way, so that a client being registered again is not reported
-    /// as unknown in the middle of it.
+    /// as unknown in the middle of it. The wait lasts as long as that registration does, a refresh
+    /// waiting on its token provider included: <paramref name="cancellationToken"/> bounds it.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// The client is not connected: it has not connected, has disconnected, or its connection is being
-    /// started again.
+    /// The client is not connected: it has not connected, its <see cref="ConnectAsync"/> failed, it has
+    /// disconnected, or its connection is being started again. In that last case only, the client
+    /// registers by itself once the connection is back.
     /// </exception>
     public async Task<bool> IsRegisteredAsync(CancellationToken cancellationToken = default)
     {
