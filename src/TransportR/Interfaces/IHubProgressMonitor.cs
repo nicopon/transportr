@@ -23,6 +23,9 @@ public interface IHubProgressMonitor
     /// flowing back are not counted. No transfer id comes with the bytes, and the hub tells no one
     /// when a transfer starts or ends.
     /// </summary>
-    /// <param name="bytes">Bytes just forwarded, as they travel on the wire.</param>
+    /// <param name="bytes">
+    /// What one read returned, as it travels on the wire. It is counted before the hub writes it on, so
+    /// a write that then fails is counted all the same; the end of each stream reports 0.
+    /// </param>
     void OnBytesTransferred(long bytes);
 }

@@ -21,12 +21,14 @@ public interface IDataClient
     /// <param name="groups">Optional groups. When authenticated and null, derived from JWT scopes.</param>
     /// <param name="cancellationToken">Token to cancel the connection attempt.</param>
     /// <exception cref="HubRequestFailedException">
-    /// The hub refused the registration. The client is left disconnected, and may connect again.
+    /// The hub refused the registration. The client is left as it was before the call, and may connect
+    /// again.
     /// </exception>
     Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Disconnects from the hub and cleans up all active sessions.
+    /// Disconnects from the hub and cleans up all active sessions. The client cannot connect again
+    /// afterwards: a host that needs the hub again builds another one.
     /// </summary>
     Task DisconnectAsync();
     
