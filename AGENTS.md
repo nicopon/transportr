@@ -5,14 +5,14 @@ This file provides guidance when working with code in this repository.
 ## What this is
 
 TransportR is a .NET library for bulk data transfer between applications through a centralized hub
-(SignalR + HTTP streaming), for network-segmented environments. It is explicitly **not** a message
-broker: no pub/sub, no hub-side persistence/replay, point-to-point transfers only. See README.md for
+(HTTP requests and server-sent events for control, HTTP streaming for data), for network-segmented
+environments. It is explicitly **not** a message broker: no pub/sub, no hub-side persistence/replay, point-to-point transfers only. See README.md for
 the pitch/comparison-to-Kafka-and-gRPC, and the three docs below for the design.
 
-- `TransportRArchitecture.md` — control plane (SignalR) vs data plane (HTTP streaming) split, binary
-  wire protocol (30-byte `ChunkHeader` + opaque payload), HA model.
+- `TransportRArchitecture.md` — control plane (requests and a stream of server-sent events) vs data plane
+  (HTTP streaming) split, binary wire protocol (30-byte `ChunkHeader` + opaque payload), HA model.
 - `ResilienceArchitecture.md` — "Dataplane First" resilience: resume point via in-stream Ping/Pong
-  (streams reopen once a SignalR probe answers), packet-level resumption, the EOF "domino sequence"
+  (streams reopen once a probe request answers), packet-level resumption, the EOF "domino sequence"
   that terminates a transfer.
 - `SecurityArchitecture.md` — JWT/OAuth2, `transportr:group:*` scopes, dev vs production auth mode.
 
@@ -39,7 +39,7 @@ started on a free port per test (`tests/TransportR.Tests/RedisServer.cs`). They 
 
 ### End-to-end / benchmark scenarios
 
-`SignalRIntegrationTests` carries a transfer to completion in process, over `TestServer`; `AddDataHub()`
+`TransferIntegrationTests` carries a transfer to completion in process, over `TestServer`; `AddDataHub()`
 registers a no-op `IHubProgressMonitor` when the host registers none of its own, so no test host needs
 one just to avoid a 500 on the first stream request. Anything beyond one small transfer — faults,
 volume, HA, auth modes — is covered by running real processes
@@ -64,28 +64,28 @@ an existing one.
 
 `ENABLE_HA=true` (see the `ha` path in `run-benchmark.sh`) starts `TransportR.TestProxy` (YARP,
 cookie-based sticky sessions) fronting two `DataHub` instances on ports 5001/5002, and points
-clients at the proxy — this is the local reference setup for exercising `AffinityRedirectException`
-handoff.
+clients at the proxy — this is the local reference setup for exercising the affinity redirect (a 421 answered
+to an `InitTransfer`) and per-transfer affinity; `ha-transfer-affinity` is its acceptance scenario.
 
 ## Architecture
 
 ### Control plane vs data plane
 
-This split is the central design decision and shows up everywhere: SignalR (`CommandHub` /
-`TransportR.Hub/Hubs/CommandHub.cs`) only ever does presence/discovery/handshake
-(`Connect`, `GetReceivers`, `InitTransfer`, the heartbeats, and the `Ping` a reconnecting session
-probes it with) — it never touches bulk bytes. Data itself moves
+This split is the central design decision and shows up everywhere: the control plane
+(`ClientController`, everything under `/api/client/{clientId}`) only ever does presence/discovery/handshake
+— a client's stream of server-sent events, which registers it, plus ordinary requests for `receivers`,
+`transfers`, `replies`, `presence`, the transfer heartbeats and the probe a reconnecting session makes
+before it reopens its streams — and never touches bulk bytes. Data itself moves
 over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
 /api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
 without deserializing them or parsing their headers: only the clients read a `ChunkHeader`, and a
 change that has the hub read one (to see a `Complete` or an `Abort`, say) reverses this decision
 rather than extending it. Reliability, the resume point and even transfer-completion detection are
-data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid SignalR-vs-stream
-race conditions. One thing still leans on SignalR, and the docs say so: a reconnecting session waits
-for a SignalR `Ping` to answer before reopening its streams. The hub judges a transfer's activity on
+data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid control-vs-stream
+race conditions. The hub judges a transfer's activity on
 its heartbeats and on the bytes its streams carry, counted and never read. Don't reintroduce a
 control-plane message for something the data plane already decides (see "Why Not Control Plane?"
-in `ResilienceArchitecture.md`). The one request that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
+in `ResilienceArchitecture.md`). The one request of the data plane that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
 transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
 cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
@@ -94,14 +94,15 @@ The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`: do not ena
 "Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md` (an upload is capped by the flow-control
 window, and the write side relies on a response meaning the body is over).
 
-The handshake itself lives in `SignalRTransferInitiator`, not in the hub: `CommandHub.InitTransfer`
+The handshake itself lives in `TransferInitiator`, not in the controller: `ClientController.InitTransfer`
 drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
 which opens a transfer between two registered clients without either asking. One implementation,
 so authorization and the cleanup of a half-done handshake cannot drift between the two.
 
-SignalR stays inside the client and hub packages: no public type exposes it (`CommandHub`, the
-`ICommandHub`/`ICommandClient` contracts and the client's connection are internal), so the control
-plane can leave it without breaking the API. A change that hands a host a SignalR type undoes that.
+The control plane's wire form is internal: the events, their data and the request bodies (`ControlPlane`
+and its records), `ClientController` and the client's `ControlChannel` are not public, so it can change
+without breaking the API. What is public is the path segments of `WireRoutes`. A change that hands a
+host one of those types undoes that.
 
 ### Wire protocol
 
@@ -120,9 +121,9 @@ but `RecordBatch`) is a compile error rather than a throw on the first batch —
 ### Project layering
 
 ```
-src/TransportR                          # Protocol, interfaces, models — no SignalR/hub deps
-src/TransportR.Client                   # Client: TransportRClient<T>, HubConnectionManager, batching, OAuth2 client credentials
-src/TransportR.Hub                      # Hub: CommandHub (SignalR) + StreamController (HTTP), BridgeManager, group flow control
+src/TransportR                          # Protocol, interfaces, models — no ASP.NET Core/hub deps
+src/TransportR.Client                   # Client: TransportRClient<T>, ControlChannel, batching, OAuth2 client credentials
+src/TransportR.Hub                      # Hub: ClientController (control) + StreamController (data), BridgeManager, group flow control
 src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
 src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
 src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
@@ -134,15 +135,17 @@ client registrations and `TransferSession`s go through it, with three implementa
 `TestProxyStateStore` in `samples/DataHub`, the adapter of the reference HA harness, which forwards to `ProxyStateStore` in `TransportR.TestProxy` (not a product feature).
 A new state-carrying concept for HA needs a home in this interface, not a hub-local field.
 
-Client registrations outlive their connection on purpose (a reconnect reclaims them), so they are
+Client registrations outlive their stream on purpose (a reconnect reclaims them), so they are
 marked `DisconnectedAtUtc` rather than deleted, and evicted after `DisconnectedGraceSeconds`
 (`ClientRegistryConfiguration`). `GetReceivers` exposes the marker and never filters on it: a caller
 finding nobody fails outright, whereas one trying a dead client retries.
 
-Presence is kept alive by `ICommandHub.Heartbeat()`, invoked every `PresenceHeartbeatInterval`
-independently of any transfer, and returning `false` when the hub no longer knows the connection so
-the client re-registers. The per-transfer `SenderHeartbeat`/`ReceiverHeartbeat` cannot serve this:
-they only exist while a transfer does and they feed `TransferState`, not the registration.
+Presence is kept alive by `POST /api/client/{id}/presence/{connectionId}` (`ClientController.Presence`),
+sent every `PresenceHeartbeatInterval` independently of any transfer and answered 404 when the hub no
+longer knows the stream, so the client registers again. It is also the client's proof of life: the
+stream announces the interval when it opens, and the hub closes one it has heard nothing from for two of
+them. The per-transfer heartbeat (`…/transfers/{id}/heartbeat`) cannot serve this: it only exists while a
+transfer does and it feeds `TransferState`, not the registration.
 
 ### Sender/receiver client model
 
@@ -153,8 +156,8 @@ and consumes a `Receive<T>` handle via `IAsyncEnumerable`. A transfer the host o
 sender through `OnSendRequested` instead; a client with no handler refuses it. `BatchAccumulator` buffers items
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
 loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands decoded items to
-`ReceiveBuffer`. `HubConnectionManager` owns the
-SignalR connection and its reconnection lifecycle; `HttpStreamManager` owns the data-plane HTTP
+`ReceiveBuffer`. `ControlChannel` owns the stream of events and the requests made of the control
+plane, and opens the stream again when it is lost; `HttpStreamManager` owns the data-plane HTTP
 streams and restarts them on `IOException`/`HttpRequestException` (the hub never proactively
 notifies clients of a disconnect — see "Disconnection Detection" in `ResilienceArchitecture.md`).
 
@@ -216,11 +219,13 @@ client claims — never conflate this with production. `TransportR.Auth.SimpleId
 they are not meant to be production identity providers.
 
 Whether a token is still good, whether a client holds any right, whether it may send to another and
-whether two identities are one is decided once, by `AccessPolicy`, for `Connect`, `InitTransfer`,
-`GetReceivers`, the data plane, renewal and the sweep — a new surface asks it rather than keeping a
-copy. A client renews its token ahead of the expiry (`PUT /api/client/{id}/token`), or when its host asks
-(`RefreshRegistrationAsync`), and the hub closes a connection, and ends its transfers, when that does not
-happen: see "Token Renewal" in `SecurityArchitecture.md`.
+whether two identities are one is decided once, by `AccessPolicy`, for registration (opening the
+stream), `InitTransfer`, `GetReceivers`, the data plane, renewal and the sweep — a new surface asks it
+rather than keeping a copy. On every control route the `clientId` of the path has to be the identity the
+request's token attests (dev mode attests none, and compares none). A client renews its token ahead of
+the expiry (`PUT /api/client/{id}/token`), or when its host asks (`RefreshRegistrationAsync`), and the hub
+closes a client's stream, and ends its transfers, when that does not happen: see "Token Renewal" in
+`SecurityArchitecture.md`.
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 
@@ -256,7 +261,7 @@ happen: see "Token Renewal" in `SecurityArchitecture.md`.
   implement) anything that pushes it toward pub/sub, hub-side persistence/replay, or topic routing —
   point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces before
   building it. A host coordinates its own clients over a channel of its own: TransportR's control
-  connection offers it no hook, and a hook, SignalR group or fan-out proposed there is the same
+  plane offers it no hook, and a hook, a group of event streams or a fan-out proposed there is the same
   drift toward pub/sub. Ask of each addition a consumer requests whether it is transport or
   orchestration; orchestration belongs to the host.
 - No generation dates in documentation.

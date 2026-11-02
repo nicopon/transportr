@@ -12,8 +12,8 @@
 
 ```
 TransportR/                              # Interfaces, protocols, abstractions
-TransportR.Client/                       # SignalR + HTTP streaming client & OAuth2 auth
-TransportR.Hub/                          # SignalR Hub + HTTP API server & group flow control
+TransportR.Client/                       # Control requests, event stream and HTTP streaming client & OAuth2 auth
+TransportR.Hub/                          # HTTP API server (control and data planes) & group flow control
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
 TransportR.Serialization.Protobuf/       # Protobuf + Zstd serializer
 TransportR.Serialization.Json/           # System.Text.Json + Zstd serializer (uncompressed for debugging)
@@ -44,12 +44,13 @@ sequenceDiagram
     participant H as DataHub
     participant R as Receiver
 
-    R->>H: 1. Connect(groups)
-    S->>H: 2. Connect(groups)
-    S->>H: 3. GetReceivers()
+    R->>H: 1. GET /api/client/{id}/events (registers the receiver)
+    S->>H: 2. GET /api/client/{id}/events (registers the sender)
+    S->>H: 3. GET /api/client/{id}/receivers
     H-->>S: [Receiver]
-    S->>H: 4. InitTransfer(ReceiverId)
-    H->>R: GetReadyToReceive(TransferId)
+    S->>H: 4. POST /api/client/{id}/transfers (ReceiverId)
+    H->>R: event ready-to-receive (TransferId)
+    R-->>H: POST /api/client/{id}/replies/{requestId}
     H-->>S: TransferId (the sender starts its session from it)
     
     loop Data Transfer
@@ -67,16 +68,16 @@ sequenceDiagram
     H->>R: GET EOF
 ```
 
-> **Note**: Transfer completion uses pure dataplane signals (HTTP EOF), not SignalR control plane.
+> **Note**: Transfer completion uses pure dataplane signals (HTTP EOF), not the control plane.
 > See [ResilienceArchitecture.md](./ResilienceArchitecture.md#transfer-completion-eof-domino-sequence) for details.
 
 ### Control Plane vs Data Plane
 
 TransportR clearly separates responsibilities between coordination and transfer:
 
-1. **Control Plane (SignalR)**
+1. **Control Plane (HTTP requests and server-sent events)**
     - **Role**: "The Coordinator"
-    - **Methods**: `Connect`, `GetReceivers`, `InitTransfer`
+    - **Methods**: a client opens `GET /api/client/{id}/events`, a stream of server-sent events by which the hub reaches it, and asks the hub for the rest with ordinary requests under the same path (see *Communication Channels*)
     - **Responsibility**: Manages presence, lightweight signaling, and state synchronization. It negotiates the transfer parameters but never touches the bulk data.
 
 2. **Data Plane (HTTP Streaming)**
@@ -88,13 +89,20 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 | Channel | Transport | Usage |
 |---------|-----------|-------|
-| **Control** | SignalR (`/hub/command`) | Handshake, discovery, heartbeat |
+| **Control plane: events** | HTTP GET, server-sent events (`/api/client/{id}/events`) | Hub → Client. Opening it registers the client and its end marks the client disconnected. Events: `registered` (first, at once), `keepalive`, `ready-to-receive`, `request-send`, `cancel-transfer` |
+| **Control plane: requests** | HTTP (`/api/client/{id}/…`) | Client → Hub: `GET receivers` (discovery), `POST transfers` (open a transfer), `POST replies/{requestId}` (answer to an event that asks), `POST presence/{connectionId}`, `POST transfers/{transferId}/heartbeat`, `POST transfers/{transferId}/ping` (the probe before a session reopens its streams) |
 | **Data Send** | HTTP POST (`/api/stream/{id}/send`, Header: `X-Connection-Type: Data`) | Sender → Hub |
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`, Header: `X-Connection-Type: Data`) | Hub → Receiver |
 | **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
 | **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |
 | **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
+
+Every control request names the client in its path and carries the token the client holds at that moment; with
+authentication on, it is refused with a 404 unless the path's `clientId` is the identity that token attests.
+The events stream is HTTP/1.1 like the data streams (below); a reverse proxy must forward it as it is written
+rather than buffer it, and keep its idle timeout above the hub's keepalive interval (*Key Timings* in
+`ResilienceArchitecture.md`).
 
 ### Data Plane Transport: HTTP/1.1
 
@@ -128,7 +136,7 @@ For a deployment:
 
 TransportR utilizes a **Dataplane First** resilience strategy:
 
-- **Stream Handshake (Ping/Pong)**: After a cut, the client waits for its control connection to answer, then reopens its streams; a Ping/Pong on the new data stream tells the sender where the receiver stands.
+- **Stream Handshake (Ping/Pong)**: After a cut, the client probes the hub with a request, then reopens its streams once it answers; a Ping/Pong on the new data stream tells the sender where the receiver stands.
 - **Packet-Level Resumption**: Receiver indicates the exact offset to resume from, eliminating the need for Hub-side state (Checkpoints).
 - **Sender-side Buffering**: Payloads are kept until End-to-End ACK is received.
 - **Hub Lifecycle Management**: Hub terminates transfers that go silent (timeout), and, if configured, those that stop progressing.
@@ -145,10 +153,10 @@ See [SecurityArchitecture.md](./SecurityArchitecture.md) for the security model.
 TransportR supports horizontal scaling (Active/Active) for Hubs:
 
 1. **Shared State**: Client registrations and transfer sessions are stored in Redis
-   (`TransportR.Storage.Redis`) -> Used for initial Connection/Discovery and for routing.
-2. **Sticky Sessions**: Required at the Load Balancer level for SignalR connections.
-3. **Affinity Handoff**: Hubs can redirect clients to the correct instance if they land on the wrong node.
-4. **TestProxy**: A YARP-based reference implementation is provided for testing HA locally.
+   (`TransportR.Storage.Redis`) -> Used for registration, discovery and routing.
+2. **Sticky Sessions**: Required at the Load Balancer level. A client has an affinity of its own, that of the instance holding its events stream, which its registration, discovery, presence and renewal requests carry. A transfer has another, that of the instance holding its bridge, which its handshake, its replies, its heartbeats, its probe and its data streams carry. The client sets the `Cookie` header request by request, and its HTTP handler holds no cookie container, which would override it.
+3. **Affinity Handoff**: A sender whose receiver's events stream is held by another instance is answered `421` with the cookie that reaches that instance, and sends that one `InitTransfer` request again with it. Its own events stream does not move, and neither do its other transfers. A stream opened without a cookie whose response sets one is opened once more carrying it, since the registration would otherwise record no instance.
+4. **TestProxy**: A YARP-based reference implementation is provided for testing HA locally; `ha-transfer-affinity` is the scenario that exercises the redirection and the affinity of each transfer.
 
 **What is *not* shared, and why sticky sessions are a requirement rather than an optimisation**:
 the per-transfer progress counters (`TransferState`: items sent, acks, last activity) live in a

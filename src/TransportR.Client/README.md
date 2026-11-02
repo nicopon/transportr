@@ -1,4 +1,4 @@
-# TransportR - SignalR Client
+# TransportR - Client
 
 The client of [TransportR](https://github.com/nicopon/TransportR): streams typed records between .NET applications through a hub both sides connect out to.
 
@@ -61,7 +61,7 @@ You can provide a static token or a custom dynamic provider:
 .WithTokenProvider(async () => await GetMyTokenAsync())
 ```
 Only a provider is renewed (see "Token Renewal" in `SecurityArchitecture.md`): the hub closes the
-connection of a client whose token it was not given a new one for, and a static token's client is closed
+events stream of a client whose token it was not given a new one for, and a static token's client is closed
 when it expires. `WithTokenRefreshThreshold` sets how far ahead of the expiry the renewal starts.
 
 A host that owns the rights of its clients (its own `IClientIdentityProvider` on the hub) and changes
@@ -70,8 +70,8 @@ them while they run applies the change without waiting for a renewal:
 await client.RefreshRegistrationAsync();
 ```
 The client registers again under the same id, with the groups its identity holds now and a token from its
-provider, and returns once the hub has recorded both. Its connection and its transfers are not interrupted;
-the hub ends those the new groups no longer allow. It raises `InvalidOperationException` when the client is
+provider, and returns once the hub has recorded both. It stays reachable and its transfers are not
+interrupted; the hub ends those the new groups no longer allow. It raises `InvalidOperationException` when the client is
 not connected, and the hub's refusal when the identity holds no group (the registration stays as it was).
 The hub must be of the same release.
 

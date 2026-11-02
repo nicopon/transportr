@@ -5,7 +5,7 @@
 ## Purpose
 
 Unit tests for the components, and component tests for the hub's state and access logic.
-End-to-end transfers are covered in two places: `SignalRIntegrationTests` carries one transfer in
+End-to-end transfers are covered in two places: `TransferIntegrationTests` carries one transfer in
 process over `TestServer`, and the scenarios of `./scripts/run-benchmark.sh` run real processes
 for faults, volume, HA and authentication.
 

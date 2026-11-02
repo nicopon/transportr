@@ -17,7 +17,7 @@ builder.Services.AddDataHub()
 
 ## Features
 
-- **Client registrations**: kept for `ConnectedTtlSeconds` (3600 s by default) while the client is connected, and for `DisconnectedGraceSeconds` (300 s by default) once its connection drops. Each `Heartbeat()` pushes the expiry back.
+- **Client registrations**: kept for `ConnectedTtlSeconds` (3600 s by default) while the client is connected, and for `DisconnectedGraceSeconds` (300 s by default) once its events stream ends. Each presence heartbeat pushes the expiry back.
 - **Transfer sessions**: expire at the session's `ExpiresAtUtc`; heartbeats extend them.
 - **Secondary index**: connection id → client id, with the same expiry as the registration.
 
@@ -33,7 +33,7 @@ builder.Services.AddDataHub()
 ## Requirements
 
 - Tested against Redis 7.0: the test suite runs on a `redis:7.0` container.
-- Sticky sessions at the load balancer level (for SignalR connections).
+- Sticky sessions at the load balancer level (see "High Availability" in `TransportRArchitecture.md`).
 - The per-transfer progress counters are not stored here; see "High Availability" in `TransportRArchitecture.md`.
 
 ## Dependencies

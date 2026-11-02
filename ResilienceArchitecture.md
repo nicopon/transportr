@@ -6,7 +6,7 @@
 
 TransportR implements a **"Dataplane First" resilience pattern** where:
 1.  **State is driven by streams**: HTTP streams interactions determine the transfer state.
-2.  **Resumption via Stream Handshake**: After a cut, the client waits for its control connection to answer a probe, then reopens its streams and exchanges Ping/Pong on the new data stream, which carries the resume point.
+2.  **Resumption via Stream Handshake**: After a cut, the client probes the hub with a request, then reopens its streams and exchanges Ping/Pong on the new data stream, which carries the resume point.
 3.  **Smart Resend**: Stream Handshake tells the sender exactly which batch was last processed (Packet Level Ack), enabling precise resumption without duplicates.
 4.  **Hub Lifecycle Management**: The Hub acts as a passive router + active monitor (Reaper), terminating silent transfers (and, opt-in, stalled ones) but not orchestrating recovery.
 
@@ -21,26 +21,29 @@ says: a builder method on the client, an options class on the hub.
 | Side | Name | Default | Settable | What it bounds |
 |---|---|---|---|---|
 | client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
-| client | Reconnect probe, control connection (`ReconnectionHandler.cs:33`) | 21 × 500 ms | **fixed** | Wait for the control connection to be `Connected` while `Reconnecting` |
-| client | Reconnect probe, `Pong` (`ReconnectionHandler.cs:45`) | 5 s | **fixed** | Wait for the hub's SignalR `Pong` to the probe's `Ping` |
-| client | Reconnect pause (`DataSession.cs:613`) | 2 s | **fixed** | Pause after a failed probe |
-| client | Closing-phase retry (`DataSession.cs:29`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
-| client | Session loop error pause (`DataSession.cs:640`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
-| client | `Complete` resend (`DataSession.cs:25`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
+| client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx` or a `404` means the hub answers |
+| client | Reconnect pause (`DataSession.cs:612`) | 2 s | **fixed** | Pause after a failed probe |
+| client | Closing-phase retry (`DataSession.cs:28`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
+| client | Session loop error pause (`DataSession.cs:639`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
+| client | `Complete` resend (`DataSession.cs:24`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
 | client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
-| client | Abort write (`DataSession.cs:33`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
-| client | Abort request (`DataSession.cs:36`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
-| client | Handshake (`TransportRClient.cs:49`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
-| client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat, which only runs while a transfer does |
-| client | `ClientOptions.PresenceHeartbeatInterval` | 60 s | **fixed** | `Heartbeat()`, which keeps the registration alive between transfers |
+| client | Abort write (`DataSession.cs:32`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
+| client | Abort request (`DataSession.cs:35`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
+| client | Handshake (`TransportRClient.cs:46`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
+| client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat (`POST …/transfers/{transferId}/heartbeat`), which only runs while a transfer does |
+| client | Heartbeat request (`DataSession.cs:38`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
+| client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself |
 | client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write |
 | client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`BatchAccumulator.cs:166`) |
 | client | `ClientOptions.TokenRefreshThreshold` | 5 min | `WithTokenRefreshThreshold` | How long before its expiry a token is renewed, and no more than half of what is left of it |
 | client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
 | client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
 | client | Renewal retry (`TokenRenewer.cs:30-31`) | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
-| client | Connect backoff (`HubConnectionManager.cs:192-209`) | 500 ms → 4 s | **fixed** | Five attempts to open the first hub connection. Restarting a data stream is not backed off |
-| client | Restart backoff (`HubConnectionManager.cs:40-41`) | 1 s → 30 s | **fixed** | After a closed hub connection: doubling, half to full delay, no limit |
+| client | Events stream, silence (`ControlChannel.cs:37`) | 30 s | **fixed** | A stream that carried nothing, keepalives included, for this long is abandoned and opened again |
+| client | Events stream, first opening (`ControlChannel.cs:41`, `:135-154`) | 5 attempts, 500 ms → 5 s | **fixed** | Attempts to open the first stream, the delay doubling; a refusal is raised at once. Restarting a data stream is not backed off |
+| client | Events stream, reopening (`ControlChannel.cs:39-40`) | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
+| hub | Keepalive (`ClientStreams.cs:130`) | 15 s | **fixed** | Quiet on an events stream before the hub writes a `keepalive` event: half the client's silence limit |
+| hub | Client silence | twice the announced presence interval (30 s) | **fixed**, announced by the client | An events stream the hub has heard nothing from is closed; any request the hub admits from that client counts as hearing from it |
 | hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
 | hub | `TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
 | hub | `StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
@@ -49,7 +52,7 @@ says: a builder method on the client, an options class on the hub.
 | hub | Transfer sweep (`TransferCleanupService.cs:22`) | 10 s | **fixed** | Interval between two inactivity and stalled-progress checks |
 | hub | Session TTL (`TransferManager.cs:20`) | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats and by the bytes of its streams |
 | hub | Session extension (`TransferManager.cs:21`) | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
-| hub | `DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose connection dropped is kept |
+| hub | `DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose events stream ended is kept |
 | hub | `ConnectedTtlSeconds` | 3600 s | `ClientRegistryConfiguration` | A connected registration the hub has not heard from at all (stores with server-side expiry) |
 | hub | `AccessSweepIntervalSeconds` | 5 s | `AccessOptions` | Interval between two passes that judge every registered client again |
 | hub | `TokenExpiryMarginSeconds` | 0 s | `AccessOptions` | How long a token is still honoured after its `exp` |
@@ -62,8 +65,10 @@ says: a builder method on the client, an options class on the hub.
   Nothing checks it (`ClientRegistryConfiguration`).
 - The per-transfer heartbeat (1 s, fixed) is far below `TransferInactivityTimeoutSeconds` (60 s) (`ClientOptions.HeartbeatInterval`). The hub
   checks only that its own value is positive.
-- The presence heartbeat (60 s, fixed) is below `ConnectedTtlSeconds` (3600 s), which it refreshes (`ClientOptions.PresenceHeartbeatInterval`).
+- The presence heartbeat (15 s, fixed) is below `ConnectedTtlSeconds` (3600 s), which it refreshes (`ClientOptions.PresenceHeartbeatInterval`).
   The hub checks only that its own value is positive.
+- The hub's keepalive (15 s) is half the client's silence limit (30 s), so a stream is abandoned only after two keepalives went missing. Nothing
+  compares them, nor either with the idle timeout of a proxy in front of the hub, which has to be above the keepalive.
 - The completion stall bound (60 s, fixed) is the client's own (`ClientOptions.CompleteStallTimeout`), and at the hub's defaults it is reached
   first. While `CompleteAsync` waits, the sender's per-transfer heartbeats keep the transfer active, so `TransferInactivityTimeoutSeconds` does
   not end it. The hub ends the transfer of a receiver that went away no sooner than `BridgeTimeoutSeconds` (300 s) later, and that of a receiver
@@ -98,8 +103,8 @@ sequenceDiagram
 
     Note over S,R: Session → Reconnecting
 
-    S->>H: SignalR Ping(transferId)
-    H-->>S: SignalR Pong (control plane reachable)
+    S->>H: POST /api/client/{id}/transfers/{transferId}/ping
+    H-->>S: 204 (the instance holding the transfer answers)
 
     Note over S,R: Restart HTTP Streams (Autonomously)
 
@@ -131,7 +136,7 @@ sequenceDiagram
 ### 1. Disconnection Detection (Client-Side)
 
 Both Sender and Receiver rely on standard `IOException` or `HttpRequestException` when reading/writing to the stream.
-The Hub **DOES NOT** actively notify clients of disconnections via SignalR (to avoid race conditions).
+The Hub **DOES NOT** actively notify clients of disconnections over their events streams (to avoid race conditions).
 
 A batch body the receiver cannot decode is not a cut: it arrived whole, so a resend would decode no better. The
 receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead of reconnecting; the sender's
@@ -145,9 +150,9 @@ A write stream sees a cut even when its client has nothing to write because its 
 
 ### 1b. Registration Lifetime (Hub-Side)
 
-A client registration is **not deleted** when its control connection drops: on an unstable network
-the same client usually reconnects within seconds under the same `ClientId`, and removing it would
-break a transfer that was about to resume. `OnDisconnectedAsync` instead stamps
+A client registration is **not deleted** when its events stream ends: on an unstable network
+the same client usually opens a new one within seconds under the same `ClientId`, and removing the
+registration would break a transfer that was about to resume. The end of the stream instead stamps
 `DisconnectedAtUtc`, which `GetReceivers` exposes through `ClientInfo`.
 
 -   **Nothing filters on it.** A caller that finds nobody fails outright, whereas a caller that
@@ -157,43 +162,50 @@ break a transfer that was about to resume. `OnDisconnectedAsync` instead stamps
     dropped registration is kept before eviction. It is the window in which a reconnecting client
     can claim its registration back.
 -   **`ConnectedTtlSeconds`** (default `3600 s`) is a backstop for registrations orphaned by a hub
-    that died without running `OnDisconnectedAsync`. It applies to stores with server-side expiry
+    that died before it stamped them. It applies to stores with server-side expiry
     (Redis); the in-memory store keeps connected registrations for the lifetime of the process.
--   **`Heartbeat()`** is what refreshes it. The client invokes it every
-    `PresenceHeartbeatInterval` (default `60 s`) for as long as it is connected, whether or not a
-    transfer is running, so an idle client never expires. Keep the interval well below
-    `ConnectedTtlSeconds`.
+-   **The presence heartbeat** (`POST /api/client/{id}/presence/{connectionId}`) is what refreshes it.
+    The client sends it every `PresenceHeartbeatInterval` (default `15 s`) for as long as its stream
+    is open, whether or not a transfer is running, so an idle client never expires. Keep the interval
+    well below `ConnectedTtlSeconds`.
+-   **It is also the hub's view of a cut that closes nothing.** The client announces the interval when
+    it opens its stream (`heartbeatMs`), and the hub closes a stream it has heard nothing from for two
+    of them (30 s by default); any request the hub admits from the client counts, not this one alone.
+    A write to a stream whose peer vanished without closing a connection does not fail, so the hub
+    would otherwise see nothing until that connection closed. The stream's end then marks the client
+    disconnected, as any other.
 
-> **The per-transfer heartbeats cannot do this job.** `SenderHeartbeat` / `ReceiverHeartbeat` live
-> on `DataSession`, which exists only while a transfer does, and they report transfer statistics
-> into `TransferState` — they never touch the registration. Presence is a property of the client,
-> not of a transfer.
+> **The per-transfer heartbeats cannot do this job.** The heartbeat of a transfer
+> (`POST …/transfers/{transferId}/heartbeat`) is sent by a `DataSession`, which exists only while a
+> transfer does, and it reports transfer statistics into `TransferState`. Presence is a property of
+> the client, not of a transfer.
 
 ### 1c. Losing a Registration While Connected
 
-Three things leave a client connected but unknown to the hub: a hub restart, a registration evicted
-past its grace period, and a **SignalR reconnection**, which gives the client a new connection id
-while the stored registration still names the old one. In all three, discovery returns nothing for
-that client and nobody can open a transfer against it — while its own in-flight transfers keep
-working, because resumption is entirely data-plane.
+Three things leave a client holding a stream but unknown to the hub: a hub restart, a registration
+evicted past its grace period, and another stream of the same identity that took the registration
+over, which then names that stream. In all three, discovery returns nothing for that client and
+nobody can open a transfer against it — while its own in-flight transfers keep working, because
+resumption is entirely data-plane.
 
 Recovery is the client's, and has two paths:
 
--   `Heartbeat()` returns **`false`** when the hub holds no registration for the calling
-    connection. The client answers by invoking `Connect` again.
--   On `Reconnected`, the client re-registers immediately rather than waiting up to a full
-    heartbeat interval. This is wired through the connection-rebuild callback, so it survives an
-    affinity redirect rebuilding the `HubConnection`.
-
-A `chaos` run shows this firing about ten times over two million rows.
+-   The presence heartbeat is answered **`404`** when the hub holds no registration for the stream.
+    The client answers by opening a new stream, which registers it afresh, and closes the old one
+    once the new one is registered.
+-   A stream that ended (cut, closed by the hub, or silent for 30 s) is opened again after a delay
+    (see "Events stream, reopening" in Key Timings), and each opening registers the client. The
+    client then restarts the streams of its transfers at once rather than waiting for their next
+    failure.
 
 Without this policy the two implementations fail in opposite directions — an in-memory registration
 lives forever, and a Redis one expires on a fixed timer whether or not the client is still there.
 
 ### 2. Stream Handshake (Reachability & Resume)
 
-The streams are reopened only once the control connection answers: a session in `Reconnecting` probes the hub with a
-SignalR `Ping`, so the data plane does not resume while SignalR is down. The resume point is then not asked of the
+The streams are reopened only once the hub answers: a session in `Reconnecting` probes it with an ordinary request
+(`POST …/transfers/{transferId}/ping`), carrying the transfer's affinity so that it reaches the instance holding the
+bridge, because that is when its streams are worth reopening. The resume point is then not asked of the
 Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new data stream**:
 
 1.  **Sender** sends `ChunkType.Ping` immediately upon connecting the stream.
@@ -217,18 +229,22 @@ if (pong.NextExpectedBatchId > currentBatch.Id) {
 
 The Hub employs a **TransferCleanupService** that monitors all active transfers.
 
--   **LastActivityUtc**: Updates on the per-transfer heartbeats, on `Ping`, and on every read the hub makes from one of the transfer's streams: the bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' control connections are silent.
+-   **LastActivityUtc**: Updates on the per-transfer heartbeats, on the probe request (`…/ping`), and on every read the hub makes from one of the transfer's streams: the bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' heartbeats are silent.
 -   **Which hub instance judges**: the one that registered the transfer, or that accepted one of its streams. An instance that only looks the transfer up in the shared store (a misrouted request, a check whether the hub still holds it) starts no state, so its sweep never ends a transfer it does not carry.
 -   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
--   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration, or from the first of its streams it accepts. Because heartbeats and Ping keep-alives refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
+-   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration, or from the first of its streams it accepts. Because heartbeats and probes refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
 -   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the hub refuses it when it starts, and the deployment has to name the longest outage it intends to survive before enabling it.
--   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request below) is cancelled on both clients with `CancelTransfer`. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
+-   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request below) is cancelled on both clients with a `cancel-transfer` event. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
 -   **Not a liveness check**: a transfer whose participant's token ran out, or whose groups may no longer reach each other, is ended by the access sweep instead (see "Token Renewal" in `SecurityArchitecture.md`).
 
 ### 4. Affinity Handoff (HA)
 
-In a multi-hub deployment behind a load balancer with sticky sessions, the Hub ensures clients connect to the correct instance using `AffinityRedirectException`.
+In a multi-hub deployment behind a load balancer with sticky sessions, a sender is sent to the instance holding its receiver's stream, and each transfer then carries the affinity of the instance holding its bridge (the mechanism is under "High Availability" in `TransportRArchitecture.md`). What that means for a transfer in trouble:
+
+-   **After a cut,** a session reopens its streams and sends its probe, heartbeats and `abort` with its own transfer's affinity, whatever the client's other transfers have done since. A client that kept one affinity for all its transfers would send the first one's streams to the instance of the second, where no bridge exists (`ha-transfer-affinity`).
+-   **A lost instance** ends its clients' events streams. They open them again on another instance and register there; the bridges the lost instance held are lost with it.
+-   **What does not cross instances.** The hub tells a client through the stream it holds, so a `cancel-transfer` for a participant held by another instance is not sent, and that participant learns of the end from the data plane. A transfer the host opens through `ITransferInitiator` is refused, with affinity handoff on, unless both clients' streams are on the instance that opens it.
 
 ### 5. Backpressure (Both Ends, Data Plane Only)
 
@@ -249,7 +265,7 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 
 A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
 
-The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does. An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB. The one thing that still gets through a full stream is a request of its own, so the sender then sends `POST /api/stream/{id}/abort` (HTTP, not SignalR, and for this case only) and the hub ends the transfer as a host terminating a run does: both participants are told to cancel. The receiver fails as for any transfer the hub ends, not with the `Abort`'s reason. Only the replica that carried the transfer's streams acts on the request: it holds the bridges and the connections to tell. Behind a proxy with affinity the request has to follow the streams' cookie, which the client's `HttpClient` does (it shares the connection's cookie container); a hub that holds none of the transfer's bridges answers 404 and leaves it alone. Where the request cannot be made (the hub is unreachable, a proxy blocks the path, the hub predates the route) only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
+The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does. An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB. The one thing that still gets through a full stream is a request of its own, so the sender then sends `POST /api/stream/{id}/abort` (for this case only) and the hub ends the transfer as a host terminating a run does: both participants are told to cancel. The receiver fails as for any transfer the hub ends, not with the `Abort`'s reason. Only the replica that carried the transfer's streams acts on the request: it holds the bridges and the event streams to tell. Behind a proxy with affinity the request has to follow the streams' cookie, which the session sets on it as on its streams; a hub that holds none of the transfer's bridges answers 404 and leaves it alone. Where the request cannot be made (the hub is unreachable, a proxy blocks the path, the hub predates the route) only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
 
 The sender's window is taken **by the producer, before serialization**. Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
 
@@ -273,7 +289,7 @@ The chunk types are listed once, under "ChunkType Values" in
 
 ## Transfer Completion: EOF Domino Sequence
 
-TransportR uses **pure dataplane signals** for transfer completion. No SignalR control plane messages are used.
+TransportR uses **pure dataplane signals** for transfer completion. No control plane message is used.
 
 ### The Sequence
 
@@ -316,7 +332,7 @@ The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` 
 
 | Approach | Issue |
 |----------|-------|
-| SignalR `TransferShutdown` | Race condition: message may arrive before/after stream events |
+| A `TransferShutdown` event on the events stream | Race condition: message may arrive before/after stream events |
 | Explicit `TransferComplete` call | Adds network round-trip, can fail independently |
 | **EOF Detection (current)** | Synchronous, guaranteed ordering, no extra messages |
 
@@ -330,7 +346,7 @@ stateDiagram-v2
     Idle --> Starting: StartSenderAsync / StartReceiverAsync
     Starting --> Streaming: session loop opens the streams
     Streaming --> Reconnecting: a stream ended or failed retryably
-    Reconnecting --> Streaming: SignalR probe answered
+    Reconnecting --> Streaming: probe answered
     Streaming --> Completed: [sender] CompleteAck read
     Streaming --> ReceiverCompleteReceived: [receiver] Complete accepted
     ReceiverCompleteReceived --> Completed: both requests ended, or 404 on a reopened stream
@@ -344,7 +360,7 @@ stateDiagram-v2
 
 `Completed`, `Failed` and `Disposed` are final, and `Stopped` completes on the first of them. A released handle keeps an outcome it already has: releasing a completed session leaves it `Completed`.
 
-`Reconnecting` probes the hub over SignalR until it answers, 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
+`Reconnecting` probes the hub with a request until it answers, 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
 
 ### Client Internals
 
@@ -356,7 +372,7 @@ One `DataSession<T>` per transfer. What runs, and who owns it:
 | `HttpStreamManager` | One attempt at a time: two requests (data, control) under one cancellation source. It reports how each attempt ended as a `StreamOutcome` (`Ended`, `Cancelled`, `Gone`, `Retryable`, `Fatal`), and sends the `abort` request | Two request tasks per attempt |
 | `BatchProcessor<T>` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, the dispatch of incoming chunks, the receiver's `ReceiverState` and `ReceiveBuffer` | The serialization worker (sender); the read loop (both) |
 | `BatchAccumulator<T>` | Items not yet in a batch; flushes by size or `BatchFlushIntervalMs`, and takes an in-flight slot per batch | The caller's thread, and a flush timer |
-| `ReconnectionHandler` | The SignalR probe while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
+| `ReconnectionHandler` | The probe request while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
 
 Each side writes one stream and reads the other. The write loop drains the outgoing channel and flushes once per drain; the read loop hands each chunk to `BatchProcessor<T>`.
 

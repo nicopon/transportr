@@ -4,7 +4,7 @@ Sample TransportR hub server application.
 
 ## Purpose
 
-Demonstrates how to host a TransportR hub using ASP.NET Core, providing both SignalR control plane and HTTP streaming data plane endpoints.
+Demonstrates how to host a TransportR hub using ASP.NET Core, providing both the control plane (requests and a stream of server-sent events) and the HTTP streaming data plane endpoints.
 
 ## Quick Start
 
@@ -17,7 +17,8 @@ dotnet run --urls http://localhost:5252
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
-| `/hub/command` | SignalR command hub |
+| `GET /api/client/{id}/events` | A client's stream of server-sent events: opening it registers the client |
+| `/api/client/{id}/…` | The other control requests: discovery, transfers, replies, presence, heartbeats and probe (see "Communication Channels" in `TransportRArchitecture.md`) |
 | `POST /api/stream/{id}/send` | Data upload |
 | `GET /api/stream/{id}/receive` | Data download |
 | `POST /api/stream/{id}/abort` | A participant ends its transfer when its `Abort` cannot be written to the stream |

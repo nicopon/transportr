@@ -1,14 +1,14 @@
 # TransportR.Hub
 
-Server-side hub implementation for TransportR, providing SignalR control plane and HTTP streaming data plane.
+Server-side hub implementation for TransportR, providing the control plane (requests and a stream of server-sent events) and the HTTP streaming data plane.
 
 ## Purpose
 
 Provides the hub services that:
-1. Manage client connections and discovery
+1. Register clients, keep them registered and serve their discovery
 2. Orchestrate transfer handshakes between senders and receivers
 3. Act as a "dumb pipe" for data transfer (no deserialization)
-4. Redirect a client to the instance holding its transfer when several hubs share a state store (affinity handoff)
+4. Send a sender to the instance holding its receiver when several hubs share a state store (affinity handoff)
 
 ## Architecture
 
@@ -16,25 +16,25 @@ Provides the hub services that:
 ┌─────────────────────────────────────────────────────────────┐
 │                      DataHub Server                         │
 ├─────────────────────────────────────────────────────────────┤
-│  CommandHub (SignalR)                                       │
-│  ├── /hub/command                                           │
-│  │   ├── Connect(clientId, groups)                          │
-│  │   ├── GetReceivers() → List<ClientInfo>                  │
-│  │   ├── InitTransfer(targetId, batchSize, timeoutMs)       │
-│  │   └── Heartbeat() → bool                                 │
+│  ClientController (control plane)                           │
+│  ├── GET /api/client/{id}/events (server-sent events)       │
+│  ├── GET /api/client/{id}/receivers → List<ClientInfo>      │
+│  ├── POST /api/client/{id}/transfers                        │
+│  ├── POST /api/client/{id}/replies/{requestId}              │
+│  ├── POST /api/client/{id}/presence/{connectionId}          │
+│  ├── POST /api/client/{id}/transfers/{tid}/heartbeat        │
+│  ├── POST /api/client/{id}/transfers/{tid}/ping             │
+│  └── PUT /api/client/{id}/token                             │
 │                                                             │
-│  StreamController (HTTP)                                    │
+│  StreamController (data plane)                              │
 │  ├── POST /api/stream/{id}/send                             │
 │  ├── GET /api/stream/{id}/receive                           │
 │  └── POST /api/stream/{id}/abort                            │
-│                                                             │
-│  ClientController (HTTP)                                    │
-│  └── PUT /api/client/{id}/token                             │
 ├─────────────────────────────────────────────────────────────┤
 │  Services                                                   │
 │  ├── IStateStore → InMemoryStateStore or RedisStateStore    │
 │  ├── TransferManager                                        │
-│  └── SignalRDataServer (dumb pipe bridge)                   │
+│  └── TransportRServer (dumb pipe bridge)                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
