@@ -9,7 +9,8 @@
 #   1. Initialize test data (2,000,000 orders) and download tools
 #   2. Build solution in Release mode
 #   3. Run all scenarios: default, embedded-idp, oidc, data-plane-probe, chaos, chaos-bounded,
-#      chaos-cut-sender, chaos-cut-receiver, slow-receiver, ha-redis, ha-no-shared-state
+#      chaos-cut-sender, chaos-cut-receiver, slow-receiver, ha-redis, ha-no-shared-state,
+#      ha-transfer-affinity
 #
 
 set -e
@@ -27,7 +28,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Scenarios to run (in order)
-SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded chaos-cut-sender chaos-cut-receiver slow-receiver ha-redis ha-no-shared-state"
+SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded chaos-cut-sender chaos-cut-receiver slow-receiver ha-redis ha-no-shared-state ha-transfer-affinity"
 
 # Track results
 FAILED=0
