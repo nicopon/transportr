@@ -12,6 +12,13 @@ public class SenderOptions
     /// Null (the default) keeps the historical unbounded behaviour.
     /// </summary>
     public int? MaxInFlightBatches { get; set; }
+
+    /// <summary>
+    /// Seconds between the opening of one transfer and the next, when several run in parallel. Zero
+    /// (the default) opens them all at once.
+    /// </summary>
+    public int TransferStaggerSeconds { get; set; }
+
     public bool EnableAuth { get; set; } = false;
     public string OutputDirectory { get; set; } = "output";
     public string Group { get; set; } = "senders";

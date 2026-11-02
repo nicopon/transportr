@@ -70,6 +70,7 @@ if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SENDER__PARALLELIS
     int.TryParse(Environment.GetEnvironmentVariable("SENDER__PARALLELISM"), out parallelism);
 }
 logger.LogInformation("Parallelism configured: {Parallelism}", parallelism);
+logger.LogInformation("Transfer stagger: {Seconds}s", senderOptions.TransferStaggerSeconds);
 
 // URL from configuration
 var hubBaseUrl = hubUrl;
@@ -177,6 +178,9 @@ try
     for (int i = 0; i < parallelism; i++)
     {
         var target = receivers[i % receivers.Count]; // Round robin
+
+        // A transfer opened later finds the earlier ones already flowing.
+        var openDelay = TimeSpan.FromSeconds(senderOptions.TransferStaggerSeconds) * i;
         
         // We need a separate scope/service for each stream to be safe
         var service = new OrderFileReader(sourceFilePath, loggerFactory.CreateLogger<OrderFileReader>());
@@ -186,6 +190,7 @@ try
                 Send<Order>? transfer = null;
                 try 
                 {
+                    if (openDelay > TimeSpan.Zero) await Task.Delay(openDelay);
                     transfer = await broker.InitTransferAsync(target.ClientId, batchSize);
                     logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
                     

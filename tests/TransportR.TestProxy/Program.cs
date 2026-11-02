@@ -18,6 +18,11 @@ builder.WebHost.ConfigureKestrel(options =>
 // In-memory state store (shared across all hub instances)
 var stateStore = new ProxyStateStore();
 
+// A client with no affinity cookie goes where the balancing policy sends it. YARP's own default weighs
+// the load, so which hub a client lands on depends on what is connected at that moment; a scenario that
+// needs the placement to be a fact names a policy, RoundRobin for one that alternates.
+var loadBalancingPolicy = Environment.GetEnvironmentVariable("PROXY_LOAD_BALANCING");
+
 // YARP configuration with sticky sessions
 var routes = new[]
 {
@@ -34,6 +39,7 @@ var clusters = new[]
     new ClusterConfig
     {
         ClusterId = "hub-cluster",
+        LoadBalancingPolicy = string.IsNullOrEmpty(loadBalancingPolicy) ? null : loadBalancingPolicy,
         SessionAffinity = new SessionAffinityConfig
         {
             Enabled = true,

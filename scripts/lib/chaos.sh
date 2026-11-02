@@ -11,9 +11,10 @@ TOXIPROXY_PORT=${TOXIPROXY_PORT:-8474}
 TOXIPROXY_PID=""
 CHAOS_INJECTION_PID=""
 
-# Proxy configuration
+# Proxy configuration. Behind a hub of its own the proxy sits in front of HUB_PORT; a scenario whose
+# clients reach the hubs through another front (the TestProxy of the HA setup) names its port.
 HUB_PROXY_PORT=${HUB_PROXY_PORT:-15252}
-HUB_REAL_PORT=${HUB_PORT:-5252}
+HUB_REAL_PORT=${CHAOS_UPSTREAM_PORT:-${HUB_PORT:-5252}}
 
 # Start Toxiproxy server
 start_toxiproxy() {

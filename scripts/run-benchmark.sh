@@ -156,6 +156,14 @@ if [ -n "$SENDER_AUTH_CLIENTID" ]; then
     export Sender__Auth__Scope="$SENDER_AUTH_SCOPE"
 fi
 
+# Only exported when a scenario asks for it; unset means one transfer, opened at once.
+if [ -n "$SENDER_PARALLELISM" ]; then
+    export SENDER__PARALLELISM="$SENDER_PARALLELISM"
+fi
+if [ -n "$SENDER_TRANSFER_STAGGER_SECONDS" ]; then
+    export Sender__TransferStaggerSeconds="$SENDER_TRANSFER_STAGGER_SECONDS"
+fi
+
 # Receiver configuration
 export Receiver__HubUrl="$HUB_URL"
 export Receiver__EnableAuth="${ENABLE_AUTH:-false}"
@@ -194,6 +202,7 @@ if [ "$ENABLE_HA" == "true" ]; then
     
     # 1. Start Test Proxy
     log_step "Starting TestProxy (5000)..."
+    PROXY_LOAD_BALANCING="$PROXY_LOAD_BALANCING" \
     dotnet tests/TransportR.TestProxy/bin/Release/net10.0/TransportR.TestProxy.dll > "$OUTPUT_DIR/proxy.log" 2>&1 &
     PROXY_PID=$!
     register_pid $PROXY_PID
@@ -260,6 +269,11 @@ fi
 # Start Receivers
 start_receivers "$NUM_RECEIVERS"
 
+if [ "$ASSERT_TRANSFER_AFFINITY" == "true" ]; then
+    source "$SCRIPT_DIR/lib/affinity.sh"
+    assert_receivers_on_distinct_hubs || exit 1
+fi
+
 # Start Sender
 start_sender
 
@@ -291,6 +305,11 @@ if ! wait_for_receivers; then
     fi
     grep -h "TRANSFER FAILED\|failed\|Failed" "$OUTPUT_DIR"/sender*.log 2>/dev/null | sort -u | head -n 5
     log_error "-----------------------------"
+    if [ "$ASSERT_TRANSFER_AFFINITY" == "true" ]; then
+        log_error "--- Where the streams went ---"
+        check_stream_routing || true
+        log_error "------------------------------"
+    fi
     exit 1
 fi
 stop_rss_sampler
@@ -337,6 +356,13 @@ if [ "$ENABLE_CHAOS" == "true" ] && [ "${CHAOS_PROGRAM:-loop}" == "hold" ]; then
         exit 1
     fi
     log_info "Fault landed mid-transfer: $(tr '\n' ';' < "$events")"
+fi
+
+# Every stream request of a transfer belongs on the hub that holds its bridge, and neither the line
+# counts nor the senders' verdict looks at where a request went.
+if [ "$ASSERT_TRANSFER_AFFINITY" == "true" ]; then
+    check_stream_routing || { log_error "❌ Error: the streams of a transfer did not all reach the hub that holds it"; exit 1; }
+    log_info "Streams of each transfer reached a single hub."
 fi
 
 assert_peak_rss receiver "$MAX_RECEIVER_RSS_MB" || exit 1
