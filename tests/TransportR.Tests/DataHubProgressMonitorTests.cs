@@ -6,7 +6,7 @@ namespace TransportR.Tests;
 
 /// <summary>
 /// <c>AddDataHub()</c>'s default <c>IHubProgressMonitor</c> is covered end-to-end by
-/// <see cref="SignalRIntegrationTests.Transfer_DeliversEveryItem_WhenTheHostRegisteredNoProgressMonitor"/>;
+/// <see cref="TransferIntegrationTests.Transfer_DeliversEveryItem_WhenTheHostRegisteredNoProgressMonitor"/>;
 /// this checks the other half - that a host's own registration is not shadowed by that default.
 /// </summary>
 public class DataHubProgressMonitorTests

@@ -8,7 +8,6 @@ using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
-using Microsoft.AspNetCore.SignalR.Client;
 
 namespace TransportR.Tests;
 
@@ -318,13 +317,16 @@ public class BatchProcessorTests
         // Both null: BatchProcessor reaches neither. The transport lives behind
         // HttpStreamManager, which these tests do not start.
         public HttpClient HttpClient => null!;
-        public HubConnection HubConnection => null!;
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
         public ClientOptions Options { get; } = new ClientOptions();
         public void RemoveSession(string transferId) { }
 
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
+
+        public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
     }
 
     private class StubLogger : ILogger, IDisposable

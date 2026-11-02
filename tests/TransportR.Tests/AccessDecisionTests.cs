@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
+using System.Net;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,7 +20,12 @@ public class AccessDecisionTests
 
     private static string Token(params string[] groups) => RawHub.Token(Subject, groups: groups);
 
-    private static Task<HubConnection> StartAsync(IHost host, string token) => RawHub.StartAsync(host, token);
+    private static async Task<List<ClientInfo>> ReceiversAsync(IHost host, Guid clientId, string token)
+    {
+        using var response = await RawHub.SendAsync(host, HttpMethod.Get, clientId, WireRoutes.ReceiversSegment, token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<List<ClientInfo>>(ControlPlane.Json))!;
+    }
 
     [Fact]
     public async Task Connect_WithATokenThatGrantsNothing_IsRefused()
@@ -29,9 +34,8 @@ public class AccessDecisionTests
         using var host = AuthenticatedHubServerFactory.CreateHost();
         var clientId = Guid.NewGuid();
 
-        await using var connection = await StartAsync(host, Token());
-        await Assert.ThrowsAsync<HubException>(
-            () => connection.InvokeAsync(nameof(ICommandHub.Connect), clientId, null));
+        await using var stream = await RawHub.OpenAsync(host, clientId, Token());
+        Assert.Equal(HttpStatusCode.NotFound, stream.Status);
 
         Assert.Null(await host.Services.GetRequiredService<IStateStore>().GetClientAsync(clientId));
     }
@@ -80,10 +84,11 @@ public class AccessDecisionTests
         await store.SaveClientAsync(Registration(withoutRights, "c2", "b") with { Groups = [] });
         await store.SaveClientAsync(Registration(expired, "c3", "c") with { TokenExpiry = DateTime.UtcNow.AddMinutes(-1) });
 
-        await using var connection = await StartAsync(host, Token(AuthenticatedHubServerFactory.DefaultGroup));
-        await connection.InvokeAsync(nameof(ICommandHub.Connect), Guid.NewGuid(), null);
+        var callerId = Guid.NewGuid();
+        var token = Token(AuthenticatedHubServerFactory.DefaultGroup);
+        await using var stream = await RawHub.OpenAsync(host, callerId, token);
 
-        var receivers = await connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers));
+        var receivers = await ReceiversAsync(host, callerId, token);
 
         // A client with no group is out of discovery; one whose token has run out stays, because a
         // caller that finds nobody fails whereas one that tries a dead client retries.
@@ -98,14 +103,14 @@ public class AccessDecisionTests
         await store.SaveClientAsync(Registration(Guid.NewGuid(), "other", "other-principal"));
 
         var callerId = Guid.NewGuid();
-        await using var connection = await StartAsync(host, Token(AuthenticatedHubServerFactory.DefaultGroup));
-        await connection.InvokeAsync(nameof(ICommandHub.Connect), callerId, null);
-        Assert.Single(await connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers)));
+        var token = Token(AuthenticatedHubServerFactory.DefaultGroup);
+        await using var stream = await RawHub.OpenAsync(host, callerId, token);
+        Assert.Single(await ReceiversAsync(host, callerId, token));
 
         var registered = (await store.GetClientAsync(callerId))!;
         await store.SaveClientAsync(registered with { TokenExpiry = DateTime.UtcNow.AddMinutes(-1) });
 
-        Assert.Empty(await connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers)));
+        Assert.Empty(await ReceiversAsync(host, callerId, token));
     }
 
     private static ClientRegistration Registration(Guid clientId, string connectionId, string subject) =>

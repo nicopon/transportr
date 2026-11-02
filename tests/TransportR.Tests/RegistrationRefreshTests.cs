@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -9,6 +9,7 @@ using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Services;
 using TransportR.Hub.Access;
+using TransportR.Hub.Services;
 using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -20,10 +21,10 @@ namespace TransportR.Tests;
 
 /// <summary>
 /// A host that owns the rights of its clients changes them while the clients run, and wants the hub
-/// to take them now. Every scenario here is a client whose connection has outlived the token it
-/// opened with: the connection's principal is then older than the registration, which is the state
-/// a long-lived client is in, and the only one where registering again over the same connection can
-/// go wrong. On a fresh connection the principal is the token held, and any design passes.
+/// to take them now. Every scenario here is a client whose stream has outlived the token it opened
+/// with: the stream's principal is then older than the registration, which is the state a long-lived
+/// client is in. A refresh registers the client on a new stream, from the token of the moment, and
+/// nothing on the way may read the old principal.
 /// </summary>
 public class RegistrationRefreshTests
 {
@@ -46,8 +47,11 @@ public class RegistrationRefreshTests
         Assert.Equal(["beta"], after.Groups.Order());
         Assert.Equal(before.ClientId, after.ClientId);
         Assert.Equal(before.Subject, after.Subject);
-        Assert.Equal(before.ConnectionId, after.ConnectionId);
-        Assert.Null(after.DisconnectedAtUtc);
+        Assert.NotEqual(before.ConnectionId, after.ConnectionId);
+
+        // The old stream closes after the new one registered, and its end must not mark the new one.
+        await Task.Delay(200);
+        Assert.Null((await node.RegistrationAsync()).DisconnectedAtUtc);
         Assert.True(after.TokenExpiry > before.TokenExpiry, $"the expiry stayed at {after.TokenExpiry:O}");
         Assert.True(after.TokenExpiry > DateTime.UtcNow.AddMinutes(30), $"the expiry is {after.TokenExpiry:O}");
     }
@@ -55,9 +59,9 @@ public class RegistrationRefreshTests
     [Fact]
     public async Task Refresh_NeverLeavesTheRegistrationWithTheExpiryOfTheTokenTheConnectionOpenedWith()
     {
-        // Registering again over a connection reads the principal it was opened with, whose token
-        // ran out long ago. A registration written with that expiry is one the next sweep ends the
-        // client's transfers for and closes its connection over, however briefly it stays.
+        // The principal of the stream the client holds is that of a token that ran out long ago. A
+        // registration written with that expiry is one the next sweep ends the client's transfers for
+        // and closes its stream over, however briefly it stays.
         await using var node = await Node.StartAsync(["alpha"]);
         var already = node.Store.Writes.Count;
 
@@ -166,8 +170,8 @@ public class RegistrationRefreshTests
     {
         await using var node = await Node.StartAsync(["alpha"], outlive: false);
 
-        // The client starts a stopped connection again, after a delay of at least half a second.
-        await node.Client.ControlConnection.StopAsync();
+        // The client opens a lost stream again, after a delay of at least half a second.
+        await node.CutAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => node.Client.RefreshRegistrationAsync());
     }
@@ -181,7 +185,7 @@ public class RegistrationRefreshTests
         var before = await node.RegistrationAsync();
 
         node.Rights.Set(Sender, "beta");
-        await node.Client.ControlConnection.StopAsync();
+        await node.CutAsync();
 
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
         var after = await node.RegistrationAsync();
@@ -200,10 +204,9 @@ public class RegistrationRefreshTests
     [Fact]
     public async Task Refresh_Calls_DoNotInterleaveTheirRegistrationAndTheirPush()
     {
-        // The beat that registers a client again, the restart of its connection and a refresh all
-        // write a registration and then present the token. If one's Connect could land between the
-        // other's Connect and its push, the registration would show the principal's groups, and
-        // the older expiry, for as long as the push takes.
+        // Two refreshes each write a registration and then present the token. If one's registration
+        // could land between the other's and its push, the push would be answered for a stream that
+        // has already been replaced.
         await using var node = await Node.StartAsync(["alpha"], outlive: false);
         node.Store.RenewDelay = TimeSpan.FromMilliseconds(400);
         var already = node.Store.Writes.Count;
@@ -260,90 +263,28 @@ public class RegistrationRefreshTests
     // ========== The hub ==========
 
     [Fact]
-    public async Task Connect_AgainOverTheConnectionHoldingTheRegistration_KeepsTheLaterExpiry()
+    public async Task AStreamOfAnotherConnection_RegistersWithTheExpiryOfItsOwnPrincipal()
     {
-        await using var node = await Node.StartAsync(["alpha"]);
-        var before = await node.RegistrationAsync();
-
-        await node.Client.ControlConnection.InvokeAsync(nameof(ICommandHub.Connect), node.Client.ClientId, null);
-
-        var after = await node.RegistrationAsync();
-        Assert.True(after.TokenExpiry >= before.TokenExpiry, $"the expiry went from {before.TokenExpiry:O} to {after.TokenExpiry:O}");
-    }
-
-    [Fact]
-    public async Task Connect_AgainOverTheConnectionHoldingTheRegistration_WithNoGroup_IsRefused()
-    {
-        // The principal's token is past its expiry, and a verdict reads the expiry before the groups:
-        // judged on the principal alone, an identity with no right is "expired" and registers.
-        await using var node = await Node.StartAsync(["alpha"]);
-        var before = await node.RegistrationAsync();
-
-        node.Rights.Set(Sender);
-        await Assert.ThrowsAsync<HubException>(
-            () => node.Client.ControlConnection.InvokeAsync(nameof(ICommandHub.Connect), node.Client.ClientId, null));
-
-        Assert.Equal(before, await node.RegistrationAsync());
-    }
-
-    [Fact]
-    public async Task Connect_AgainOverTheConnectionHoldingTheRegistration_LeavesItsTransfersToTheSweep()
-    {
-        await using var node = await Node.StartAsync(["g"]);
-        await using var receiver = node.NewClient("receiver", "g");
-        var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
-        await receiver.ConnectAsync();
-
-        await using var send = await node.Client.InitTransferAsync(receiver.ClientId, batchSize: 10);
-        await using var receive = await handle.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        var consumer = Task.Run(async () =>
-        {
-            var items = new List<string>();
-            await foreach (var item in receive.ReceiveAsync()) items.Add(item);
-            await receive.WaitForCompletionAsync();
-            return items;
-        });
-
-        await node.Client.ControlConnection.InvokeAsync(nameof(ICommandHub.Connect), node.Client.ClientId, null);
-        await node.Sweep();
-
-        var expected = Enumerable.Range(0, 50).Select(i => $"item-{i}").ToList();
-        await send.SendAsync(expected);
-        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(15));
-        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(15)));
-    }
-
-    [Fact]
-    public async Task Connect_AgainOverTheConnectionHoldingTheRegistration_DoesNotBringBackAScopeTheRenewalWithdrew()
-    {
-        // The connection opened with a token that carried a and b, and the renewal carried a alone.
-        // The principal still says a and b, and an expiry past which it is no longer any attestation.
-        await using var node = await Node.StartAsync([], scopesFromTokens: true);
-        Assert.Equal(["a"], (await node.RegistrationAsync()).Groups.Order());
-
-        await node.Client.ControlConnection.InvokeAsync(nameof(ICommandHub.Connect), node.Client.ClientId, null);
-
-        Assert.Equal(["a"], (await node.RegistrationAsync()).Groups.Order());
-    }
-
-    [Fact]
-    public async Task Connect_OverAnotherConnection_StillTakesTheExpiryOfItsOwnPrincipal()
-    {
-        // Only the connection that holds the registration is spared the older expiry. A client that
-        // comes back on a new connection is registered from the token that connection opened with,
-        // which may well be the shorter one.
+        // A client that comes back on a new stream is registered from the token that stream opened
+        // with, which may well be the shorter one.
         await using var node = await Node.StartAsync(["alpha"], outlive: false);
         var shorter = DateTime.UtcNow.AddMinutes(10);
-        var token = StubJwt.Create(Sender, shorter, "token-group");
-        await using var other = new HubConnectionBuilder()
-            .WithUrl(node.Host.BaseUrl + WireRoutes.CommandHub, options => options.AccessTokenProvider = () => Task.FromResult<string?>(token))
-            .Build();
-        await other.StartAsync();
+        using var http = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"{node.Host.BaseUrl}{WireRoutes.ClientBase}/{node.Client.ClientId}/{WireRoutes.EventsSegment}?{ControlPlane.HeartbeatParameter}=60000");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", StubJwt.Create(Sender, shorter, "token-group"));
 
-        await other.InvokeAsync(nameof(ICommandHub.Connect), node.Client.ClientId, null);
+        using var other = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, other.StatusCode);
 
+        var deadline = DateTime.UtcNow.AddSeconds(5);
         var after = await node.RegistrationAsync();
+        while (after.TokenExpiry > shorter.AddSeconds(1) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+            after = await node.RegistrationAsync();
+        }
+
         Assert.True(after.TokenExpiry <= shorter.AddSeconds(1), $"the expiry is {after.TokenExpiry:O}");
     }
 
@@ -368,8 +309,8 @@ public class RegistrationRefreshTests
     }
 
     /// <summary>
-    /// A client's tokens: the first lives <c>opening</c> and is the principal the connection keeps;
-    /// the ones after it live an hour.
+    /// A client's tokens: the first lives <c>opening</c> and is the principal the stream keeps; the
+    /// ones after it live an hour.
     /// </summary>
     private sealed class Tokens
     {
@@ -450,8 +391,7 @@ public class RegistrationRefreshTests
     }
 
     /// <summary>
-    /// A hub on a real socket, and a client of it whose connection has outlived its opening token.
-    /// In memory the principal is not kept as a socket keeps it, and nothing here would be stale.
+    /// A hub on a real socket, and a client of it whose stream has outlived its opening token.
     /// </summary>
     private sealed class Node : IAsyncDisposable
     {
@@ -469,34 +409,18 @@ public class RegistrationRefreshTests
             };
 
         /// <param name="groups">What the host's rights say of the client.</param>
-        /// <param name="scopesFromTokens">
-        /// The stock identity provider instead, which reads the groups from the token's scopes: the
-        /// opening token carries a and b, the ones after it a alone.
-        /// </param>
         public static async Task<Node> StartAsync(
-            string[] groups, bool outlive = true, Action<ClientOptions>? options = null, bool scopesFromTokens = false)
+            string[] groups, bool outlive = true, Action<ClientOptions>? options = null)
         {
             var rights = new Rights();
             rights.Set(Sender, groups);
             var store = new RecordingStateStore();
-            var host = await AuthenticatedHubServerFactory.StartLoopbackAsync(configureServices: services =>
-            {
-                if (scopesFromTokens)
-                {
-                    services.Replace(ServiceDescriptor.Singleton<IStateStore>(store));
-                }
-                else
-                {
-                    Replacing(rights, store)(services);
-                }
-            });
-            var tokens = new Tokens(Sender, outlive ? OpeningLifetime : null,
-                scopesFromTokens ? ["a", "b"] : null, scopesFromTokens ? ["a"] : null);
+            var host = await AuthenticatedHubServerFactory.StartLoopbackAsync(configureServices: Replacing(rights, store));
+            var tokens = new Tokens(Sender, outlive ? OpeningLifetime : null);
 
-            // The client asks its provider again once a token is within the threshold of its expiry,
-            // and the connection asks for one twice as it opens: a threshold under the opening
-            // lifetime is what keeps the principal the first token, and lets the renewal bring the
-            // hour-long one before the first runs out.
+            // The client asks its provider again once a token is within the threshold of its expiry:
+            // a threshold under the opening lifetime is what keeps the stream's principal the first
+            // token, and lets the renewal bring the hour-long one before the first runs out.
             var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync, o =>
             {
                 if (outlive) o.TokenRefreshThreshold = TimeSpan.FromMilliseconds(100);
@@ -533,6 +457,20 @@ public class RegistrationRefreshTests
 
         public async Task<ClientRegistration> RegistrationAsync() =>
             (await Store.GetClientAsync(Client.ClientId))!;
+
+        /// <summary>Closes the client's stream from the hub, and returns once the client has seen it go.</summary>
+        public async Task CutAsync()
+        {
+            var connectionId = (await RegistrationAsync()).ConnectionId;
+            Assert.True(Host.Services.GetRequiredService<ClientStreams>().TryClose(connectionId));
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (Client.Channel.IsOpen)
+            {
+                Assert.True(DateTime.UtcNow < deadline, "the client never saw its stream close");
+                await Task.Delay(5);
+            }
+        }
 
         /// <summary>The access sweep, now rather than at its next tick.</summary>
         public Task Sweep() => Host.Services.GetRequiredService<IAccessReconciler>().ReconcileAllAsync();

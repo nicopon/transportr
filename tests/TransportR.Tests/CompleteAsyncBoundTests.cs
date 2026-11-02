@@ -19,7 +19,7 @@ public class CompleteAsyncBoundTests
         context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
 
         await using var session = new DataSession<string>(
-            context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data");
+            context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
 
         var failure = await Assert.ThrowsAsync<TransferFailedException>(
             () => session.CompleteAsync(CancellationToken.None));
@@ -35,7 +35,7 @@ public class CompleteAsyncBoundTests
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
 
         await using var session = new DataSession<string>(
-            context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data");
+            context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 

@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
-using Microsoft.AspNetCore.Http.Connections;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Abstractions;
@@ -36,13 +34,13 @@ public class HostRevocationTests
         await node.WithdrawAsync(Node.SenderSubject);
 
         await Assert.ThrowsAsync<TransferFailedException>(() => node.Receive.WaitForCompletionAsync().WaitAsync(Patience));
-        await node.Closed.Task.WaitAsync(Patience);
+        await EventuallyAsync(() => !node.Sender.Channel.IsOpen, Patience);
         Assert.Empty((await node.RegistrationAsync()).Groups);
 
-        // The client starts its connection again and asks to be registered; its identity still holds
-        // no group, so the hub refuses, and it stays out of discovery.
-        await EventuallyAsync(() => node.Sender.ControlConnection.State == HubConnectionState.Connected, Patience);
+        // The client opens its stream again, which asks to be registered; its identity still holds no
+        // group, so the hub refuses, and it stays out of discovery.
         await Task.Delay(TimeSpan.FromSeconds(1.5));
+        Assert.False(node.Sender.Channel.IsOpen);
         Assert.Empty((await node.RegistrationAsync()).Groups);
         Assert.DoesNotContain(await node.Receiver.GetReceiversAsync(), c => c.ClientId == node.Sender.ClientId);
     }
@@ -61,8 +59,8 @@ public class HostRevocationTests
         Assert.Equal(node.ConnectionId, registration.ConnectionId);
 
         await Task.Delay(TimeSpan.FromSeconds(1.5));
-        Assert.False(node.Closed.Task.IsCompleted, "the connection was closed");
-        Assert.Equal(HubConnectionState.Connected, node.Sender.ControlConnection.State);
+        Assert.True(node.Sender.Channel.IsOpen, "the stream was closed");
+        Assert.Equal(node.ConnectionId, (await node.RegistrationAsync()).ConnectionId);
     }
 
     private static async Task EventuallyAsync(Func<bool> done, TimeSpan timeout)
@@ -108,7 +106,6 @@ public class HostRevocationTests
         public required Send<string> Send { get; init; }
         public required Receive<string> Receive { get; init; }
         public required string ConnectionId { get; init; }
-        public required TaskCompletionSource Closed { get; init; }
 
         public static async Task<Node> StartAsync(Func<IReadOnlySet<string>, IReadOnlySet<string>, bool> canSendTo)
         {
@@ -126,14 +123,9 @@ public class HostRevocationTests
                 services => services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider>(rights)));
 
             var sender = TestClients.Create(null, host.BaseUrl,
-                accessToken: StubJwt.Create(SenderSubject, DateTime.UtcNow.AddHours(1), "unused"),
-                configureConnection: o => o.Transports = HttpTransportType.WebSockets);
+                accessToken: StubJwt.Create(SenderSubject, DateTime.UtcNow.AddHours(1), "unused"));
             var receiver = TestClients.Create(null, host.BaseUrl,
-                accessToken: StubJwt.Create(ReceiverSubject, DateTime.UtcNow.AddHours(1), "unused"),
-                configureConnection: o => o.Transports = HttpTransportType.WebSockets);
-
-            var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            sender.ControlConnection.Closed += _ => { closed.TrySetResult(); return Task.CompletedTask; };
+                accessToken: StubJwt.Create(ReceiverSubject, DateTime.UtcNow.AddHours(1), "unused"));
 
             var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
             receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
@@ -147,7 +139,6 @@ public class HostRevocationTests
             {
                 Host = host, Rights = rights, Sender = sender, Receiver = receiver, Send = send, Receive = receive,
                 ConnectionId = (await store.GetClientAsync(sender.ClientId))!.ConnectionId,
-                Closed = closed,
             };
         }
 

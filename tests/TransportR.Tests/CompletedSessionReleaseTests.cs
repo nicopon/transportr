@@ -17,7 +17,7 @@ public class CompletedSessionReleaseTests
     {
         var hub = new AcknowledgingHub();
         var session = new DataSession<string>(
-            new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data");
+            new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
 
         await session.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));

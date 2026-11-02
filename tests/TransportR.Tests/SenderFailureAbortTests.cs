@@ -66,7 +66,7 @@ public class SenderFailureAbortTests
         configure?.Invoke(context.Options);
 
         var session = new DataSession<string>(
-            context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data");
+            context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;
     }

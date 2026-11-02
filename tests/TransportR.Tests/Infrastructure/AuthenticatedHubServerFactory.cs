@@ -34,7 +34,7 @@ public static class AuthenticatedHubServerFactory
     public const string DefaultGroup = "test";
 
     /// <summary>
-    /// An in-memory host: SignalR runs over the transports a test handler can carry.
+    /// An in-memory host.
     /// <paramref name="configureServices"/> runs once the hub is built, so what it registers replaces
     /// the hub's own (the identity provider, the state store).
     /// </summary>

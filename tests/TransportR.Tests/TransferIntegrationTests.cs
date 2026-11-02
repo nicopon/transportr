@@ -1,8 +1,8 @@
+using System.Net;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.SignalR;
 using TransportR.Protocol;
-using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,11 +25,11 @@ using TransportR.Serialization.Json.Services;
 
 namespace TransportR.Tests;
 
-public class SignalRIntegrationTests
+public class TransferIntegrationTests
 {
     private readonly ITestOutputHelper _output;
 
-    public SignalRIntegrationTests(ITestOutputHelper output)
+    public TransferIntegrationTests(ITestOutputHelper output)
     {
         _output = output;
     }
@@ -156,45 +156,31 @@ public class SignalRIntegrationTests
     }
 
     [Fact]
-    public async Task SenderInitiatedTransfer_Opens_WhenTheSenderInvokesTheHubDuringIt()
+    public async Task SenderInitiatedTransfer_Opens_OnTheReceiversReply_WithoutCallingTheSenderBack()
     {
-        // The hub runs one invocation at a time per client, and InitTransfer is one. Anything else the
-        // sender invokes while it is in flight - its presence beat, the statistics of another transfer -
-        // queues behind it. A handshake that called the sender back would wait behind its own queue;
-        // the sender here invokes the hub from inside that callback, so such a handshake stalls every time.
+        // The wire alone: the sender asks, the receiver's stream carries the question, and its reply
+        // is what the sender's request waits on. Nothing reaches the sender's own stream.
         using var host = TestHubServerFactory.CreateHost();
-        var handler = host.GetTestServer().CreateHandler();
-
-        await using var receiver = await StartRawClientAsync(handler, connection =>
-            connection.On<string, Guid, bool>(nameof(ICommandClient.GetReadyToReceive), (_, _) => true));
-        await using var sender = await StartRawClientAsync(handler, connection =>
-            connection.On<string, int, Guid, bool>(nameof(ICommandClient.RequestSend), async (_, _, _) =>
-            {
-                await connection.SendAsync(nameof(ICommandHub.Heartbeat));
-                return true;
-            }));
-
+        var senderId = Guid.NewGuid();
         var receiverId = Guid.NewGuid();
-        await receiver.InvokeAsync(nameof(ICommandHub.Connect), receiverId, new[] { "test" });
-        await sender.InvokeAsync(nameof(ICommandHub.Connect), Guid.NewGuid(), new[] { "test" });
+        await using var receiver = await RawHub.OpenAsync(host, receiverId, token: null, "test");
+        await using var sender = await RawHub.OpenAsync(host, senderId, token: null, "test");
 
-        // A stalled handshake runs out its whole timeout; an unstalled one takes milliseconds.
-        const int handshakeTimeoutMs = 3_000;
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        var transferId = await sender.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), receiverId, 10, handshakeTimeoutMs);
+        var opening = RawHub.SendAsync(host, HttpMethod.Post, senderId, WireRoutes.TransfersSegment, token: null,
+            new InitTransferRequest(receiverId, 10, 5_000));
 
-        Assert.False(string.IsNullOrEmpty(transferId));
-        Assert.True(clock.ElapsedMilliseconds < handshakeTimeoutMs / 2, $"the handshake took {clock.ElapsedMilliseconds} ms");
-    }
+        var asked = await receiver.NextEventAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(ControlPlane.ReadyToReceive, asked?.EventType);
+        var question = System.Text.Json.JsonSerializer.Deserialize<ReadyToReceiveEvent>(asked!.Value.Data, ControlPlane.Json)!;
+        Assert.Equal(senderId, question.SenderId);
 
-    private static async Task<HubConnection> StartRawClientAsync(HttpMessageHandler handler, Action<HubConnection> register)
-    {
-        var connection = new HubConnectionBuilder()
-            .WithUrl(TestHubServerFactory.HubUrl, options => options.HttpMessageHandlerFactory = _ => handler)
-            .Build();
-        register(connection);
-        await connection.StartAsync();
-        return connection;
+        using var reply = await RawHub.SendAsync(host, HttpMethod.Post, receiverId, $"{WireRoutes.RepliesSegment}/{question.RequestId}",
+            token: null, new CallbackReply(CallbackOutcome.Accepted));
+        Assert.Equal(HttpStatusCode.NoContent, reply.StatusCode);
+
+        using var opened = await opening.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Equal(question.TransferId, (await opened.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json))!.TransferId);
     }
 
     [Fact]
@@ -284,10 +270,10 @@ public class SignalRIntegrationTests
 
         await Assert.ThrowsAsync<HubRequestFailedException>(() => client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
 
-        // Past the first restart delay (one second at most): a connection that came back by itself
-        // would hold no registration, and nothing would ever register the client on it.
+        // Past the first reopening delay (one second at most): a refused stream is not opened again
+        // by itself, which would register the client behind its caller's back.
         await Task.Delay(TimeSpan.FromSeconds(1.5));
-        Assert.Equal(HubConnectionState.Disconnected, client.ControlConnection.State);
+        Assert.False(client.Channel.IsOpen);
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.IsRegisteredAsync());
 
         await client.ConnectAsync(["senders"]).WaitAsync(TimeSpan.FromSeconds(10));
@@ -927,10 +913,8 @@ public class SignalRIntegrationTests
         await receiver.DisposeAsync();
         await Task.Delay(500);
 
-        // 2. The registration outlived the connection, so the handshake invokes a connection that
-        //    no longer exists. SignalR always prefixes its generic sentence, but it appends a
-        //    HubException's own message after it - so an untranslated IOException here leaves the
-        //    caller with the prefix and nothing else.
+        // 2. The registration outlived the stream, so the handshake asks a client whose stream the
+        //    hub no longer holds. Left untranslated, that failure would tell the caller nothing.
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiverId, batchSize: 100));
 
@@ -940,30 +924,26 @@ public class SignalRIntegrationTests
     [Fact]
     public async Task Heartbeat_ReportsWhetherTheHubStillKnowsTheConnection()
     {
-        // 1. Start Server
         using var host = TestHubServerFactory.CreateHost();
-        var server = host.GetTestServer();
-        var handler = server.CreateHandler();
-
-        // A raw connection: this exercises the hub method, not the client that drives it.
-        await using var connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost" + WireRoutes.CommandHub, o => o.HttpMessageHandlerFactory = _ => handler)
-            .Build();
-        await connection.StartAsync();
-
         var clientId = Guid.NewGuid();
-        await connection.InvokeAsync(nameof(ICommandHub.Connect), clientId, new[] { "senders" });
 
-        // 2. Registered: the hub knows this connection.
-        Assert.True(await connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat)));
+        // A raw stream: this exercises the hub's route, not the client that drives it.
+        await using var stream = await RawHub.OpenAsync(host, clientId, token: null, "senders");
+        var presence = $"{WireRoutes.PresenceSegment}/{stream.ConnectionId}";
 
-        // 3. Drop the registration the way an expiry would - the connection stays up.
+        // Registered: the hub knows this stream.
+        using (var known = await RawHub.SendAsync(host, HttpMethod.Post, clientId, presence, token: null))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, known.StatusCode);
+        }
+
+        // Drop the registration the way an expiry would - the stream stays up.
         var store = host.Services.GetRequiredService<IStateStore>();
         await store.DeleteClientAsync(clientId);
 
-        // 4. Connected but unknown. This is what discovery sees, and why the answer has to carry
-        //    more than a keep-alive: the client must know to register again.
-        Assert.False(await connection.InvokeAsync<bool>(nameof(ICommandHub.Heartbeat)));
+        // Connected but unknown: the client must know to register again.
+        using var unknown = await RawHub.SendAsync(host, HttpMethod.Post, clientId, presence, token: null);
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
     }
 
     [Fact]
@@ -1073,46 +1053,26 @@ public class SignalRIntegrationTests
         HttpMessageHandler? handler, string url, Action<ClientOptions>? configure = null,
         HttpMessageHandler? networkHandler = null, IBatchSerializer<string>? serializer = null)
     {
-        // Custom Connection Manager that uses TestServer's HttpMessageHandler
         var options = new ClientOptions();
         configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
-        
-        // We need to bypass the standard HubConnectionBuilder.WithUrl and inject the handler
-        // But HubConnectionBuilderExtensions only supports standard HttpClient or options.
-        // THE TRICK: Use WithUrl(url, options => options.HttpMessageHandlerFactory = _ => handler)
-        
-        var connectionManager = new HubConnectionManager(
-            url + WireRoutes.CommandHub,
-            options,
-            logger,
-            initialAccessToken: null,
-            tokenProvider: null,
-             configureHttpConnection: (httpOpts) => 
-             {
-                 if (handler != null)
-                 {
-                     httpOpts.HttpMessageHandlerFactory = _ => handler;
-                 }
-             }
-        );
         
         var registry = new SessionRegistry<string>(logger);
         serializer ??= new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = handler != null
-            ? new HttpClient(handler) { BaseAddress = new Uri(url) }
-            : new HttpClient(networkHandler ?? new SocketsHttpHandler()) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
+            ? new HttpClient(handler) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan }
+            : new HttpClient(networkHandler ?? new SocketsHttpHandler { UseCookies = false }) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
+        var channel = new ControlChannel(url, Guid.NewGuid(), httpClient, options, logger);
 
         return new TransportRClient<string>(
-            connectionManager,
+            channel,
             registry,
             serializer,
             logger,
             defaultBatchSize: 100,
             options,
             url + WireRoutes.StreamBase,
-            url + WireRoutes.ClientBase,
             httpClient,
             streamManager
         );

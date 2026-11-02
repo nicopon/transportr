@@ -5,8 +5,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,6 +15,7 @@ using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
 using TransportR.Hub.Controllers;
+using TransportR.Hub.Services;
 using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -66,6 +65,13 @@ public class TokenRenewalRouteTests
         Assert.True(Math.Abs((body.TokenExpiry!.Value - expiry).TotalSeconds) < 1);
     }
 
+    private static async Task<List<ClientInfo>> ReceiversAsync(IHost host, Guid clientId, string token)
+    {
+        using var response = await RawHub.SendAsync(host, HttpMethod.Get, clientId, WireRoutes.ReceiversSegment, token);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<List<ClientInfo>>(ControlPlane.Json))!;
+    }
+
     [Fact]
     public async Task Renew_FollowsTheGroupsOfTheNewToken_ThroughDiscoveryAndTransfers()
     {
@@ -75,19 +81,20 @@ public class TokenRenewalRouteTests
             new Rules((source, target) => source.Contains("senders") && target.Contains("receivers"))));
         var receiverId = await RegisterAsync(host, "receiver-principal", groups: "receivers");
 
-        await using var connection = await RawHub.StartAsync(host, RawHub.Token(Owner, groups: "senders"));
+        var token = RawHub.Token(Owner, groups: "senders");
         var callerId = Guid.NewGuid();
-        await connection.InvokeAsync(nameof(ICommandHub.Connect), callerId, null);
+        await using var stream = await RawHub.OpenAsync(host, callerId, token);
 
-        Assert.Equal(receiverId, Assert.Single(await connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers))).ClientId);
+        Assert.Equal(receiverId, Assert.Single(await ReceiversAsync(host, callerId, token)).ClientId);
 
         using var response = await RawHub.RenewAsync(host, callerId, RawHub.Token(Owner, groups: "bystanders"));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        Assert.Empty(await connection.InvokeAsync<List<ClientInfo>>(nameof(ICommandHub.GetReceivers)));
-        var refusal = await Assert.ThrowsAsync<HubException>(
-            () => connection.InvokeAsync<string>(nameof(ICommandHub.InitTransfer), receiverId, 10, 1000));
-        Assert.Contains("not authorized", refusal.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await ReceiversAsync(host, callerId, token));
+        using var refusal = await RawHub.SendAsync(host, HttpMethod.Post, callerId, WireRoutes.TransfersSegment, token,
+            new InitTransferRequest(receiverId, 10, 1000));
+        Assert.Equal(HttpStatusCode.Conflict, refusal.StatusCode);
+        Assert.Contains("not authorized", (await refusal.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json))!.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -181,11 +188,20 @@ public class TokenRenewalRouteTests
 
         var expiry = clock.GetUtcNow().UtcDateTime.AddMinutes(10);
         var reconciler = new RecordingReconciler();
+        var policy = new AccessPolicy(Options.Create(new AccessOptions()), clock);
+        var streams = new ClientStreams(clock);
+        var transfers = new TransferManager(store, clock);
+        var affinity = Options.Create(new AffinityOptions());
         var controller = new ClientController(
             store,
             new JwtIdentityProvider(),
-            new AccessPolicy(Options.Create(new AccessOptions()), clock),
+            policy,
             reconciler,
+            streams,
+            new TransferInitiator(streams, store, transfers, policy, affinity, NullLogger<TransferInitiator>.Instance, clock),
+            transfers,
+            affinity,
+            clock,
             NullLogger<ClientController>.Instance)
         {
             ControllerContext = new ControllerContext

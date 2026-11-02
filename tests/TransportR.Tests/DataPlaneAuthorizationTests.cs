@@ -11,7 +11,7 @@ namespace TransportR.Tests;
 
 /// <summary>
 /// The stream routes carry the whole payload, so "authenticated" and "is a participant" have to
-/// hold on them and not only on the SignalR endpoint.
+/// hold on them and not only on the control plane.
 /// </summary>
 public class DataPlaneAuthorizationTests
 {

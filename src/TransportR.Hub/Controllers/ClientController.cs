@@ -360,6 +360,7 @@ internal class ClientController : ControllerBase
 
         _logger.LogInformation("Token renewed for client {ClientId}, groups [{Groups}], new expiry: {Expiry}",
             clientId, string.Join(", ", renewed.Groups), renewed.TokenExpiry?.ToString("u") ?? "N/A");
+        _streams.Touch(clientId);
 
         // What the new token no longer grants applies now, to what this client has running.
         await _reconciler.ReconcileAsync(clientId, HttpContext.RequestAborted);

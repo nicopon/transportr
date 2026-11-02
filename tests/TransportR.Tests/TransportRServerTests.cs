@@ -18,7 +18,7 @@ namespace TransportR.Tests;
 /// test's to say. The real thing dies of a client vanishing behind a link that stayed silent, which
 /// no in-process host can produce; these pin what the hub must do once it has noticed.
 /// </summary>
-public class SignalRDataServerTests
+public class TransportRServerTests
 {
     private const string TransferId = "transfer-1";
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(5);
@@ -29,12 +29,12 @@ public class SignalRDataServerTests
         public RecordingRetirer Retirer { get; } = new();
         public LogRecorder Logs { get; } = new();
         public KnownTransfer Transfers { get; } = new();
-        public SignalRDataServer Server { get; }
+        public TransportRServer Server { get; }
 
         public Harness()
         {
-            Server = new SignalRDataServer(
-                Logs.Factory.CreateLogger<SignalRDataServer>(),
+            Server = new TransportRServer(
+                Logs.Factory.CreateLogger<TransportRServer>(),
                 new IgnoredProgress(),
                 Transfers,
                 Bridges,
@@ -68,8 +68,8 @@ public class SignalRDataServerTests
     [InlineData(ConnectionType.Control)]
     public async Task BytesOnAStream_KeepTheTransferAlive(ConnectionType type)
     {
-        // A heartbeat reaches only the instance its client's SignalR connection lives on, which need not
-        // carry the streams; the shared session a replica takes the transfer over from is renewed here.
+        // A heartbeat is a request of its own, which can fail while the streams carry on; the shared
+        // session a replica takes the transfer over from is renewed here.
         var hub = new Harness();
         var bridge = hub.BridgeFor(type);
         _ = bridge.RegisterReceiverAsync(new MemoryStream(), Guid.NewGuid());

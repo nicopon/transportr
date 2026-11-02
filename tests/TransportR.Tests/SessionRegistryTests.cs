@@ -15,7 +15,7 @@ public class SessionRegistryTests
         var transferId = "t1";
         
         var session = registry.GetOrAdd(transferId, id => 
-            new DataSession<string>(_stubContext, id, 100, "http://dummy")); 
+            new DataSession<string>(_stubContext, id, 100, "http://dummy", affinity: null)); 
             
         Assert.NotNull(session);
         Assert.Equal(transferId, session.TransferId);
@@ -28,7 +28,7 @@ public class SessionRegistryTests
         await using var registry = new SessionRegistry<string>(_stubContext.Logger);
         var transferId = "t2";
         
-        registry.GetOrAdd(transferId, id => new DataSession<string>(_stubContext, id, 100, "http://dummy"));
+        registry.GetOrAdd(transferId, id => new DataSession<string>(_stubContext, id, 100, "http://dummy", affinity: null));
         
         var found = registry.TryGetSession(transferId, out var session);
         
@@ -42,7 +42,7 @@ public class SessionRegistryTests
     {
         await using var registry = new SessionRegistry<string>(_stubContext.Logger);
         var transferId = "t3";
-        registry.GetOrAdd(transferId, id => new DataSession<string>(_stubContext, id, 100, "http://dummy"));
+        registry.GetOrAdd(transferId, id => new DataSession<string>(_stubContext, id, 100, "http://dummy", affinity: null));
         
         var removed = registry.TryRemove(transferId, out var session);
         
@@ -55,8 +55,8 @@ public class SessionRegistryTests
     public async Task DisposeAsync_ShouldDisposeSessions()
     {
         var registry = new SessionRegistry<string>(_stubContext.Logger);
-        registry.GetOrAdd("s1", id => new DataSession<string>(_stubContext, id, 100, "http://dummy"));
-        registry.GetOrAdd("s2", id => new DataSession<string>(_stubContext, id, 100, "http://dummy"));
+        registry.GetOrAdd("s1", id => new DataSession<string>(_stubContext, id, 100, "http://dummy", affinity: null));
+        registry.GetOrAdd("s2", id => new DataSession<string>(_stubContext, id, 100, "http://dummy", affinity: null));
         
         await registry.DisposeAsync();
         

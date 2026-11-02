@@ -1,15 +1,12 @@
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.AspNetCore.TestHost;
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
 /// <summary>
-/// Under a subject that is not a Guid the client picks its own id, and <c>GetReceivers</c> shows
+/// Under a subject that is not a Guid the client picks its own id, and discovery shows
 /// every id to every authorized sender. A registration must therefore stay with the subject that
 /// made it.
 /// </summary>
@@ -24,14 +21,11 @@ public class ConnectIdentityTests
         using var host = AuthenticatedHubServerFactory.CreateHost();
         var clientId = Guid.NewGuid();
 
-        await using var owner = await StartAsync(host, Owner);
-        await owner.InvokeAsync(nameof(ICommandHub.Connect), clientId, null);
+        await using var owner = await OpenAsync(host, clientId, Owner);
+        Assert.Equal(HttpStatusCode.OK, owner.Status);
 
-        await using var intruder = await StartAsync(host, Intruder);
-        var ex = await Assert.ThrowsAsync<HubException>(
-            () => intruder.InvokeAsync(nameof(ICommandHub.Connect), clientId, null));
-
-        Assert.Contains("already in use", ex.Message, StringComparison.OrdinalIgnoreCase);
+        await using var intruder = await OpenAsync(host, clientId, Intruder);
+        Assert.Equal(HttpStatusCode.NotFound, intruder.Status);
 
         var registration = await host.Services.GetRequiredService<IStateStore>().GetClientAsync(clientId);
         Assert.Equal(Owner, registration?.Subject);
@@ -44,11 +38,9 @@ public class ConnectIdentityTests
         using var host = AuthenticatedHubServerFactory.CreateHost();
         var clientId = Guid.NewGuid();
 
-        await using var first = await StartAsync(host, Owner);
-        await first.InvokeAsync(nameof(ICommandHub.Connect), clientId, null);
-
-        await using var second = await StartAsync(host, Owner);
-        await second.InvokeAsync(nameof(ICommandHub.Connect), clientId, null);
+        await using var first = await OpenAsync(host, clientId, Owner);
+        await using var second = await OpenAsync(host, clientId, Owner);
+        Assert.Equal(HttpStatusCode.OK, second.Status);
 
         var store = host.Services.GetRequiredService<IStateStore>();
         Assert.Equal(clientId, (await store.GetClientByConnectionIdAsync(second.ConnectionId!))?.ClientId);
@@ -63,8 +55,7 @@ public class ConnectIdentityTests
         var store = host.Services.GetRequiredService<IStateStore>();
         var clientId = Guid.NewGuid();
 
-        var owner = await StartAsync(host, Owner);
-        await owner.InvokeAsync(nameof(ICommandHub.Connect), clientId, null);
+        var owner = await OpenAsync(host, clientId, Owner);
         await owner.DisposeAsync();
 
         var deadline = DateTime.UtcNow.AddSeconds(10);
@@ -74,23 +65,10 @@ public class ConnectIdentityTests
         }
         Assert.NotNull((await store.GetClientAsync(clientId))?.DisconnectedAtUtc);
 
-        await using var intruder = await StartAsync(host, Intruder);
-        await Assert.ThrowsAsync<HubException>(
-            () => intruder.InvokeAsync(nameof(ICommandHub.Connect), clientId, null));
+        await using var intruder = await OpenAsync(host, clientId, Intruder);
+        Assert.Equal(HttpStatusCode.NotFound, intruder.Status);
     }
 
-    private static async Task<HubConnection> StartAsync(Microsoft.Extensions.Hosting.IHost host, string subject)
-    {
-        var handler = host.GetTestServer().CreateHandler();
-        var connection = new HubConnectionBuilder()
-            .WithUrl("http://localhost" + WireRoutes.CommandHub, options =>
-            {
-                options.HttpMessageHandlerFactory = _ => handler;
-                options.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {subject}");
-            })
-            .Build();
-
-        await connection.StartAsync();
-        return connection;
-    }
+    private static Task<RawStream> OpenAsync(Microsoft.Extensions.Hosting.IHost host, Guid clientId, string subject) =>
+        RawHub.OpenAsync(host, clientId, RawHub.Token(subject, groups: AuthenticatedHubServerFactory.DefaultGroup));
 }

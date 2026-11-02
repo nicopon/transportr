@@ -151,7 +151,7 @@ public class HubEndedSessionTests
         // Long enough that reaching the stall bound would be a hang, not a verdict.
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
         configure?.Invoke(context.Options);
-        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data");
+        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
     }
 
     /// <summary>Takes the sender's data POST and keeps what it wrote; answers nothing else.</summary>

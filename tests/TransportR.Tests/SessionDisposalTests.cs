@@ -14,7 +14,7 @@ namespace TransportR.Tests;
 public class SessionDisposalTests
 {
     private static DataSession<string> NewSession(StubSessionContext context) =>
-        new(context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data");
+        new(context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
 
     [Fact]
     public async Task WaitForCompletionAsync_AfterTheSessionWasDisposed_ReportsTheAbandonedTransfer()

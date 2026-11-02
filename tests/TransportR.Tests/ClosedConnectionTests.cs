@@ -1,69 +1,63 @@
-using Microsoft.AspNetCore.Http.Connections;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using TransportR.Hub.Access;
-using TransportR.Hub.Configuration;
-using TransportR.Hub.Hubs;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Hub.Services;
 using TransportR.Interfaces;
+using TransportR.Models;
+using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
 /// <summary>
-/// A connection the hub ends on purpose closes cleanly, and SignalR's automatic reconnection only
-/// answers failures: nothing brings such a client back unless the client does.
+/// A stream the hub ends on purpose (a token that ran out) closes cleanly, and is no failure to
+/// answer: nothing brings such a client back unless the client does.
 /// </summary>
 public class ClosedConnectionTests
 {
-    private sealed class ConnectionCounter
+    /// <summary>
+    /// The state store, counting registrations, and closing the stream of the next ones the moment
+    /// they are written: a hub that closes what it has just accepted.
+    /// </summary>
+    private sealed class ClosingStore : IStateStore
     {
+        private readonly InMemoryStateStore _inner = new();
         private int _count;
         private int _closeNext;
 
+        public ClientStreams? Streams { get; set; }
+
         public int Count => Volatile.Read(ref _count);
 
-        public void Add() => Interlocked.Increment(ref _count);
+        public void CloseNext(int registrations) => Volatile.Write(ref _closeNext, registrations);
 
-        /// <summary>The next <paramref name="connections"/> connections are closed the moment they open.</summary>
-        public void CloseNext(int connections) => Volatile.Write(ref _closeNext, connections);
+        public async Task SaveClientAsync(ClientRegistration client)
+        {
+            await _inner.SaveClientAsync(client);
+            Interlocked.Increment(ref _count);
+            if (Interlocked.Decrement(ref _closeNext) >= 0) Streams!.TryClose(client.ConnectionId);
+        }
 
-        public bool TakeClose() => Interlocked.Decrement(ref _closeNext) >= 0;
+        public Task<ClientRegistration?> GetClientAsync(Guid clientId) => _inner.GetClientAsync(clientId);
+        public Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId) => _inner.GetClientByConnectionIdAsync(connectionId);
+        public Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync() => _inner.GetAllClientsAsync();
+        public Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc) => _inner.MarkDisconnectedAsync(connectionId, whenUtc);
+        public Task DeleteClientAsync(Guid clientId) => _inner.DeleteClientAsync(clientId);
+        public Task<ClientRegistration?> RenewClientAsync(Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry) =>
+            _inner.RenewClientAsync(clientId, expectedSubject, groups, tokenExpiry);
+        public Task SaveSessionAsync(TransferSession session) => _inner.SaveSessionAsync(session);
+        public Task<TransferSession?> GetSessionAsync(string transferId) => _inner.GetSessionAsync(transferId);
+        public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry) => _inner.ExtendSessionExpiryAsync(transferId, newExpiry);
+        public Task DeleteSessionAsync(string transferId) => _inner.DeleteSessionAsync(transferId);
     }
 
-    private class ClosingHub : CommandHub
+    private static async Task<(LoopbackHost Host, ClosingStore Store)> StartHubAsync()
     {
-        private readonly ConnectionCounter _counter;
-
-        public ClosingHub(CommandHubDependencies dependencies, ConnectionCounter counter)
-            : base(dependencies)
-        {
-            _counter = counter;
-        }
-
-        public override Task OnConnectedAsync()
-        {
-            _counter.Add();
-            if (_counter.TakeClose()) Context.Abort();
-            return base.OnConnectedAsync();
-        }
-
-        // What the hub does to a connection whose token has run out.
-        public Task CloseMe()
-        {
-            Context.Abort();
-            return Task.CompletedTask;
-        }
+        var store = new ClosingStore();
+        var host = await AuthenticatedHubServerFactory.StartLoopbackAsync(
+            configureServices: services => services.Replace(ServiceDescriptor.Singleton<IStateStore>(store)));
+        store.Streams = host.Services.GetRequiredService<ClientStreams>();
+        return (host, store);
     }
-
-    private static Task<LoopbackHost> StartHubAsync() => AuthenticatedHubServerFactory.StartLoopbackAsync(hub =>
-    {
-        hub.Services.AddSingleton<ConnectionCounter>();
-        hub.UseHub<ClosingHub>();
-    });
 
     private static async Task<T> EventuallyAsync<T>(Func<Task<T>> read, Func<T, bool> done, TimeSpan timeout)
     {
@@ -78,29 +72,18 @@ public class ClosedConnectionTests
         return value;
     }
 
-    [Theory]
-    [InlineData(HttpTransportType.WebSockets)]
-    [InlineData(HttpTransportType.ServerSentEvents)]
-    [InlineData(HttpTransportType.LongPolling)]
-    public async Task ConnectionClosedByTheHub_IsStartedAgain_WithTheClientRegisteredOnIt(HttpTransportType transport)
+    [Fact]
+    public async Task ConnectionClosedByTheHub_IsStartedAgain_WithTheClientRegisteredOnIt()
     {
-        await using var host = await StartHubAsync();
-        var store = host.Services.GetRequiredService<IStateStore>();
+        var (host, store) = await StartHubAsync();
+        await using var _ = host;
         var tokens = new TokenSource("closed-principal", TimeSpan.FromHours(1));
-        await using var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync,
-            configureConnection: options => options.Transports = transport);
+        await using var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync);
 
         await client.ConnectAsync();
         var before = (await store.GetClientAsync(client.ClientId))!.ConnectionId;
 
-        try
-        {
-            await client.ControlConnection.InvokeAsync(nameof(ClosingHub.CloseMe));
-        }
-        catch (Exception)
-        {
-            // The invocation ends with the connection it was made on.
-        }
+        Assert.True(store.Streams!.TryClose(before));
 
         var after = await EventuallyAsync(
             async () => await store.GetClientAsync(client.ClientId),
@@ -116,43 +99,35 @@ public class ClosedConnectionTests
     public async Task ConnectionClosedAgainWhileItIsBeingBroughtBack_IsStartedYetAgain()
     {
         // A hub that closes what it has just accepted (a token still not good) must not leave the client
-        // out: the closure that lands while a restart is running is not lost.
-        await using var host = await StartHubAsync();
-        var store = host.Services.GetRequiredService<IStateStore>();
-        var counter = host.Services.GetRequiredService<ConnectionCounter>();
+        // out: the closure that lands as a stream comes back is not lost.
+        var (host, store) = await StartHubAsync();
+        await using var _ = host;
         var tokens = new TokenSource("closed-twice-principal", TimeSpan.FromHours(1));
-        await using var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync,
-            configureConnection: options => options.Transports = HttpTransportType.WebSockets);
+        await using var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync);
 
         await client.ConnectAsync();
         var before = (await store.GetClientAsync(client.ClientId))!.ConnectionId;
-        counter.CloseNext(2);
+        store.CloseNext(2);
 
-        try
-        {
-            await client.ControlConnection.InvokeAsync(nameof(ClosingHub.CloseMe));
-        }
-        catch (Exception)
-        {
-            // The invocation ends with the connection it was made on.
-        }
+        Assert.True(store.Streams!.TryClose(before));
 
         var after = await EventuallyAsync(
             async () => await store.GetClientAsync(client.ClientId),
-            r => r != null && r.ConnectionId != before && r.DisconnectedAtUtc == null && counter.Count >= 4,
+            r => r != null && r.ConnectionId != before && r.DisconnectedAtUtc == null && store.Count >= 4,
             TimeSpan.FromSeconds(30));
 
         Assert.NotEqual(before, after!.ConnectionId);
         Assert.Null(after.DisconnectedAtUtc);
-        Assert.True(counter.Count >= 4, $"{counter.Count} connections.");
+        Assert.True(store.Count >= 4, $"{store.Count} registrations.");
+        Assert.True(client.Channel.IsOpen);
         Assert.NotNull(await client.GetReceiversAsync());
     }
 
     [Fact]
     public async Task ConnectionClosedWhileTheClientIsBeingDisposed_IsNotStartedAgain()
     {
-        await using var host = await StartHubAsync();
-        var counter = host.Services.GetRequiredService<ConnectionCounter>();
+        var (host, store) = await StartHubAsync();
+        await using var _ = host;
         var tokens = new TokenSource("leaving-principal", TimeSpan.FromHours(1));
         var client = TestClients.Create(null, host.BaseUrl, tokens.GetAsync);
         await client.ConnectAsync();
@@ -160,6 +135,6 @@ public class ClosedConnectionTests
         await client.DisposeAsync();
         await Task.Delay(TimeSpan.FromSeconds(3));
 
-        Assert.Equal(1, counter.Count);
+        Assert.Equal(1, store.Count);
     }
 }

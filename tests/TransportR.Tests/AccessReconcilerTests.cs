@@ -1,11 +1,9 @@
-using System.Security.Claims;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
+using TransportR.Hub.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
@@ -25,31 +23,50 @@ public class AccessReconcilerTests
         public bool CanSendTo(IReadOnlySet<string> sourceGroups, IReadOnlySet<string> targetGroups) => allowed();
     }
 
+    /// <summary>
+    /// What the pass did, in order. A stream it closed is noted when the journal is next read or
+    /// written to, so a close that came before a termination is noted before it.
+    /// </summary>
     private sealed class Journal
     {
-        public List<string> Events { get; } = [];
+        private readonly List<string> _events = [];
+        private readonly List<(string Name, ClientStream Stream)> _streams = [];
+
+        public List<string> Events
+        {
+            get
+            {
+                NoteCloses();
+                return _events;
+            }
+        }
+
+        public void Watch(string name, ClientStream stream) => _streams.Add((name, stream));
+
+        public void Add(string entry)
+        {
+            NoteCloses();
+            _events.Add(entry);
+        }
+
+        private void NoteCloses()
+        {
+            foreach (var (name, stream) in _streams.Where(s => s.Stream.EndReason != null).ToList())
+            {
+                _events.Add("close conn-" + name);
+                _streams.Remove((name, stream));
+            }
+        }
     }
 
     private sealed class RecordingTerminator(Journal journal) : ITransferTerminator
     {
         public Task TerminateAsync(string transferId, CancellationToken cancellationToken = default)
         {
-            journal.Events.Add("terminate " + transferId);
+            journal.Add("terminate " + transferId);
             return Task.CompletedTask;
         }
 
-    }
-
-    private sealed class FakeContext(string connectionId, Journal journal) : HubCallerContext
-    {
-        public override string ConnectionId { get; } = connectionId;
-        public override string? UserIdentifier => null;
-        public override ClaimsPrincipal? User => null;
-        public override IDictionary<object, object?> Items { get; } = new Dictionary<object, object?>();
-        public override IFeatureCollection Features { get; } = new FeatureCollection();
-        public override CancellationToken ConnectionAborted => CancellationToken.None;
-
-        public override void Abort() => journal.Events.Add("close " + ConnectionId);
     }
 
     private sealed class Harness
@@ -58,27 +75,34 @@ public class AccessReconcilerTests
         public Journal Journal { get; } = new();
         public InMemoryStateStore Store { get; }
         public TransferManager Transfers { get; }
-        public ConnectionRegistry Connections { get; } = new();
+        public ClientStreams Streams { get; }
         public AccessReconciler Reconciler { get; }
 
         public Harness(Func<bool>? flowControl = null)
         {
             Store = new InMemoryStateStore(timeProvider: Clock);
             Transfers = new TransferManager(Store, Clock);
+            Streams = new ClientStreams(Clock);
             var policy = new AccessPolicy(
                 Options.Create(new AccessOptions()), Clock, flowControl == null ? null : new Rules(flowControl));
             Reconciler = new AccessReconciler(
-                Store, Transfers, new RecordingTerminator(Journal), policy, Connections, NullLogger<AccessReconciler>.Instance);
+                Store, Transfers, new RecordingTerminator(Journal), policy, Streams, NullLogger<AccessReconciler>.Instance);
         }
 
         public async Task<Guid> RegisterAsync(string name, TimeSpan? lifetime, bool connected = true, params string[] groups)
         {
             var id = Guid.NewGuid();
             var connectionId = "conn-" + name;
+            if (connected)
+            {
+                var stream = Streams.Open(id, TimeSpan.FromHours(1));
+                Journal.Watch(name, stream);
+                connectionId = stream.ConnectionId;
+            }
+
             await Store.SaveClientAsync(new ClientRegistration(
                 id, connectionId, (groups.Length == 0 ? ["g"] : groups).ToHashSet(), null,
                 lifetime is { } l ? Clock.GetUtcNow().UtcDateTime + l : null, Clock.GetUtcNow().UtcDateTime, Subject: name));
-            if (connected) Connections.Add(new FakeContext(connectionId, Journal));
             return id;
         }
     }

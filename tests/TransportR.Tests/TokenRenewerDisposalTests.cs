@@ -6,17 +6,17 @@ namespace TransportR.Tests;
 
 public class TokenRenewerDisposalTests
 {
-    private static TokenRenewer Create(out HubConnectionManager manager)
+    private static TokenRenewer Create(out ControlChannel channel, HttpMessageHandler? hub = null)
     {
-        manager = new HubConnectionManager("http://unused", new ClientOptions(), NullLogger.Instance);
-        return new TokenRenewer(manager, new HttpClient(), "http://unused/api/client", Guid.NewGuid(), TimeSpan.FromSeconds(30), NullLogger.Instance);
+        channel = new ControlChannel("http://unused", Guid.NewGuid(), new HttpClient(hub ?? new HttpClientHandler()), new ClientOptions(), NullLogger.Instance);
+        return new TokenRenewer(channel, TimeSpan.FromSeconds(30), NullLogger.Instance);
     }
 
     [Fact]
     public async Task DisposeAsync_CalledTwice_IsNotAnError()
     {
-        var renewer = Create(out var manager);
-        await using var _ = manager;
+        var renewer = Create(out var channel);
+        await using var _ = channel;
 
         await renewer.DisposeAsync();
         await renewer.DisposeAsync();
@@ -25,8 +25,8 @@ public class TokenRenewerDisposalTests
     [Fact]
     public async Task DisposeAsync_AfterStart_CalledTwice_IsNotAnError()
     {
-        var renewer = Create(out var manager);
-        await using var _ = manager;
+        var renewer = Create(out var channel);
+        await using var _ = channel;
 
         renewer.Start();
         await renewer.DisposeAsync();
@@ -36,8 +36,8 @@ public class TokenRenewerDisposalTests
     [Fact]
     public async Task StartAndPushNow_AfterDisposal_StartNothing()
     {
-        var renewer = Create(out var manager);
-        await using var _ = manager;
+        var renewer = Create(out var channel);
+        await using var _ = channel;
 
         await renewer.DisposeAsync();
 
@@ -48,8 +48,8 @@ public class TokenRenewerDisposalTests
     [Fact]
     public async Task PushNowAsync_AfterDisposal_IsRefused()
     {
-        var renewer = Create(out var manager);
-        await using var _ = manager;
+        var renewer = Create(out var channel);
+        await using var _ = channel;
 
         await renewer.DisposeAsync();
 
@@ -62,9 +62,8 @@ public class TokenRenewerDisposalTests
         // The caller of a push is waiting on the hub; a client that goes meanwhile must not leave it
         // waiting on a loop that has ended.
         var hub = new SilentHub();
-        var manager = new HubConnectionManager("http://unused", new ClientOptions(), NullLogger.Instance);
-        await using var _ = manager;
-        var renewer = new TokenRenewer(manager, new HttpClient(hub), "http://unused/api/client", Guid.NewGuid(), TimeSpan.FromSeconds(30), NullLogger.Instance);
+        var renewer = Create(out var channel, hub);
+        await using var _ = channel;
 
         var push = renewer.PushNowAsync("token", CancellationToken.None);
         await hub.Asked.Task.WaitAsync(TimeSpan.FromSeconds(10));

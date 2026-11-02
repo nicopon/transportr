@@ -31,7 +31,7 @@ public class ReceiveCompletionContractTests
         var context = new StubSessionContext(new HttpClient(new ReceivingHub(batches: 2)));
         context.Options.ReceiveBufferCapacity = BufferCapacity.Items(1);
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data");
+        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartReceiverAsync();
 
         await using var items = session.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();

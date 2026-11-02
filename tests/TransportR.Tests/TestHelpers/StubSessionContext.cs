@@ -1,7 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
-using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Interfaces;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
@@ -14,10 +13,6 @@ internal class StubSessionContext: ISessionContext<string>
     public ILogger Logger { get; }
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
     public HttpClient HttpClient { get; }
-    
-    // Null: HubConnection is sealed and not mockable, and nothing under test here reaches it.
-    // We'll return null! for now, risking NRE if accessed.
-    public HubConnection HubConnection => null!; 
     
     public int BatchFlushIntervalMs => 50;
     public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
@@ -36,6 +31,11 @@ internal class StubSessionContext: ISessionContext<string>
     }
     
     public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
+
+    // No hub behind this context: a heartbeat goes nowhere, and the probe finds nobody answering.
+    public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
 }
 
 public class StubLogger : ILogger, IDisposable

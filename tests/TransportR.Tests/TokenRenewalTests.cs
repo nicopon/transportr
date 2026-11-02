@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -8,7 +6,6 @@ using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Internal;
 using TransportR.Hub.Configuration;
-using TransportR.Hub.Hubs;
 using TransportR.Hub.Services;
 using TransportR.Interfaces;
 using TransportR.Serialization.MessagePack.Services;
@@ -160,10 +157,12 @@ public class TokenRenewalTests
         string? cached = null;
         var calls = 0;
 
+        // The opening asks once and the renewer's first attempt once: the fifth call is the third time
+        // the renewer asks for a new token.
         async Task<string> Provider()
         {
             var n = Interlocked.Increment(ref calls);
-            if (cached == null || n >= 6) cached = await tokens.GetAsync();
+            if (cached == null || n >= 5) cached = await tokens.GetAsync();
             return cached;
         }
 
@@ -174,7 +173,7 @@ public class TokenRenewalTests
         var renewed = await EventuallyAsync(ExpiryOf(host, client.ClientId), e => e > first.AddSeconds(1), TimeSpan.FromSeconds(10));
 
         Assert.True(renewed > first.AddSeconds(1), $"Never renewed ({calls} calls); the hub still holds {renewed:O}.");
-        Assert.True(calls >= 6);
+        Assert.True(calls >= 5);
     }
 
     [Fact]

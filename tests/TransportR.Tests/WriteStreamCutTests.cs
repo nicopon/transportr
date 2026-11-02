@@ -42,8 +42,8 @@ public class WriteStreamCutTests
 
         var context = new StubSessionContext(hub.CreateClient());
         var transferId = Guid.NewGuid();
-        var handshake = new ReconnectionHandler(context, transferId.ToString());
-        await using var manager = new HttpStreamManager(context, context, transferId.ToString(), hub.DataUrl);
+        var handshake = new ReconnectionHandler(context, transferId.ToString(), affinity: null);
+        await using var manager = new HttpStreamManager(context, context, transferId.ToString(), hub.DataUrl, affinity: null);
 
         // The sender's real write action up to the point where it parks: the handshake Ping goes
         // out, then the window is full and nothing else is written.
@@ -81,7 +81,7 @@ public class WriteStreamCutTests
 
         var context = new StubSessionContext(hub.CreateClient());
         var transferId = Guid.NewGuid().ToString();
-        await using var manager = new HttpStreamManager(context, context, transferId, hub.DataUrl);
+        await using var manager = new HttpStreamManager(context, context, transferId, hub.DataUrl, affinity: null);
 
         manager.StartStreams(
             isSender: false,
@@ -114,7 +114,7 @@ public class WriteStreamCutTests
 
         var context = new StubSessionContext(hub.CreateClient());
         var transferId = Guid.NewGuid().ToString();
-        await using var manager = new HttpStreamManager(context, context, transferId, hub.DataUrl);
+        await using var manager = new HttpStreamManager(context, context, transferId, hub.DataUrl, affinity: null);
 
         manager.StartStreams(
             isSender: true,
@@ -137,7 +137,7 @@ public class WriteStreamCutTests
     {
         // The Pong never comes; what ends the wait is the attempt, not the 10 s PongTimeout.
         var context = new StubSessionContext();
-        var handshake = new ReconnectionHandler(context, Guid.NewGuid().ToString());
+        var handshake = new ReconnectionHandler(context, Guid.NewGuid().ToString(), affinity: null);
         handshake.PrepareForHandshake();
 
         using var attempt = new CancellationTokenSource();

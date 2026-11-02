@@ -77,7 +77,7 @@ public class FatalStreamFailureTests
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
         configure?.Invoke(context.Options);
 
-        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data");
+        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
     }
 
     private static async Task AssertParkedAsync(Task task)

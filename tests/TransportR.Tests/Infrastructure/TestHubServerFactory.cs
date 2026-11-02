@@ -13,7 +13,6 @@ namespace TransportR.Tests.Infrastructure;
 
 public static class TestHubServerFactory
 {
-    public const string HubUrl = "http://localhost" + WireRoutes.CommandHub;
 
     public static IHost CreateHost(Action<IServiceCollection>? configureServices = null)
     {

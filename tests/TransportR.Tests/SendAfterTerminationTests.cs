@@ -101,7 +101,7 @@ public class SendAfterTerminationTests
         // Long enough that reaching the stall bound would be a hang, not a verdict.
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
 
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data");
+        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;
     }

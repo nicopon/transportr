@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http.Connections.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.Configuration;
@@ -12,7 +11,7 @@ namespace TransportR.Tests.Infrastructure;
 /// <summary>
 /// Builds a client the way <c>TransportRClientBuilder</c> does, with the two things the builder does
 /// not let a test choose: the handler that carries it (a <c>TestServer</c> one, or the network) and
-/// the options of its HTTP connection (the SignalR transport).
+/// its options.
 /// </summary>
 internal static class TestClients
 {
@@ -21,7 +20,6 @@ internal static class TestClients
         string baseUrl,
         Func<Task<string>>? tokenProvider = null,
         Action<ClientOptions>? configure = null,
-        Action<HttpConnectionOptions>? configureConnection = null,
         ILogger? logger = null,
         string? accessToken = null)
     {
@@ -30,35 +28,21 @@ internal static class TestClients
 
         logger ??= NullLogger.Instance;
 
-        var connectionManager = new HubConnectionManager(
-            baseUrl + WireRoutes.CommandHub,
-            options,
-            logger,
-            initialAccessToken: accessToken,
-            tokenProvider: tokenProvider,
-            configureHttpConnection: httpOptions =>
-            {
-                if (handler != null)
-                {
-                    httpOptions.HttpMessageHandlerFactory = _ => handler;
-                }
-
-                configureConnection?.Invoke(httpOptions);
-            });
-
         var httpClient = handler != null
-            ? new HttpClient(handler) { BaseAddress = new Uri(baseUrl) }
-            : new HttpClient(new SocketsHttpHandler()) { BaseAddress = new Uri(baseUrl), Timeout = Timeout.InfiniteTimeSpan };
+            ? new HttpClient(handler) { BaseAddress = new Uri(baseUrl), Timeout = Timeout.InfiniteTimeSpan }
+            : new HttpClient(new SocketsHttpHandler { UseCookies = false }) { BaseAddress = new Uri(baseUrl), Timeout = Timeout.InfiniteTimeSpan };
+
+        var channel = new ControlChannel(baseUrl, Guid.NewGuid(), httpClient, options, logger,
+            initialAccessToken: accessToken, tokenProvider: tokenProvider);
 
         return new TransportRClient<string>(
-            connectionManager,
+            channel,
             new SessionRegistry<string>(logger),
             new MessagePackBatchSerializer<string>(),
             logger,
             defaultBatchSize: 100,
             options,
             baseUrl + WireRoutes.StreamBase,
-            baseUrl + WireRoutes.ClientBase,
             httpClient,
             new Microsoft.IO.RecyclableMemoryStreamManager());
     }

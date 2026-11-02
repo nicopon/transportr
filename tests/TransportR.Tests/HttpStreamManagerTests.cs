@@ -4,7 +4,6 @@ using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.IO;
 
 namespace TransportR.Tests;
@@ -27,7 +26,7 @@ public class HttpStreamManagerTests
     public async Task StartStreams_Success_ReturnsSuccessResult()
     {
         // Arrange
-        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data");
+        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data", affinity: null);
         _httpHandler.SetResponse(HttpStatusCode.OK);
 
         // Act
@@ -47,7 +46,7 @@ public class HttpStreamManagerTests
     public async Task StartStreams_404_ReturnsFatalFailure()
     {
         // Arrange
-        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data");
+        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data", affinity: null);
         _httpHandler.SetResponse(HttpStatusCode.NotFound);
 
         // Act
@@ -67,7 +66,7 @@ public class HttpStreamManagerTests
     public async Task StartStreams_500_ReturnsRetryableFailure()
     {
         // Arrange
-        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data");
+        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data", affinity: null);
         _httpHandler.SetResponse(HttpStatusCode.InternalServerError);
 
         // Act
@@ -87,7 +86,7 @@ public class HttpStreamManagerTests
     public async Task StartStreams_ProtocolViolation_ReturnsFatalFailure()
     {
         // Arrange
-        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data");
+        await using var manager = new HttpStreamManager(_stubContext, _stubContext, _transferId, "http://test/data", affinity: null);
         _httpHandler.SetResponse(HttpStatusCode.OK);
 
         // Act
@@ -118,7 +117,7 @@ public class HttpStreamManagerTests
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrHigher,
         };
         var context = new StubSessionContext(client);
-        await using var manager = new HttpStreamManager(context, context, _transferId, "http://test/data");
+        await using var manager = new HttpStreamManager(context, context, _transferId, "http://test/data", affinity: null);
 
         manager.StartStreams(
             isSender,
@@ -178,7 +177,6 @@ public class HttpStreamManagerTests
         public ILogger Logger { get; } = new StubLogger();
         public HttpClient HttpClient { get; }
         
-        public HubConnection HubConnection => null!;
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
         public ClientOptions Options { get; } = new ClientOptions();
@@ -190,6 +188,10 @@ public class HttpStreamManagerTests
         public void RemoveSession(string transferId) { }
         
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
+
+        public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
     }
     
     // Reuse StubLogger from others or duplicate for isolation

@@ -123,7 +123,7 @@ public class OutOfBandAbortTests
         context.Options.MaxInFlightBatches = 1;
         configure?.Invoke(context.Options);
 
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data");
+        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;
     }

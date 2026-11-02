@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -57,10 +56,8 @@ public class FailClosedTests
     private static async Task<Pair> OpenTransferAsync(LoopbackHost host, TokenSource senderTokens, Func<Task<string>>? senderProvider = null)
     {
         var receiverTokens = new TokenSource("fail-closed-receiver", TimeSpan.FromHours(1));
-        var sender = TestClients.Create(null, host.BaseUrl, senderProvider ?? senderTokens.GetAsync,
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
-        var receiver = TestClients.Create(null, host.BaseUrl, receiverTokens.GetAsync,
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
+        var sender = TestClients.Create(null, host.BaseUrl, senderProvider ?? senderTokens.GetAsync);
+        var receiver = TestClients.Create(null, host.BaseUrl, receiverTokens.GetAsync);
         return await OpenAsync(host, sender, receiver);
     }
 
@@ -71,11 +68,9 @@ public class FailClosedTests
     private static async Task<Pair> OpenTransferWithStaticTokensAsync(LoopbackHost host)
     {
         var sender = TestClients.Create(null, host.BaseUrl,
-            accessToken: StubJwt.Create("fail-closed-sender", DateTime.UtcNow.AddHours(1), AuthenticatedHubServerFactory.DefaultGroup),
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
+            accessToken: StubJwt.Create("fail-closed-sender", DateTime.UtcNow.AddHours(1), AuthenticatedHubServerFactory.DefaultGroup));
         var receiver = TestClients.Create(null, host.BaseUrl,
-            accessToken: StubJwt.Create("fail-closed-receiver", DateTime.UtcNow.AddHours(1), AuthenticatedHubServerFactory.DefaultGroup),
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
+            accessToken: StubJwt.Create("fail-closed-receiver", DateTime.UtcNow.AddHours(1), AuthenticatedHubServerFactory.DefaultGroup));
         return await OpenAsync(host, sender, receiver);
     }
 
@@ -158,10 +153,8 @@ public class FailClosedTests
 
         var senderTokens = new TokenSource("fail-closed-sender", TimeSpan.FromSeconds(4), "senders");
         var receiverTokens = new TokenSource("fail-closed-receiver", TimeSpan.FromHours(1), "receivers");
-        await using var sender = TestClients.Create(null, host.BaseUrl, senderTokens.GetAsync,
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
-        await using var receiver = TestClients.Create(null, host.BaseUrl, receiverTokens.GetAsync,
-            configureConnection: o => o.Transports = HttpTransportType.WebSockets);
+        await using var sender = TestClients.Create(null, host.BaseUrl, senderTokens.GetAsync);
+        await using var receiver = TestClients.Create(null, host.BaseUrl, receiverTokens.GetAsync);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
         await sender.ConnectAsync();
