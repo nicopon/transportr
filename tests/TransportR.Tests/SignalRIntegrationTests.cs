@@ -247,11 +247,8 @@ public class SignalRIntegrationTests
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
 
         // Without a group the identity resolves to nothing, which is what the Quick Start did until
-        // its clients named one. A client of its own: one refused cannot connect again.
-        await using (var anonymous = CreateClient(handler, "http://localhost"))
-        {
-            await Assert.ThrowsAsync<HubRequestFailedException>(() => anonymous.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
-        }
+        // its clients named one.
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
 
         await sender.ConnectAsync(["senders"]).WaitAsync(TimeSpan.FromSeconds(10));
         await receiver.ConnectAsync(["receivers"]).WaitAsync(TimeSpan.FromSeconds(10));
@@ -277,6 +274,24 @@ public class SignalRIntegrationTests
         await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task A_Client_The_Hub_Refused_Stays_Disconnected_Until_It_Connects_Again()
+    {
+        using var host = CreateHost(services => services.AddDataHub().UseDevMode().Build());
+        await using var client = CreateClient(host.GetTestServer().CreateHandler(), "http://localhost");
+
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Past the first restart delay (one second at most): a connection that came back by itself
+        // would hold no registration, and nothing would ever register the client on it.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        Assert.Equal(HubConnectionState.Disconnected, client.ControlConnection.State);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.IsRegisteredAsync());
+
+        await client.ConnectAsync(["senders"]).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(await client.IsRegisteredAsync());
     }
 
     [Theory]

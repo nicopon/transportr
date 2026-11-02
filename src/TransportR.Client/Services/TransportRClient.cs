@@ -119,18 +119,28 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         _lastConnectGroups = groups;
         await _connectionManager.StartAsync(cancellationToken);
 
-        await _registration.WaitAsync(cancellationToken);
         try
         {
-            await InvokeConnectAsync("Registering Client", cancellationToken);
-            _registered = true;
+            await _registration.WaitAsync(cancellationToken);
+            try
+            {
+                await InvokeConnectAsync("Registering Client", cancellationToken);
+                _registered = true;
 
-            StartPresenceHeartbeat();
-            StartTokenRenewal();
+                StartPresenceHeartbeat();
+                StartTokenRenewal();
+            }
+            finally
+            {
+                _registration.Release();
+            }
         }
-        finally
+        catch when (!_registered)
         {
-            _registration.Release();
+            // Nothing registers the client on a connection the hub refused, and a started connection
+            // cannot be started again: the client is put back as it was, for the caller to try again.
+            await _connectionManager.ResetAsync();
+            throw;
         }
     }
 

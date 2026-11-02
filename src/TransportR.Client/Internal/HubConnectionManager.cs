@@ -28,13 +28,13 @@ internal class HubConnectionManager : IAsyncDisposable
 
     // A connection the hub closes cleanly, or that SignalR gave up reconnecting, is restarted for as
     // long as the application has not disposed the client. Stopping it ourselves (an affinity
-    // redirect, disposal) is not a closure to recover from.
+    // redirect, a refused registration, disposal) is not a closure to recover from.
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _restartLock = new();
     private Task? _restart;
     private bool _restarting;
     private bool _closedWhileRestarting;
-    private bool _redirecting;
+    private bool _replacing;
     private bool _disposed;
 
     private static readonly TimeSpan FirstRestartDelay = TimeSpan.FromSeconds(1);
@@ -106,7 +106,7 @@ internal class HubConnectionManager : IAsyncDisposable
 
     private Task OnClosed(HubConnection connection, Exception? error)
     {
-        if (_redirecting || !ReferenceEquals(connection, _hubConnection))
+        if (_replacing || !ReferenceEquals(connection, _hubConnection))
         {
             return Task.CompletedTask;
         }
@@ -209,6 +209,27 @@ internal class HubConnectionManager : IAsyncDisposable
          }
     }
 
+    /// <summary>
+    /// Stops the connection and puts in its place a new one, not started: what a client that the hub
+    /// refused to register holds, so that its next <see cref="StartAsync"/> starts from scratch.
+    /// </summary>
+    public async Task ResetAsync()
+    {
+        // SignalR raises Closed on the thread pool, possibly once the flag is down again; by then the
+        // stopped connection is no longer the current one, and OnClosed leaves it alone.
+        _replacing = true;
+        try
+        {
+            await Connection.StopAsync();
+            await Connection.DisposeAsync();
+            BuildAndConfigureConnection();
+        }
+        finally
+        {
+            _replacing = false;
+        }
+    }
+
     public async Task HandleAffinityRedirectAsync(string cookieName, string affinityToken, Func<Task> reconnectAction)
     {
         _logger.LogInformation("Affinity redirect received. Reconnecting with cookie {CookieName}={Token}", cookieName, affinityToken);
@@ -219,7 +240,7 @@ internal class HubConnectionManager : IAsyncDisposable
         _cookieContainer.Add(cookie);
         
         // The closure this causes is ours, not the hub's.
-        _redirecting = true;
+        _replacing = true;
         try
         {
             // Stop current
@@ -240,7 +261,7 @@ internal class HubConnectionManager : IAsyncDisposable
         }
         finally
         {
-            _redirecting = false;
+            _replacing = false;
         }
 
         await reconnectAction();
