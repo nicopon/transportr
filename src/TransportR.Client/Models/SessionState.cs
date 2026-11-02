@@ -21,7 +21,7 @@ internal enum SessionState
     Streaming,
 
     /// <summary>
-    /// Stream broken or initial connection failed, attempting SignalR Probe + Handshake.
+    /// Stream broken or initial connection failed, attempting the hub probe + Handshake.
     /// </summary>
     Reconnecting,
 
