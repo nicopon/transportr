@@ -15,7 +15,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR.Hub</PackageId>
     <Description>TransportR hub for ASP.NET Core: relays transfers between clients over SignalR and HTTP streaming, without decoding or keeping the data</Description>
-    <PackageTags>signalr;transport;streaming;hub;server;bulk-data;flowcontrol;authorization</PackageTags>
+    <PackageTags>transport;streaming;hub;server;bulk-data;flowcontrol;authorization</PackageTags>
   </PropertyGroup>
 
 </Project>

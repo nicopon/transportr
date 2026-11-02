@@ -39,6 +39,7 @@ internal class HttpStreamManager : IAsyncDisposable
     private readonly ISessionConfig _config;
     private readonly string _transferId;
     private readonly string _dataUrl;
+    private readonly string? _affinity;
     
     public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null)
     {
@@ -62,12 +63,14 @@ internal class HttpStreamManager : IAsyncDisposable
     /// </summary>
     public Task<StreamResult>? WriteTask { get; private set; }
 
-    public HttpStreamManager(IStreamTransport transport, ISessionConfig config, string transferId, string dataUrl)
+    /// <param name="affinity">The cookies of the hub instance holding the transfer's bridge, on every stream.</param>
+    public HttpStreamManager(IStreamTransport transport, ISessionConfig config, string transferId, string dataUrl, string? affinity)
     {
         _transport = transport;
         _config = config;
         _transferId = transferId;
         _dataUrl = dataUrl;
+        _affinity = affinity;
         _streamCts = new CancellationTokenSource();
     }
 
@@ -257,6 +260,7 @@ internal class HttpStreamManager : IAsyncDisposable
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_dataUrl}/{_transferId}/{WireRoutes.AbortSegment}");
             request.Version = HttpVersion.Version11;
             request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+            AddAffinity(request);
 
             var token = await _transport.GetAccessTokenAsync(forceRefresh: false).WaitAsync(cts.Token);
             if (!string.IsNullOrEmpty(token))
@@ -281,6 +285,16 @@ internal class HttpStreamManager : IAsyncDisposable
         return false;
     }
 
+    // Only the bridge's instance can carry the streams: one the client reached for another transfer
+    // since, or for its own stream, is the wrong one.
+    private void AddAffinity(HttpRequestMessage request)
+    {
+        if (!string.IsNullOrEmpty(_affinity))
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", _affinity);
+        }
+    }
+
     private HttpRequestMessage CreateStreamRequest(ConnectionType type, bool isWrite, Func<Stream, CancellationToken, Task> writeAction, CancellationToken token)
     {
         string method = isWrite ? "send" : "receive";
@@ -295,8 +309,7 @@ internal class HttpStreamManager : IAsyncDisposable
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
 
-        // Cookie header handled by shared CookieContainer in HttpClient
-
+        AddAffinity(request);
 
         if (isWrite)
         {

@@ -97,11 +97,6 @@ internal interface IDataSession<T> : IAsyncDisposable
     /// </summary>
     void TriggerReconnect();
     
-    /// <summary>
-    /// Called when a Pong is received from the hub.
-    /// </summary>
-    void OnPongReceived();
-
 
     /// <summary>
     /// Waits for the transfer to be fully completed (including shutdown handshake).

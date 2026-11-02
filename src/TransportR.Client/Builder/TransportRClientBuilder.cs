@@ -1,5 +1,4 @@
 using System.Net;
-using Microsoft.AspNetCore.SignalR.Client;
 using TransportR.Interfaces;
 using TransportR.Protocol;
 using TransportR.Client.Services;
@@ -209,30 +208,19 @@ public class TransportRClientBuilder<T>
         }
         
         var hubUrl = _url.TrimEnd('/');
-        var controlUrl = hubUrl + WireRoutes.CommandHub;
         var dataUrl = hubUrl + WireRoutes.StreamBase;
-        var clientUrl = hubUrl + WireRoutes.ClientBase;
 
-        // Create Internal Components
-        var connectionManager = new HubConnectionManager(
-            controlUrl, 
-            options, 
-            loggerFactory.CreateLogger<HubConnectionManager>(),
-            _accessToken,
-            _tokenProvider
-        );
-        
         var sessionRegistry = new SessionRegistry<T>(logger);
 
         // Create Infrastructure dependencies
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
-        
-        // Configure HttpClient using the Manager's CookieContainer
+
+        // No cookie container: the control channel sets each request's cookies itself, since a
+        // transfer's requests carry another affinity than the client's own.
         var httpHandler = new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.None,
-            UseCookies = true,
-            CookieContainer = connectionManager.CookieContainer
+            UseCookies = false
         };
         
         var httpClient = new HttpClient(httpHandler)
@@ -240,15 +228,23 @@ public class TransportRClientBuilder<T>
              Timeout = Timeout.InfiniteTimeSpan
         };
 
+        var channel = new ControlChannel(
+            hubUrl,
+            Guid.NewGuid(),
+            httpClient,
+            options,
+            loggerFactory.CreateLogger<ControlChannel>(),
+            _accessToken,
+            _tokenProvider);
+
         return new TransportRClient<T>(
-            connectionManager,
+            channel,
             sessionRegistry,
             _serializer,
             logger,
             _batchSize,
             options,
             dataUrl,
-            clientUrl,
             httpClient,
             streamManager
         );

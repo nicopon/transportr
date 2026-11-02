@@ -6,18 +6,18 @@ using System.Buffers;
 
 namespace TransportR.Hub.Services;
 
-internal class SignalRDataServer : ITransportRServer
+internal class TransportRServer : ITransportRServer
 {
     private const string DestinationLostMessage = "The destination of the stream is no longer connected.";
 
-    private readonly ILogger<SignalRDataServer> _logger;
+    private readonly ILogger<TransportRServer> _logger;
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly IBridgeManager _bridgeManager;
     private readonly ITransferRetirer _retirer;
 
-    public SignalRDataServer(
-        ILogger<SignalRDataServer> logger, 
+    public TransportRServer(
+        ILogger<TransportRServer> logger, 
         IHubProgressMonitor progressMonitor,
         ITransferManager transferManager,
         IBridgeManager bridgeManager,
@@ -75,7 +75,7 @@ internal class SignalRDataServer : ITransportRServer
             }
             _logger.LogInformation("BRIDGE: Piping {BridgeKey}", bridgeKey);
 
-            // Bytes on either stream show the transfer alive, whatever its SignalR connections say.
+            // Bytes on either stream show the transfer alive, whatever its control requests say.
             var inputToCopy = type == ConnectionType.Data
                 ? new CountingStream(input, bytes =>
                 {
@@ -259,9 +259,9 @@ internal class SignalRDataServer : ITransportRServer
 
     /// <summary>
     /// Refreshes the transfer's activity and renews its shared session, as a heartbeat does: a
-    /// heartbeat reaches only the instance its client's SignalR connection lives on, which need not
-    /// carry the streams. Called on every read, so it never waits on the store, and a store that fails
-    /// costs a log line rather than the stream.
+    /// heartbeat is a request of its own, which can fail while the streams carry on. Called on every
+    /// read, so it never waits on the store, and a store that fails costs a log line rather than the
+    /// stream.
     /// </summary>
     private void KeepAlive(string transferId) => _ = KeepAliveAsync(transferId);
 

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
+using TransportR.Hub.Services;
 using TransportR.Models;
 
 namespace TransportR.Hub.Access;
@@ -11,7 +12,7 @@ internal sealed class AccessReconciler : IAccessReconciler
     private readonly ITransferManager _transferManager;
     private readonly ITransferTerminator _terminator;
     private readonly AccessPolicy _policy;
-    private readonly ConnectionRegistry _connections;
+    private readonly ClientStreams _streams;
     private readonly ILogger<AccessReconciler> _logger;
 
     public AccessReconciler(
@@ -19,14 +20,14 @@ internal sealed class AccessReconciler : IAccessReconciler
         ITransferManager transferManager,
         ITransferTerminator terminator,
         AccessPolicy policy,
-        ConnectionRegistry connections,
+        ClientStreams streams,
         ILogger<AccessReconciler> logger)
     {
         _stateStore = stateStore;
         _transferManager = transferManager;
         _terminator = terminator;
         _policy = policy;
-        _connections = connections;
+        _streams = streams;
         _logger = logger;
     }
 
@@ -87,7 +88,7 @@ internal sealed class AccessReconciler : IAccessReconciler
                 }
             }
 
-            if (_connections.TryClose(client.ConnectionId))
+            if (_streams.TryClose(client.ConnectionId))
             {
                 _logger.LogWarning(
                     "Closing the connection of client {ClientId}: {Verdict} (token expiry {Expiry:u}), and no renewal was received",

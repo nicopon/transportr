@@ -21,7 +21,7 @@ public interface IStateStore
     Task<ClientRegistration?> GetClientAsync(Guid clientId);
     
     /// <summary>
-    /// Gets a client by SignalR connection ID.
+    /// Gets a client by the id of the event stream it registered on.
     /// More efficient than GetAllClientsAsync for single lookups.
     /// </summary>
     Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId);
@@ -59,8 +59,8 @@ public interface IStateStore
     /// subject. Two absent subjects are the same subject.
     /// </returns>
     /// <remarks>
-    /// The connection and the disconnection mark stay as they are: a renewal arrives over HTTP, not
-    /// over the connection, and says nothing of whether that is still up. Like
+    /// The connection and the disconnection mark stay as they are: a renewal is a request of its own,
+    /// not part of the client's stream, and says nothing of whether that is still up. Like
     /// <see cref="MarkDisconnectedAsync"/> it must be one step with its check, or it writes back a
     /// registration that a reconnect has replaced since it was read.
     /// </remarks>

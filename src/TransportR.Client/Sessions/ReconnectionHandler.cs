@@ -1,65 +1,43 @@
-using Microsoft.AspNetCore.SignalR.Client;
-using TransportR.Interfaces;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Sessions;
 
 /// <summary>
-/// Encapsulates logic for handling disconnection, probing connectivity via SignalR,
-/// and performing the reconnection handshake (Ping/Pong).
+/// Encapsulates logic for handling disconnection, probing the hub with a request,
+/// and performing the reconnection handshake (Ping/Pong) on the new stream.
 /// </summary>
 internal class ReconnectionHandler : IDisposable
 {
+    // Short: the probe is a request, and a hub that answers does so well within it.
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+
     private readonly ISessionContext _context;
     private readonly string _transferId;
-    // Pure service - no callback
-    public ReconnectionHandler(ISessionContext context, string transferId)
+    private readonly string? _affinity;
+
+    public ReconnectionHandler(ISessionContext context, string transferId, string? affinity)
     {
         _context = context;
         _transferId = transferId;
+        _affinity = affinity;
     }
 
     /// <summary>
-    /// Probes SignalR connectivity. Returns true if SignalR is back online and Hub responds to Ping.
+    /// Returns true once the hub instance holding the transfer answers a request, which is when its
+    /// streams are worth reopening.
     /// </summary>
     public async Task<bool> ProbeConnectivityAsync(CancellationToken token)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(ProbeTimeout);
         try
         {
-            // 1. Wait for SignalR Connection
-            int retry = 0;
-            while (_context.HubConnection.State != HubConnectionState.Connected)
-            {
-                if (token.IsCancellationRequested || retry++ > 20) return false;
-                await Task.Delay(500, token);
-            }
-
-            // 2. Ping Hub
-            _signalRProbeTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            
-            // Invoke Ping
-            await _context.HubConnection.InvokeAsync(nameof(ICommandHub.Ping), _transferId, token);
-            
-            // Wait for Pong
-            // We use a small timeout for the Pong itself
-            using var timeoutCts = new CancellationTokenSource(5000);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
-            
-            await _signalRProbeTcs.Task.WaitAsync(linkedCts.Token);
-            return true;
+            return await _context.ProbeAsync(_transferId, _affinity, timeout.Token);
         }
-        catch
+        catch (Exception) when (!token.IsCancellationRequested)
         {
             return false;
         }
-    }
-    
-    /// <summary>
-    /// Called when SignalR Pong is received (confirming connectivity with Hub).
-    /// </summary>
-    public void HandleSignalRPong()
-    {
-        _signalRProbeTcs?.TrySetResult();
     }
     
     /// <summary>
@@ -74,9 +52,6 @@ internal class ReconnectionHandler : IDisposable
     // Handshake State (Set by DataSession before starting WriteLoop)
     private TaskCompletionSource? _streamPongReceived;
     private volatile int _pongNextExpectedBatchId;
-
-    // Connectivity Probe State (SignalR-based)
-    private TaskCompletionSource? _signalRProbeTcs;
 
     public void PrepareForHandshake()
     {
@@ -108,7 +83,7 @@ internal class ReconnectionHandler : IDisposable
 
     public void Dispose()
     {
-        // Nothing to release: the probe state is task completion sources, which the collector
+        // Nothing to release: the handshake state is a task completion source, which the collector
         // takes. Kept as IDisposable so a caller's using block does not change shape if that
         // stops being true.
     }

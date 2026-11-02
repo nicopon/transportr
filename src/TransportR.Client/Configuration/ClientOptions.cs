@@ -29,20 +29,25 @@ internal class ClientOptions
 
     /// <summary>
     /// Interval at which the client tells the hub it is still there, independently of any
-    /// transfer. Default: 60 seconds.
+    /// transfer. Default: 15 seconds.
     /// </summary>
     /// <remarks>
     /// <para>
     /// This is what keeps a registration alive while the client sits idle between transfers, and
-    /// what detects that the hub no longer knows this connection — after a hub restart, an evicted
-    /// registration, or a SignalR reconnection that produced a new connection id. In all three the
-    /// client is connected but invisible to discovery until it registers again.
+    /// what detects that the hub no longer knows this stream — after a hub restart, an evicted
+    /// registration, or another stream of the same identity that took the registration over.
+    /// </para>
+    /// <para>
+    /// It is also how the hub knows the client is there at all: the client announces it when it opens
+    /// its stream, and the hub closes a stream it has heard nothing from for two of them. A cut that
+    /// closes no connection leaves no other trace on the hub's side, so the default puts a client cut
+    /// off in silence out of discovery within about 30 seconds.
     /// </para>
     /// <para>
     /// Keep it comfortably below the hub's <c>ConnectedTtlSeconds</c>, which is what it refreshes.
     /// </para>
     /// </remarks>
-    public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// How long <c>CompleteAsync</c> keeps re-sending its Complete signal while nothing at all is

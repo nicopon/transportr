@@ -4,14 +4,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TransportR.Configuration;
 using TransportR.Hub.Access;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Configuration;
-using TransportR.Hub.Hubs;
 using TransportR.Hub.Services;
 using TransportR.Identity;
 using TransportR.Interfaces;
@@ -57,41 +53,6 @@ public class DataHubBuilder
             configure?.Invoke(options);
         });
         return this;
-    }
-    
-    /// <summary>
-    /// Registers <typeparamref name="THub"/> in place of <see cref="CommandHub"/> as the single hub
-    /// this connection carries, for a test that probes the connection from the hub's side.
-    /// <see cref="TransportRHubExtensions.MapDataHub"/> maps whichever hub was registered here - last
-    /// call wins - so a test cannot register one hub and map another.
-    /// </summary>
-    /// <remarks>
-    /// TransportR's own services keep resolving <see cref="IHubContext{CommandHub}"/>, which reaches
-    /// none of <typeparamref name="THub"/>'s connections: no transfer opens on such a hub.
-    /// </remarks>
-    internal DataHubBuilder UseHub<THub>() where THub : CommandHub
-    {
-        Services.AddSingleton(new DataHubTypeMarker(typeof(THub), (endpoints, pattern) => endpoints.MapHub<THub>(pattern)));
-        return this;
-    }
-}
-
-/// <summary>
-/// Carries the hub type <see cref="DataHubBuilder.UseHub{THub}"/> registered from the builder to
-/// <see cref="TransportRHubExtensions.MapDataHub"/>, which runs later against an
-/// <see cref="IEndpointRouteBuilder"/> that has no reference to that builder instance. The mapping
-/// call itself is captured as a delegate rather than reflected, since <c>THub</c> is only known as
-/// a compile-time type parameter inside <see cref="DataHubBuilder.UseHub{THub}"/>.
-/// </summary>
-internal sealed class DataHubTypeMarker
-{
-    public Type HubType { get; }
-    public Func<IEndpointRouteBuilder, string, HubEndpointConventionBuilder> MapHub { get; }
-
-    public DataHubTypeMarker(Type hubType, Func<IEndpointRouteBuilder, string, HubEndpointConventionBuilder> mapHub)
-    {
-        HubType = hubType;
-        MapHub = mapHub;
     }
 }
 
@@ -142,7 +103,9 @@ public static class TransportRHubExtensions
             .Validate(o => o.AccessSweepIntervalSeconds > 0, "AccessOptions.AccessSweepIntervalSeconds must be positive.")
             .ValidateOnStart();
         services.AddSingleton<AccessPolicy>();
-        services.AddSingleton<ConnectionRegistry>();
+
+        // The event streams of the clients this instance holds: how the hub reaches a client.
+        services.AddSingleton<ClientStreams>();
 
         // Applies the policy to what is running: on the schedule below, after a renewal, and whenever
         // the host calls it.
@@ -162,44 +125,24 @@ public static class TransportRHubExtensions
         // Transfer cleanup service (Timeouts)
         services.AddHostedService<TransferCleanupService>();
         
-        // Register Transfer Notifier (SignalR implementation)
-        services.AddSingleton<ITransferNotifier, SignalRTransferNotifier>();
+        services.AddSingleton<ITransferNotifier, ClientStreamNotifier>();
 
-        // Registered as itself too: the hub drives the same handshake through members the host
-        // interface does not expose.
-        services.AddSingleton<SignalRTransferInitiator>();
-        services.AddSingleton<ITransferInitiator>(sp => sp.GetRequiredService<SignalRTransferInitiator>());
+        // Registered as itself too: the control route drives the same handshake through members the
+        // host interface does not expose.
+        services.AddSingleton<TransferInitiator>();
+        services.AddSingleton<ITransferInitiator>(sp => sp.GetRequiredService<TransferInitiator>());
 
         // Register Broker Server
-        services.AddSingleton<ITransportRServer, SignalRDataServer>();
+        services.AddSingleton<ITransportRServer, TransportRServer>();
 
-        // DI cannot call the internal constructor, so the hub's dependencies are assembled here. Transient
-        // because a hub is created per invocation and holds nothing of its own.
-        services.AddTransient(sp => new CommandHubDependencies(
-            sp.GetRequiredService<IStateStore>(),
-            sp.GetRequiredService<ITransferManager>(),
-            sp.GetRequiredService<IClientIdentityProvider>(),
-            sp.GetRequiredService<SignalRTransferInitiator>(),
-            sp.GetRequiredService<AccessPolicy>(),
-            sp.GetRequiredService<ConnectionRegistry>(),
-            sp.GetRequiredService<IOptions<AffinityOptions>>(),
-            sp.GetRequiredService<ILogger<CommandHub>>(),
-            sp.GetRequiredService<TimeProvider>()));
-
-        // SignalRDataServer requires an IHubProgressMonitor; TryAdd so a host that registers its
+        // TransportRServer requires an IHubProgressMonitor; TryAdd so a host that registers its
         // own before Build() keeps seeing it used, whichever order that registration happens in.
         services.TryAddSingleton<IHubProgressMonitor, NoopHubProgressMonitor>();
         
-        // Add SignalR
-        services.AddSignalR();
-
-        // Add Controllers (for StreamController)
+        // The data plane (StreamController) and the control plane (ClientController).
         services.AddControllers()
                 .AddApplicationPart(typeof(TransportRHubExtensions).Assembly)
                 .ConfigureApplicationPartManager(manager => manager.FeatureProviders.Add(new DataHubControllerFeatureProvider()));
-
-        // Default hub for MapDataHub to map; UseHub<THub>() overrides this registration.
-        services.AddSingleton(new DataHubTypeMarker(typeof(CommandHub), (endpoints, pattern) => endpoints.MapHub<CommandHub>(pattern)));
 
         return new DataHubBuilder(services);
     }
@@ -223,7 +166,7 @@ public static class TransportRHubExtensions
     }
 
     /// <summary>
-    /// Maps the CommandHub, StreamController and ClientController endpoints.
+    /// Maps the StreamController and ClientController endpoints: the data plane and the control plane.
     /// </summary>
     /// <param name="requireAuth">
     /// Arms authorization on both planes. The host must have called <c>UseAuthentication()</c> and
@@ -240,14 +183,6 @@ public static class TransportRHubExtensions
         {
             throw new InvalidOperationException(
                 "TransportR is not fully configured: AddDataHub() must be followed by Build().");
-        }
-
-        var marker = endpoints.ServiceProvider.GetRequiredService<DataHubTypeMarker>();
-        var hubEndpoint = marker.MapHub(endpoints, WireRoutes.CommandHub);
-
-        if (requireAuth)
-        {
-            hubEndpoint.RequireAuthorization();
         }
 
         var controllers = endpoints.MapControllers();

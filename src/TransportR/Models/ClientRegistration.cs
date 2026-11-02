@@ -4,7 +4,7 @@ namespace TransportR.Models;
 /// Registration data for a connected client, stored in state store.
 /// </summary>
 /// <param name="Subject">
-/// The identity the IdP attested to at Connect time. This is what the data plane compares a stream
+/// The identity the IdP attested to when the client registered. This is what the data plane compares a stream
 /// caller against; a registration carrying null cannot be claimed by any authenticated caller.
 /// </param>
 public record ClientRegistration(

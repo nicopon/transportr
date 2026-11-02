@@ -5,7 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
   </ItemGroup>
 
@@ -13,7 +13,7 @@
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR.Client</PackageId>
     <Description>TransportR client: streams typed records to another .NET application through a TransportR hub, resuming after network cuts, with opt-in backpressure</Description>
-    <PackageTags>signalr;transport;streaming;client;bulk-data;auth;oauth2</PackageTags>
+    <PackageTags>transport;streaming;client;bulk-data;auth;oauth2</PackageTags>
   </PropertyGroup>
 
 </Project>

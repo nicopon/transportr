@@ -1,3 +1,4 @@
+
 namespace TransportR.Protocol;
 
 /// <summary>
@@ -10,9 +11,6 @@ namespace TransportR.Protocol;
 /// </remarks>
 public static class WireRoutes
 {
-    /// <summary>The SignalR control plane, relative to the hub's base URL.</summary>
-    public const string CommandHub = "/hub/command";
-
     /// <summary>
     /// The data plane's base path, relative to the hub's base URL. The two streams hang off it as
     /// <c>{transferId}/send</c> and <c>{transferId}/receive</c>.
@@ -27,9 +25,45 @@ public static class WireRoutes
     public const string AbortSegment = "abort";
 
     /// <summary>
-    /// The path a client renews its token on, relative to the hub's base URL:
-    /// <c>PUT {clientId}/token</c> under this base, answered with a <see cref="TokenRenewalResponse"/>.
-    /// A reverse proxy that filters by path has to let it through as it does <see cref="StreamBase"/>.
+    /// The control plane's base path, relative to the hub's base URL. Every request of a client hangs
+    /// off it as <c>{clientId}/…</c>, the renewal of its token (<c>PUT {clientId}/token</c>, answered
+    /// with a <see cref="TokenRenewalResponse"/>) as much as the segments below. A reverse proxy that
+    /// filters by path has to let it through as it does <see cref="StreamBase"/>, and must not buffer
+    /// the <see cref="EventsSegment"/> stream.
     /// </summary>
     public const string ClientBase = "/api/client";
+
+    /// <summary>
+    /// <c>GET {ClientBase}/{clientId}/events</c>: the stream of server-sent events by which the hub
+    /// reaches a client. Opening it registers the client, and its end is the client's disconnection.
+    /// </summary>
+    public const string EventsSegment = "events";
+
+    /// <summary>
+    /// <c>POST {ClientBase}/{clientId}/presence/{connectionId}</c>: the client's presence heartbeat,
+    /// answered 204 while the hub holds a registration for that stream and 404 once it does not.
+    /// </summary>
+    public const string PresenceSegment = "presence";
+
+    /// <summary><c>GET {ClientBase}/{clientId}/receivers</c>: the clients this one may send to.</summary>
+    public const string ReceiversSegment = "receivers";
+
+    /// <summary>
+    /// <c>POST {ClientBase}/{clientId}/transfers</c> opens a transfer to another client;
+    /// <c>{transferId}/heartbeat</c> and <c>{transferId}/ping</c> under it report on one and probe the
+    /// hub before its streams reopen.
+    /// </summary>
+    public const string TransfersSegment = "transfers";
+
+    /// <summary>The last segment of a transfer's statistics report, under <see cref="TransfersSegment"/>.</summary>
+    public const string HeartbeatSegment = "heartbeat";
+
+    /// <summary>The last segment of the probe a session makes before it reopens its streams.</summary>
+    public const string PingSegment = "ping";
+
+    /// <summary>
+    /// <c>POST {ClientBase}/{clientId}/replies/{requestId}</c>: a client's answer to an event that
+    /// asks for one, which a handshake waits for.
+    /// </summary>
+    public const string RepliesSegment = "replies";
 }

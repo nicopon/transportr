@@ -34,8 +34,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
     // is worth trusting, so a long one is taken in pieces.
     private static readonly TimeSpan MaxWait = TimeSpan.FromHours(6);
 
-    private readonly HubConnectionManager _tokens;
-    private readonly HttpClient _http;
+    private readonly ControlChannel _tokens;
     private readonly string _url;
     private readonly TimeSpan _threshold;
     private readonly ILogger _logger;
@@ -52,11 +51,14 @@ internal sealed class TokenRenewer : IAsyncDisposable
     private DateTime? _heldExpiry;
     private int _unchanged;
 
-    public TokenRenewer(HubConnectionManager tokens, HttpClient http, string clientUrl, Guid clientId, TimeSpan threshold, ILogger logger)
+    /// <param name="channel">
+    /// Where tokens come from, and what the renewal goes through: it carries the client's own
+    /// affinity, so that the instance holding the client's stream judges what the token changes.
+    /// </param>
+    public TokenRenewer(ControlChannel channel, TimeSpan threshold, ILogger logger)
     {
-        _tokens = tokens;
-        _http = http;
-        _url = $"{clientUrl.TrimEnd('/')}/{clientId}/token";
+        _tokens = channel;
+        _url = channel.UrlOf("token");
         _threshold = threshold;
         _logger = logger;
     }
@@ -262,7 +264,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
 
     private async Task<Attempt> PushAsync(string token, CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Put, _url);
+        var request = new HttpRequestMessage(HttpMethod.Put, _url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -271,7 +273,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
         TokenRenewalResponse? body;
         try
         {
-            using var response = await _http.SendAsync(request, timeout.Token);
+            using var response = await _tokens.SendAsync(request, affinity: null, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Token renewal refused by the hub with {Status}. The old token stays in place.", (int)response.StatusCode);

@@ -4,7 +4,6 @@ using System.Threading.Channels;
 using TransportR.Abstractions;
 using TransportR.Interfaces;
 using TransportR.Protocol;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
 using TransportR.Client.Batching;
@@ -35,6 +34,9 @@ internal class DataSession<T> : IDataSession<T>
     // Bounds the request that tells the hub when the Abort could not be written.
     private static readonly TimeSpan AbortRequestTimeout = TimeSpan.FromSeconds(2);
 
+    // Bounds a heartbeat, so that one sent to a hub out of reach gives way to the next.
+    private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(5);
+
     private const string ReleasedBeforeCompletion =
         "The transfer handle was released before the transfer completed; the transfer was abandoned.";
 
@@ -44,7 +46,8 @@ internal class DataSession<T> : IDataSession<T>
     public int BatchSize { get; }
     public string DataUrl { get; }
     
-    private readonly ISignalRInteraction _signalR;
+    private readonly IControlPlane _control;
+    private readonly string? _affinity;
     private readonly ISessionConfig _config;
     
     private readonly CancellationTokenSource _cts;
@@ -68,6 +71,7 @@ internal class DataSession<T> : IDataSession<T>
     private volatile bool _abortQueued;
 
     private readonly Timer _heartbeatTimer;
+    private int _heartbeating;
     private int _disposed;
     private int _writeSideEndDelivered;
 
@@ -97,11 +101,14 @@ internal class DataSession<T> : IDataSession<T>
     public long AcksReceived => _batchProcessor.AcksReceived;
     public long AcksSent => _batchProcessor.AcksSent;
     
-    // Ping/Pong connection probing delegated to ReconnectionHandler
-    
-    public DataSession(ISessionContext<T> context, string transferId, int batchSize, string dataUrl)
+    /// <param name="affinity">
+    /// The cookies that reach the hub instance holding the transfer's bridge, which every request of
+    /// the session carries: its streams, its heartbeats, its probe and its abort.
+    /// </param>
+    public DataSession(ISessionContext<T> context, string transferId, int batchSize, string dataUrl, string? affinity)
     {
-        _signalR = context;
+        _control = context;
+        _affinity = affinity;
         _config = context; // ISessionContext implements ISessionConfig
         
         TransferId = transferId;
@@ -113,9 +120,9 @@ internal class DataSession<T> : IDataSession<T>
         _fsm = new DataSessionStateMachine(transferId, context.Logger);
         
         // Pass segregated interfaces to HttpStreamManager
-        _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl); // IStreamTransport, ISessionConfig
+        _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl, affinity); // IStreamTransport, ISessionConfig
         
-        _reconnectionHandler = new ReconnectionHandler(context, transferId);
+        _reconnectionHandler = new ReconnectionHandler(context, transferId, affinity);
             
         // Hook up events
         _batchProcessor.OnPongReceived += (id) => {
@@ -397,18 +404,10 @@ internal class DataSession<T> : IDataSession<T>
         }
         else if (IsInCompletingPhase)
         {
-             _config.Logger.LogInformation("SignalR disconnected while in completing phase. Cancelling streams to force verification.");
+             _config.Logger.LogInformation("The control stream was lost while in completing phase. Cancelling streams to force verification.");
              // Do NOT transition to Reconnecting (preserve completing state logic)
              _httpStreamManager.CancelStreams();
         }
-    }
-
-    /// <summary>
-    /// Called when Pong is received from hub, confirming connectivity.
-    /// </summary>
-    public void OnPongReceived()
-    {
-        _reconnectionHandler.HandleSignalRPong();
     }
 
 
@@ -532,7 +531,7 @@ internal class DataSession<T> : IDataSession<T>
 
         _heartbeatTimer.Dispose();
         _cts.Dispose();
-        _signalR.RemoveSession(TransferId);
+        _control.RemoveSession(TransferId);
     }
 
     /// <summary>
@@ -601,7 +600,7 @@ internal class DataSession<T> : IDataSession<T>
                          var online = await _reconnectionHandler.ProbeConnectivityAsync(token);
                          if (online)
                          {
-                             // SignalR is back. The handshake rides the new data stream rather
+                             // The hub answers. The handshake rides the new data stream rather
                              // than the control plane, so there is nothing to do here but arm it
                              // and let Streaming open that stream.
                              _reconnectionHandler.PrepareForHandshake();
@@ -901,31 +900,27 @@ internal class DataSession<T> : IDataSession<T>
             return;
         }
 
-        try 
+        // A beat still waiting on the hub is not joined by the next: they would only pile up on a hub
+        // out of reach.
+        if (Interlocked.Exchange(ref _heartbeating, 1) == 1) return;
+        try
         {
-            // Only send Heartbeat if Hub Connection is active
-            if (_signalR.HubConnection.State == HubConnectionState.Connected)
-            {
-                // If Sender
-                if (IsSender) 
-                {
-                    var items = _batchProcessor.ItemsSent;
-                    var acks = _batchProcessor.AcksReceived;
-                    await _signalR.HubConnection.InvokeAsync(nameof(ICommandHub.SenderHeartbeat), TransferId, items, acks);
-                }
-                
-                // If Receiver
-                if (!IsSender)
-                {
-                    var items = _batchProcessor.ItemsReceived;
-                    var acks = _batchProcessor.AcksSent;
-                    await _signalR.HubConnection.InvokeAsync(nameof(ICommandHub.ReceiverHeartbeat), TransferId, items, acks);
-                }
-            }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            timeout.CancelAfter(HeartbeatTimeout);
+
+            var (items, acks) = IsSender
+                ? (_batchProcessor.ItemsSent, _batchProcessor.AcksReceived)
+                : (_batchProcessor.ItemsReceived, _batchProcessor.AcksSent);
+            await _control.ReportTransferAsync(TransferId, _affinity, items, acks, timeout.Token);
         }
-        catch(Exception ex)
+        catch (Exception ex)
         {
-            _config.Logger.LogError(ex, "Failed to send Heartbeat for {TransferId}", TransferId);
+            // The next beat is a second away, and an outage is the streams' to report.
+            _config.Logger.LogDebug("Heartbeat for {TransferId} failed: {Message}", TransferId, ex.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref _heartbeating, 0);
         }
     }
 
