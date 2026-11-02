@@ -26,10 +26,6 @@ public class DataHubProgressMonitorTests
 
     private sealed class RecordingProgressMonitor : IHubProgressMonitor
     {
-        public void InitializeTransfer(string transferId) { }
-
         public void OnBytesTransferred(long bytes) { }
-
-        public void CompleteTransfer(string transferId) { }
     }
 }

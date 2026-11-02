@@ -15,18 +15,8 @@ public class ProgressMonitorAdapter : IHubProgressMonitor
         _service = service;
     }
 
-    public void InitializeTransfer(string transferId)
-    {
-        _service.InitializeTransfer(transferId);
-    }
-
     public void OnBytesTransferred(long bytes)
     {
         _service.OnBytesTransferred(bytes);
-    }
-
-    public void CompleteTransfer(string transferId)
-    {
-        // No-op: ProgressMonitorService tracks globally, not per-transfer
     }
 }

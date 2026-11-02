@@ -8,9 +8,5 @@ namespace TransportR.Hub.Services;
 /// </summary>
 internal sealed class NoopHubProgressMonitor : IHubProgressMonitor
 {
-    public void InitializeTransfer(string transferId) { }
-
     public void OnBytesTransferred(long bytes) { }
-
-    public void CompleteTransfer(string transferId) { }
 }

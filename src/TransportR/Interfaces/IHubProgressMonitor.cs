@@ -1,7 +1,7 @@
 namespace TransportR.Interfaces;
 
 /// <summary>
-/// Interface for monitoring data transfer progress at the hub level.
+/// Receives the bytes the hub forwards, as they cross it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,20 +18,11 @@ namespace TransportR.Interfaces;
 public interface IHubProgressMonitor
 {
     /// <summary>
-    /// Called when a new transfer is initialized.
+    /// Called as the bytes of a data stream cross the hub, after each read, inside the copy and from
+    /// every transfer at once: an implementation stays short and thread-safe. The acknowledgements
+    /// flowing back are not counted. No transfer id comes with the bytes, and the hub tells no one
+    /// when a transfer starts or ends.
     /// </summary>
-    /// <param name="transferId">Unique identifier for the transfer.</param>
-    void InitializeTransfer(string transferId);
-
-    /// <summary>
-    /// Called when bytes are transferred through the hub.
-    /// </summary>
-    /// <param name="bytes">Number of compressed bytes transferred.</param>
+    /// <param name="bytes">Bytes just forwarded, as they travel on the wire.</param>
     void OnBytesTransferred(long bytes);
-
-    /// <summary>
-    /// Called when a transfer is completed.
-    /// </summary>
-    /// <param name="transferId">Unique identifier for the transfer.</param>
-    void CompleteTransfer(string transferId);
 }

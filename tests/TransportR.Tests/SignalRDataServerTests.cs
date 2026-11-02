@@ -555,9 +555,7 @@ public class SignalRDataServerTests
 
     private sealed class IgnoredProgress : IHubProgressMonitor
     {
-        public void InitializeTransfer(string transferId) { }
         public void OnBytesTransferred(long bytes) { }
-        public void CompleteTransfer(string transferId) { }
     }
 
     private sealed class RecordingRetirer : ITransferRetirer

@@ -1,12 +1,10 @@
-using System.Collections.Concurrent;
-
 namespace DataHub.Services;
 
 public class ProgressMonitorService
 {
     private readonly ILogger<ProgressMonitorService> _logger;
     private readonly DataProxyMetrics _metrics;
-    private readonly ConcurrentDictionary<string, TransferProgress> _transfers = new();
+    private TransferProgress? _hub;
     private readonly IConfiguration _configuration;
     private readonly bool _showProgress;
 
@@ -18,30 +16,13 @@ public class ProgressMonitorService
         _showProgress = _configuration.GetValue<bool>("ShowProgress", false);
     }
 
-    public void InitializeTransfer(string transferId)
+    public void OnBytesTransferred(long bytes)
     {
-        var tracker = new TransferProgress
+        // The whole hub's throughput, timed from its first bytes: the monitor is told nothing per transfer.
+        var tracker = LazyInitializer.EnsureInitialized(ref _hub, () => new TransferProgress
         {
             StartTime = DateTime.UtcNow,
             LastLogTime = DateTime.UtcNow
-        };
-        _transfers[transferId] = tracker;
-        
-        var msg = $"PROGRESS: [{transferId}] STARTED";
-        if (_showProgress)
-        {
-            Console.WriteLine(msg);
-        }
-        _logger.LogInformation(msg);
-    }
-
-    public void OnBytesTransferred(long bytes)
-    {
-        // Global tracker for Hub throughput monitoring
-        var tracker = _transfers.GetOrAdd("Global", _ => new TransferProgress 
-        { 
-            StartTime = DateTime.UtcNow, 
-            LastLogTime = DateTime.UtcNow 
         });
 
         Interlocked.Add(ref tracker.TotalCompressedBytes, bytes);
