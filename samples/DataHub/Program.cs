@@ -238,14 +238,14 @@ app.MapGet("/health", () => new
 // Information endpoint
 app.MapGet("/", () => new
 {
-    service = "TransportR Hub (SignalR)",
+    service = "TransportR Hub",
     version = "1.0.0",
     healthEndpoint = "/health",
     authenticationEnabled = enableAuth
 });
 
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
-logger.LogInformation("=== TransportR Hub started (SignalR) ===");
+logger.LogInformation("=== TransportR Hub started ===");
 logger.LogInformation("Identity Mode: {Mode}", enableAuth ? "JWT (Authentication)" : "Dev (Client-Provided)");
 
 app.Run();
