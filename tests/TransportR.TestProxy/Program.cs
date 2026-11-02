@@ -1,5 +1,6 @@
 using System.Net;
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Mvc;
 using TransportR.Interfaces;
 using TransportR.Models;
 using Yarp.ReverseProxy.Configuration;
@@ -88,7 +89,7 @@ stateApi.MapGet("/clients/{clientId:guid}", async (Guid clientId, ProxyStateStor
     return client != null ? Results.Ok(client) : Results.NotFound();
 });
 
-stateApi.MapPost("/connections/{connectionId}/disconnected", async (string connectionId, DateTime whenUtc, ProxyStateStore store) =>
+stateApi.MapPost("/connections/{connectionId}/disconnected", async (string connectionId, [FromBody] DateTime whenUtc, ProxyStateStore store) =>
 {
     await store.MarkDisconnectedAsync(connectionId, whenUtc);
     return Results.NoContent();
@@ -120,7 +121,7 @@ stateApi.MapGet("/sessions/{transferId}", async (string transferId, ProxyStateSt
     return session != null ? Results.Ok(session) : Results.NotFound();
 });
 
-stateApi.MapPut("/sessions/{transferId}/expiry", async (string transferId, DateTime newExpiry, ProxyStateStore store) =>
+stateApi.MapPut("/sessions/{transferId}/expiry", async (string transferId, [FromBody] DateTime newExpiry, ProxyStateStore store) =>
 {
     await store.ExtendSessionExpiryAsync(transferId, newExpiry);
     return Results.NoContent();
