@@ -129,7 +129,9 @@ For a deployment:
   last batch after a pause: held back, they leave the sender to fail after its stall bound although every item was
   delivered. YARP 2.3 with its default HTTP/1.1 upstream does this: 30 bytes written 50 ms after a large write were
   still held 2.5 s later, where straight to the backend they arrive at once. The reference proxy in
-  `tests/TransportR.TestProxy` flushes every write through a wrapped outbound handler. No other proxy has been tried.
+  `tests/TransportR.TestProxy` flushes every write through a wrapped outbound handler. The hub asks the same of a
+  proxy for the streams it writes to (`X-Accel-Buffering: no`, which nginx honours). No response can ask it for a
+  request body: behind nginx, that takes `proxy_request_buffering off`. No other proxy has been tried.
 - A reverse proxy that speaks HTTP/2 to the hub is not covered: that hop has not been validated.
 
 ### Resilience & Reliability
