@@ -16,7 +16,10 @@ public interface IClientIdentityProvider
     /// Resolves client identity from the provided claims principal and optional client-provided values.
     /// </summary>
     /// <param name="user">The claims principal from the connection context.</param>
-    /// <param name="providedClientId">Optional client-provided ID (used in dev mode).</param>
+    /// <param name="providedClientId">
+    /// The id the client registers under, which both built-in providers keep. Null on the data plane,
+    /// which names no client.
+    /// </param>
     /// <param name="providedGroups">Optional client-provided groups (used in dev mode).</param>
     /// <returns>
     /// The resolved client identity, or null if identity cannot be resolved. An identity whose

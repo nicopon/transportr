@@ -6,9 +6,8 @@ using TransportR.Tests.Infrastructure;
 namespace TransportR.Tests;
 
 /// <summary>
-/// Under a subject that is not a Guid the client picks its own id, and discovery shows
-/// every id to every authorized sender. A registration must therefore stay with the subject that
-/// made it.
+/// The client picks its own id, whatever its subject, and discovery shows every id to every
+/// authorized sender. A registration must therefore stay with the subject that made it.
 /// </summary>
 public class ConnectIdentityTests
 {
@@ -67,6 +66,26 @@ public class ConnectIdentityTests
 
         await using var intruder = await OpenAsync(host, clientId, Intruder);
         Assert.Equal(HttpStatusCode.NotFound, intruder.Status);
+    }
+
+    [Fact]
+    public async Task Connect_UnderAGuidSubject_RegistersTheIdTheClientNames()
+    {
+        // The client never learns its token's subject: an id taken from it would be one that no
+        // request of the client names, its renewal included.
+        using var host = AuthenticatedHubServerFactory.CreateHost();
+        var store = host.Services.GetRequiredService<IStateStore>();
+        var subject = Guid.NewGuid().ToString();
+        var clientId = Guid.NewGuid();
+
+        await using var stream = await OpenAsync(host, clientId, subject);
+        Assert.Equal(HttpStatusCode.OK, stream.Status);
+        Assert.Equal(subject, (await store.GetClientAsync(clientId))?.Subject);
+        Assert.Null(await store.GetClientAsync(Guid.Parse(subject)));
+
+        using var renewal = await RawHub.RenewAsync(host, clientId,
+            RawHub.Token(subject, groups: AuthenticatedHubServerFactory.DefaultGroup));
+        Assert.Equal(HttpStatusCode.OK, renewal.StatusCode);
     }
 
     private static Task<RawStream> OpenAsync(Microsoft.Extensions.Hosting.IHost host, Guid clientId, string subject) =>

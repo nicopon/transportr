@@ -9,9 +9,9 @@ namespace TransportR.Identity;
 /// Resolves client identity from JWT claims.
 /// </summary>
 /// <remarks>
-/// Extracts client ID from 'sub' claim, groups from 'transportr:group:*' scopes,
-/// and token expiry from 'exp' claim. A token with no such scope resolves to an identity with
-/// no groups rather than to null.
+/// Keeps the client id the caller names, and reads the subject from the 'sub' claim, groups from
+/// 'transportr:group:*' scopes and token expiry from the 'exp' claim. A token with no such scope
+/// resolves to an identity with no groups rather than to null.
 /// </remarks>
 public class JwtIdentityProvider : IClientIdentityProvider
 {
@@ -68,18 +68,11 @@ public class JwtIdentityProvider : IClientIdentityProvider
             return null;
         }
 
-        // Extract clientId from the subject or use provided/generate new
-        Guid clientId;
-        if (Guid.TryParse(subject, out var parsedId))
-        {
-            clientId = parsedId;
-        }
-        else
-        {
-            // Use provided or generate new (sub claim is often not a Guid like "sender")
-            clientId = providedClientId ?? Guid.NewGuid();
-            _logger?.LogDebug("JwtIdentityProvider: ClientId {ClientId} (sub was not a Guid)", clientId);
-        }
+        // Never read from the subject, even one that parses as a Guid: the client draws its own id and
+        // never learns its token's subject, so an id taken from it is one no request of the client names.
+        // What a registration belongs to is the subject, which every control route compares. The data
+        // plane names no client and reads only the subject and the groups.
+        var clientId = providedClientId ?? Guid.NewGuid();
 
         // Extract token expiration
         DateTime? tokenExpiry = null;
