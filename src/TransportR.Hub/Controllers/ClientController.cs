@@ -328,7 +328,7 @@ internal class ClientController : ControllerBase
     /// stream cannot carry one. A valid token of the registered subject that grants no group is not a
     /// refusal: it is the identity provider withdrawing every right, and it is applied.
     /// </summary>
-    [HttpPut("{clientId:guid}/token")]
+    [HttpPut("{clientId:guid}/" + WireRoutes.TokenSegment)]
     public async Task<IActionResult> Renew(Guid clientId)
     {
         // Dev mode arms no authorization on this route and attests nothing to renew.

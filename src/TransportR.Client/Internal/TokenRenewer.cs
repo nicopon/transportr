@@ -58,7 +58,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
     public TokenRenewer(ControlChannel channel, TimeSpan threshold, ILogger logger)
     {
         _tokens = channel;
-        _url = channel.UrlOf("token");
+        _url = channel.UrlOf(WireRoutes.TokenSegment);
         _threshold = threshold;
         _logger = logger;
     }

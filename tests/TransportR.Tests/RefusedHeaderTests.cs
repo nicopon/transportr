@@ -21,7 +21,7 @@ public class RefusedHeaderTests
     [InlineData(WireRoutes.RepliesSegment)]
     [InlineData(WireRoutes.HeartbeatSegment)]
     [InlineData(WireRoutes.PingSegment)]
-    [InlineData("token")]
+    [InlineData(WireRoutes.TokenSegment)]
     public async Task AControlRequestOfAClientTheHubDoesNotKnow_IsRefusedWithTheMark(string route)
     {
         using var host = TestHubServerFactory.CreateHost();

@@ -27,10 +27,9 @@ public static class WireRoutes
 
     /// <summary>
     /// The control plane's base path, relative to the hub's base URL. Every request of a client hangs
-    /// off it as <c>{clientId}/…</c>, the renewal of its token (<c>PUT {clientId}/token</c>, answered
-    /// with a <see cref="TokenRenewalResponse"/>) as much as the segments below. A reverse proxy that
-    /// filters by path has to let it through as it does <see cref="StreamBase"/>, and must not buffer
-    /// the <see cref="EventsSegment"/> stream.
+    /// off it as <c>{clientId}/…</c>, the renewal of its token (<see cref="TokenSegment"/>) as much as
+    /// the other segments below. A reverse proxy that filters by path has to let it through as it does
+    /// <see cref="StreamBase"/>, and must not buffer the <see cref="EventsSegment"/> stream.
     /// </summary>
     public const string ClientBase = "/api/client";
 
@@ -67,6 +66,12 @@ public static class WireRoutes
     /// asks for one, which a handshake waits for.
     /// </summary>
     public const string RepliesSegment = "replies";
+
+    /// <summary>
+    /// <c>PUT {ClientBase}/{clientId}/token</c>: where a client presents a renewed token, answered with a
+    /// <see cref="TokenRenewalResponse"/>.
+    /// </summary>
+    public const string TokenSegment = "token";
 
     /// <summary>
     /// The response header on every 404 the hub answers itself, on either plane, with the value

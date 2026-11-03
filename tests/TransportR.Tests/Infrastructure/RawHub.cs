@@ -52,7 +52,7 @@ public static class RawHub
     }
 
     public static Task<HttpResponseMessage> RenewAsync(IHost host, Guid clientId, string? token) =>
-        SendAsync(host, HttpMethod.Put, clientId, "token", token);
+        SendAsync(host, HttpMethod.Put, clientId, WireRoutes.TokenSegment, token);
 
     private static HttpRequestMessage Request(HttpMethod method, Guid clientId, string path, string? token)
     {
