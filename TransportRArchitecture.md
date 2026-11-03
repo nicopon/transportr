@@ -131,7 +131,10 @@ For a deployment:
   still held 2.5 s later, where straight to the backend they arrive at once. The reference proxy in
   `tests/TransportR.TestProxy` flushes every write through a wrapped outbound handler. The hub asks the same of a
   proxy for the streams it writes to (`X-Accel-Buffering: no`, which nginx honours). No response can ask it for a
-  request body: behind nginx, that takes `proxy_request_buffering off`. No other proxy has been tried.
+  request body. Behind nginx, its documentation calls for `proxy_request_buffering off`,
+  `proxy_http_version 1.1` (the default only from nginx 1.29.7; before it, a chunked body is buffered whatever the
+  first says) and `client_max_body_size 0` (1 MB by default, then 413). Neither nginx nor any proxy but the reference
+  one has been tried.
 - A reverse proxy that speaks HTTP/2 to the hub is not covered: that hop has not been validated.
 
 ### Resilience & Reliability
