@@ -34,6 +34,10 @@ internal class DataSession<T> : IDataSession<T>
     // Bounds the request that tells the hub when the Abort could not be written.
     private static readonly TimeSpan AbortRequestTimeout = TimeSpan.FromSeconds(2);
 
+    // Bounds how long a completed receiver's release waits for the hub to end its data GET. A sender
+    // that died after reading its acknowledgement never lets the hub end it, and must not hang the release.
+    private static readonly TimeSpan ReadSideEndTimeout = TimeSpan.FromSeconds(2);
+
     // Bounds a heartbeat, so that one sent to a hub out of reach gives way to the next.
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(5);
 
@@ -523,6 +527,22 @@ internal class DataSession<T> : IDataSession<T>
             await DeliverWriteSideEndAsync();
         }
 
+        // A receiver completes when the hub has read its acknowledgement, which the sender may not have
+        // read yet. The hub ends the receiver's data GET once the sender's data POST has ended cleanly,
+        // and a GET cut before that takes the POST down with it: the sender then loses the
+        // acknowledgement with its streams, and nobody sends it again.
+        if (!IsSender && _fsm.CurrentState == SessionState.Completed && _httpStreamManager.ReadTask is { } readTask)
+        {
+            try
+            {
+                await readTask.WaitAsync(ReadSideEndTimeout);
+            }
+            catch (TimeoutException)
+            {
+                _config.Logger.LogDebug("The hub had not ended the data stream of Transfer={TransferId} when it was released", TransferId);
+            }
+        }
+
         _reconnectionHandler.Dispose();
         await _batchProcessor.DisposeAsync();
         await _httpStreamManager.DisposeAsync();
@@ -663,6 +683,19 @@ internal class DataSession<T> : IDataSession<T>
         
         if (activeTasks.Count > 0)
         {
+            // A receiver's closing phase ends with its control POST, answered once the hub has read the
+            // acknowledgement. Its data GET is read on until the hub ends it, after the sender's data
+            // POST, so the attempt as a whole ends a step later than the transfer does.
+            if (receiverTask != null && _httpStreamManager.WriteTask is { } writeTask
+                && await Task.WhenAny(receiverTask, writeTask) == writeTask
+                && writeTask.Result.Outcome == StreamOutcome.Ended
+                && IsInCompletingPhase)
+            {
+                _config.Logger.LogInformation("Control stream ended while in completing phase: the hub read the acknowledgement. Transfer confirmed Completed.");
+                _fsm.TransitionTo(SessionState.Completed);
+                return;
+            }
+
             var finished = await Task.WhenAny(activeTasks);
             var result = await finished;
 
@@ -825,6 +858,18 @@ internal class DataSession<T> : IDataSession<T>
         {
             while (!token.IsCancellationRequested)
             {
+                if (IsInCompletingPhase)
+                {
+                    // The consumer has everything, and what still comes is the sender asking again for
+                    // an acknowledgement already queued. The stream is read to its end rather than
+                    // closed: the hub ends it once the sender's data POST has ended cleanly, and closed
+                    // sooner it takes that POST down with it, possibly before the sender has read the
+                    // acknowledgement.
+                    _batchProcessor.CompleteReceiver();
+                    await inputStream.CopyToAsync(Stream.Null, token);
+                    break;
+                }
+
                 using var chunkData = await ChunkIO.ReadChunkAsync(inputStream, token);
                 if (chunkData == null)
                 {
@@ -851,10 +896,9 @@ internal class DataSession<T> : IDataSession<T>
                     throw;
                 }
                 
-                // Exit when entering completing phase (receiver got Complete chunk) or fully completed
-                if (IsInCompletingPhase || IsTerminal)
+                if (IsTerminal)
                 {
-                    _config.Logger.LogInformation("Entering completing phase - exiting ReadLoop for Transfer={TransferId}", TransferId);
+                    _config.Logger.LogInformation("Transfer ended - exiting ReadLoop for Transfer={TransferId}", TransferId);
                     break;
                 }
             }

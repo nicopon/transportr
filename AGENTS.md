@@ -177,7 +177,8 @@ change to transfer lifecycle belongs in the state machine, not scattered as ad-h
 `ConnectionBridge`/`TransferManager`.
 A transfer ends well when the sender's data POST ends cleanly: the bridge takes `OnCompleted` and
 `ITransferRetirer.RetireAsync` (internal) removes the state and both bridges, telling nobody. Only that
-signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST.
+signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST,
+and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the POST.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer
 through `ITransferTerminator`, and **skips `Active` bridges entirely**; `TransferCleanupService`

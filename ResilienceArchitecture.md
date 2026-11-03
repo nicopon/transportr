@@ -22,16 +22,17 @@ says: a builder method on the client, an options class on the hub.
 |---|---|---|---|---|
 | client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
 | client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx` or a `404` means the hub answers |
-| client | Reconnect pause (`DataSession.cs:612`) | 2 s | **fixed** | Pause after a failed probe |
+| client | Reconnect pause (`DataSession.cs:632`) | 2 s | **fixed** | Pause after a failed probe |
 | client | Closing-phase retry (`DataSession.cs:28`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
-| client | Session loop error pause (`DataSession.cs:639`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
+| client | Session loop error pause (`DataSession.cs:659`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
 | client | `Complete` resend (`DataSession.cs:24`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
 | client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
 | client | Abort write (`DataSession.cs:32`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
 | client | Abort request (`DataSession.cs:35`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
+| client | Receiver release (`DataSession.cs:39`) | 2 s | **fixed** | Wait, when a completed receiver's handle is released, for the hub to end its data GET |
 | client | Handshake (`TransportRClient.cs:46`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
 | client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat (`POST …/transfers/{transferId}/heartbeat`), which only runs while a transfer does |
-| client | Heartbeat request (`DataSession.cs:38`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
+| client | Heartbeat request (`DataSession.cs:42`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
 | client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself |
 | client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write |
 | client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`BatchAccumulator.cs:166`) |
@@ -302,7 +303,7 @@ sequenceDiagram
     S->>R: 1. Complete (LastBatchId), on the data stream
     Note over R: Ignored while a batch up to LastBatchId is missing; the sender re-sends it every 5 s
     R->>S: 2. CompleteAck, on the control stream
-    Note over R: Stops reading data, and ends its control POST after the ack
+    Note over R: Takes no more data, and ends its control POST after the ack
     H-->>R: 3. Control POST answered: the hub has read the ack
     Note over R: Completed
     Note over S: 4. CompleteAck read: Completed, the outgoing channel closes
@@ -328,6 +329,8 @@ That clean end is also when the hub forgets the transfer: both participants have
 
 The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep ("3. Hub-Driven Timeout", above).
 
+The receiver can break that clean end too. It is `Completed` at step 3, which may come before step 4, and the hub cuts a source whose destination has gone: a receiver that closed its data GET then would take the sender's POST down before the sender has read the acknowledgement, and nobody would send it again. A receiver in its closing phase therefore reads its data GET to the end, which the hub reaches after step 5, and `DisposeAsync` of a completed receiver waits for that end (at most 2 s) before it cancels the streams.
+
 ### Why Not Control Plane?
 
 | Approach | Issue |
@@ -349,7 +352,7 @@ stateDiagram-v2
     Reconnecting --> Streaming: probe answered
     Streaming --> Completed: [sender] CompleteAck read
     Streaming --> ReceiverCompleteReceived: [receiver] Complete accepted
-    ReceiverCompleteReceived --> Completed: both requests ended, or 404 on a reopened stream
+    ReceiverCompleteReceived --> Completed: control POST answered, or 404 on a reopened stream
     Completed --> [*]
 ```
 

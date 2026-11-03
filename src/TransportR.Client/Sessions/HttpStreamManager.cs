@@ -63,6 +63,13 @@ internal class HttpStreamManager : IAsyncDisposable
     /// </summary>
     public Task<StreamResult>? WriteTask { get; private set; }
 
+    /// <summary>
+    /// The current attempt's task for whichever direction this side reads on (Control for a sender,
+    /// Data for a receiver), which resolves when the read loop returns. A receiver in its closing
+    /// phase reads its data GET to the end, so for it this is the hub ending that request.
+    /// </summary>
+    public Task<StreamResult>? ReadTask { get; private set; }
+
     /// <param name="affinity">The cookies of the hub instance holding the transfer's bridge, on every stream.</param>
     public HttpStreamManager(IStreamTransport transport, ISessionConfig config, string transferId, string dataUrl, string? affinity)
     {
@@ -115,6 +122,7 @@ internal class HttpStreamManager : IAsyncDisposable
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, isRead: false, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, isRead: true, writeAction, readAction, token);
              WriteTask = tData;
+             ReadTask = tControl;
          }
          else
          {
@@ -122,6 +130,7 @@ internal class HttpStreamManager : IAsyncDisposable
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, isRead: true, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, isRead: false, writeAction, readAction, token);
              WriteTask = tControl;
+             ReadTask = tData;
          }
 
          var tasks = new List<Task<StreamResult>> { tData, tControl };

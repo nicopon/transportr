@@ -415,9 +415,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
         _context.Logger.LogInformation("Received Valid Complete (LastBatch={Last}). NextExpected={Next}. Sending CompleteAck (Transfer={TransferId})", 
             lastBatchIdFromSender, nextExpected, _transferId);
-            
-        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
+
+        // The session enters its closing phase before the acknowledgement can be written: it reads the
+        // end of the control POST that carries it as the hub having read it only in that phase.
         if (OnCompleteReceived != null) await OnCompleteReceived.Invoke();
+        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }
     
     private void HandleCompleteAck()
