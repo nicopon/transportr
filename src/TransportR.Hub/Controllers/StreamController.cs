@@ -4,6 +4,7 @@ using TransportR.Protocol;
 using TransportR.Hub.Access;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
@@ -223,6 +224,10 @@ internal class StreamController : ControllerBase
         DisableKestrelLimits();
         Response.StatusCode = 200;
         Response.ContentType = "application/octet-stream";
+        // A proxy that buffers responses holds back the few bytes a stream can end on, an
+        // acknowledgement or a Pong, until its buffer fills, which this stream may never do.
+        Response.Headers["X-Accel-Buffering"] = "no";
+        HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
         await Response.StartAsync();
 
         try

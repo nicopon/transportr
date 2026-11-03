@@ -51,6 +51,23 @@ public class DataPlaneAuthorizationTests
     }
 
     [Fact]
+    public async Task ReadStream_AsksProxiesNotToBufferIt()
+    {
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+
+        var receiver = SendAsync(client, HttpMethod.Get, "receive", ConnectionType.Data, ReceiverSubject);
+        var sender = SendAsync(client, HttpMethod.Post, "send", ConnectionType.Data, SenderSubject);
+
+        using var read = await receiver.WaitAsync(TimeSpan.FromSeconds(30));
+        using var written = await sender.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        Assert.True(read.Headers.TryGetValues("X-Accel-Buffering", out var buffering));
+        Assert.Equal("no", Assert.Single(buffering));
+    }
+
+    [Fact]
     public async Task BothParticipants_AreAdmitted_OnTheirControlStreams()
     {
         // The control plane runs the other way round: the sender reads it with a GET and the
