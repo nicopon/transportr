@@ -96,7 +96,7 @@ internal class ClientController : ControllerBase
         {
             _logger.LogWarning("Registration of {ClientId} refused: unable to resolve a client identity for it (resolved {Resolved})",
                 clientId, identity?.ClientId.ToString() ?? "none");
-            Response.StatusCode = StatusCodes.Status404NotFound;
+            this.Refuse();
             return;
         }
 
@@ -105,7 +105,7 @@ internal class ClientController : ControllerBase
         if (_policy.Evaluate(identity) == AccessVerdict.NoGroups)
         {
             _logger.LogWarning("Registration of {ClientId} refused: the identity holds no group", clientId);
-            Response.StatusCode = StatusCodes.Status404NotFound;
+            this.Refuse();
             return;
         }
 
@@ -119,7 +119,7 @@ internal class ClientController : ControllerBase
         {
             _logger.LogWarning("Registration refused: ClientId {ClientId} is registered under subject {ExistingSubject}, caller attests {Subject}",
                 clientId, existing.Subject, identity.Subject);
-            Response.StatusCode = StatusCodes.Status404NotFound;
+            this.Refuse();
             return;
         }
 
@@ -191,7 +191,7 @@ internal class ClientController : ControllerBase
         {
             _logger.LogInformation("Heartbeat from {ClientId} on stream {ConnectionId}, which holds no registration. Asking the client to register again.",
                 clientId, connectionId);
-            return NotFound();
+            return this.Refuse();
         }
 
         _streams.Touch(clientId);
@@ -206,10 +206,10 @@ internal class ClientController : ControllerBase
     [HttpGet("{clientId:guid}/" + WireRoutes.ReceiversSegment)]
     public async Task<IActionResult> Receivers(Guid clientId)
     {
-        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(Receivers))) return NotFound();
+        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(Receivers))) return this.Refuse();
 
         var source = await AdmitAsync(clientId);
-        if (source == null) return NotFound();
+        if (source == null) return this.Refuse();
 
         var verdict = _policy.Evaluate(source);
         if (verdict != AccessVerdict.Allowed)
@@ -241,10 +241,10 @@ internal class ClientController : ControllerBase
     [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment)]
     public async Task<IActionResult> InitTransfer(Guid clientId, [FromBody] InitTransferRequest request)
     {
-        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransfer))) return NotFound();
+        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransfer))) return this.Refuse();
 
         var source = await AdmitAsync(clientId);
-        if (source == null) return NotFound();
+        if (source == null) return this.Refuse();
 
         var target = await _stateStore.GetClientAsync(request.TargetClientId);
         if (target == null)
@@ -277,12 +277,12 @@ internal class ClientController : ControllerBase
     [HttpPost("{clientId:guid}/" + WireRoutes.RepliesSegment + "/{requestId:guid}")]
     public async Task<IActionResult> Reply(Guid clientId, Guid requestId, [FromBody] CallbackReply reply)
     {
-        if (await AdmitAsync(clientId) == null) return NotFound();
+        if (await AdmitAsync(clientId) == null) return this.Refuse();
 
         if (!_streams.TryReply(clientId, requestId, reply.Outcome))
         {
             _logger.LogInformation("Reply of {ClientId} to {RequestId} came after the handshake had ended, or to another instance", clientId, requestId);
-            return NotFound();
+            return this.Refuse();
         }
 
         return NoContent();
@@ -296,7 +296,7 @@ internal class ClientController : ControllerBase
     public async Task<IActionResult> TransferHeartbeat(Guid clientId, string transferId, [FromBody] TransferProgress progress)
     {
         var participants = await AdmitParticipantAsync(clientId, transferId);
-        if (participants == null) return NotFound();
+        if (participants == null) return this.Refuse();
 
         if (participants.SenderId == clientId)
         {
@@ -317,7 +317,7 @@ internal class ClientController : ControllerBase
     [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment + "/{transferId}/" + WireRoutes.PingSegment)]
     public async Task<IActionResult> Ping(Guid clientId, string transferId)
     {
-        if (await AdmitParticipantAsync(clientId, transferId) == null) return NotFound();
+        if (await AdmitParticipantAsync(clientId, transferId) == null) return this.Refuse();
 
         await _transferManager.KeepAliveAsync(transferId);
         return NoContent();
@@ -334,28 +334,28 @@ internal class ClientController : ControllerBase
         // Dev mode arms no authorization on this route and attests nothing to renew.
         if (User?.Identity?.IsAuthenticated != true)
         {
-            return NotFound();
+            return this.Refuse();
         }
 
         var identity = _identityProvider.ResolveIdentity(User, providedClientId: clientId, providedGroups: null);
         if (identity == null || identity.Subject == null || identity.ClientId != clientId)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: the caller attests no identity for it", clientId);
-            return NotFound();
+            return this.Refuse();
         }
 
         // The host's middleware accepted the token within its own clock skew; the hub holds it to its own.
         if (_policy.Evaluate(identity) == AccessVerdict.TokenExpired)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: the token has already expired", clientId);
-            return NotFound();
+            return this.Refuse();
         }
 
         var renewed = await _stateStore.RenewClientAsync(clientId, identity.Subject, identity.Groups, identity.TokenExpiry);
         if (renewed == null)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: no registration, or it belongs to another subject", clientId);
-            return NotFound();
+            return this.Refuse();
         }
 
         _logger.LogInformation("Token renewed for client {ClientId}, groups [{Groups}], new expiry: {Expiry}",

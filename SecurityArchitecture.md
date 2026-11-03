@@ -112,8 +112,12 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   is still answered. Its transfers stay up, and the renewal's reconciliation ends those the new groups no longer
   allow. An identity that holds no group is refused as it is anywhere else, and the registration stays as it was.
 - **Refusals are 404**, as on the data plane: no such registration, a token of another subject, a token already
-  past its expiry on the hub's clock. A valid token of the registered subject that carries no
-  `transportr:group:*` scope is not a refusal: it withdraws every right, and is applied.
+  past its expiry on the hub's clock. Every 404 the hub answers itself, on either plane, carries
+  `TransportR-Refused: 1` (`WireRoutes.RefusedHeader`), the same whatever the reason. A 404 without it came from no
+  TransportR route, a proxy that does not route the path or a wrong base URL: on the control plane and in the probe
+  before a reconnection, the client raises `HttpRequestException` for it rather than report a refusal. A valid token
+  of the registered subject that carries no `transportr:group:*` scope is not a refusal: it withdraws every right,
+  and is applied.
 - **Fail closed.** `AccessSweepService` re-judges every registered client every `AccessSweepIntervalSeconds`
   (5). A client whose token has run out (plus `TokenExpiryMarginSeconds`, 0 by default) has its transfers ended,
   so that it and its peer are told, and then its events stream closed, with a warning that no renewal was received.

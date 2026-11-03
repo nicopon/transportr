@@ -142,7 +142,7 @@ internal class StreamController : ControllerBase
 
         if (!await ValidateTransfer(transferId, type, isWrite: true))
         {
-            Response.StatusCode = 404;
+            this.Refuse();
             return;
         }
 
@@ -178,7 +178,7 @@ internal class StreamController : ControllerBase
     {
         if (!await Admit(transferId, Role.Either))
         {
-            return NotFound();
+            return this.Refuse();
         }
 
         // Only the replica that carried the transfer's streams can end it: it holds the bridges, and the
@@ -189,7 +189,7 @@ internal class StreamController : ControllerBase
             && !_bridgeManager.Bridges.ContainsKey(IBridgeManager.KeyFor(transferId, ConnectionType.Control)))
         {
             _logger.LogWarning("Abort request for transfer {TransferId} refused: this hub holds none of its bridges, so the request did not follow its streams", transferId);
-            return NotFound();
+            return this.Refuse();
         }
 
         _logger.LogInformation("Transfer {TransferId} ended at the request of one of its participants", transferId);
@@ -208,7 +208,7 @@ internal class StreamController : ControllerBase
 
         if (!await ValidateTransfer(transferId, type, isWrite: false))
         {
-            Response.StatusCode = 404;
+            this.Refuse();
             return;
         }
 

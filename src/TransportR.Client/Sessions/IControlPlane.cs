@@ -11,7 +11,8 @@ internal interface IControlPlane
 
     /// <summary>
     /// Whether the hub answers, before the session reopens its streams. A refusal is an answer: what
-    /// the hub knows of the transfer is for the streams to find out.
+    /// the hub knows of the transfer is for the streams to find out. A 404 the hub did not mark is not
+    /// one, and raises.
     /// </summary>
     Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken);
 

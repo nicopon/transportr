@@ -3,10 +3,13 @@ using System.IO.Pipelines;
 using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.TestHost;
+using TransportR.Abstractions;
 using TransportR.Client.Internal;
 using TransportR.Client.Configuration;
+using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
+using TransportR.Tests.TestHelpers;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TransportR.Tests;
@@ -39,6 +42,111 @@ public class ControlChannelTests
         await Task.Delay(200);
 
         Assert.Equal(new string?[] { null }, hub.StreamCookies);
+    }
+
+    [Fact]
+    public async Task AnOpeningAnsweredWithAnUnmarkedNotFound_IsTriedAgain_AsWhenTheHubIsOutOfReach()
+    {
+        // A proxy that does not forward the control plane yet answers 404: no refusal of the hub's.
+        var hub = new NotFoundHub(marked: false, refusedOpenings: 1);
+        await using var channel = new ControlChannel("http://hub", Guid.NewGuid(), new HttpClient(hub), new ClientOptions(), NullLogger.Instance);
+
+        await channel.OpenAsync(groups: null, CancellationToken.None);
+
+        Assert.Equal(2, hub.Openings);
+        Assert.True(channel.IsOpen);
+    }
+
+    [Fact]
+    public async Task AnOpeningAnsweredWithTheHubsNotFound_IsARefusal_RaisedAtOnce()
+    {
+        var hub = new NotFoundHub(marked: true, refusedOpenings: 1);
+        await using var channel = new ControlChannel("http://hub", Guid.NewGuid(), new HttpClient(hub), new ClientOptions(), NullLogger.Instance);
+
+        var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => channel.OpenAsync(groups: null, CancellationToken.None));
+
+        Assert.Equal(ControlChannel.RefusedMessage, refusal.Message);
+        Assert.Equal(1, hub.Openings);
+    }
+
+    [Fact]
+    public async Task AReplacementAnsweredWithAnUnmarkedNotFound_RaisesAnHttpRequestException()
+    {
+        var hub = new NotFoundHub(marked: false, refusedOpenings: 2);
+        await using var channel = new ControlChannel("http://hub", Guid.NewGuid(), new HttpClient(hub), new ClientOptions(), NullLogger.Instance);
+        await channel.OpenAsync(groups: null, CancellationToken.None);
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => channel.ReplaceAsync(token: null, CancellationToken.None));
+
+        Assert.Equal(ControlChannel.NoHubRouteMessage, failure.Message);
+        Assert.True(channel.IsOpen);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APresenceAnsweredWithANotFound_IsAnUnknownStream_OnlyWhenTheHubMarkedIt(bool marked)
+    {
+        var hub = new NotFoundHub(marked);
+        await using var channel = new ControlChannel("http://hub", Guid.NewGuid(), new HttpClient(hub), new ClientOptions(), NullLogger.Instance);
+        await channel.OpenAsync(groups: null, CancellationToken.None);
+
+        if (marked)
+        {
+            Assert.False(await channel.IsKnownAsync(CancellationToken.None));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() => channel.IsKnownAsync(CancellationToken.None));
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ARequestAnsweredWithANotFound_IsARefusal_OnlyWhenTheHubMarkedIt(bool marked)
+    {
+        using var response = NotFoundHub.NotFound(marked);
+
+        if (marked)
+        {
+            await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(response));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(response));
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AProbeAnsweredWithANotFound_HearsTheHub_OnlyWhenTheHubMarkedIt(bool marked)
+    {
+        await using var client = TestClients.Create(new NotFoundHub(marked), "http://hub");
+        var probe = ((IControlPlane)client).ProbeAsync("transfer-1", affinity: null, CancellationToken.None);
+
+        if (marked)
+        {
+            Assert.True(await probe);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() => probe);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, "The hub refused the token (404).")]
+    [InlineData(false, ControlChannel.NoHubRouteMessage)]
+    public async Task ARenewalAnsweredWithANotFound_IsARefusal_OnlyWhenTheHubMarkedIt(bool marked, string message)
+    {
+        await using var channel = new ControlChannel("http://hub", Guid.NewGuid(), new HttpClient(new NotFoundHub(marked)), new ClientOptions(), NullLogger.Instance);
+        await using var renewer = new TokenRenewer(channel, TimeSpan.FromSeconds(30), NullLogger.Instance);
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => renewer.PushNowAsync("token", CancellationToken.None));
+
+        Assert.Equal(message, failure.Message);
     }
 
     [Fact]
@@ -144,13 +252,45 @@ public class ControlChannelTests
             var cookie = request.Headers.TryGetValues("Cookie", out var values) ? string.Join("; ", values) : null;
             _streamCookies.Enqueue(cookie);
 
-            var pipe = new Pipe();
-            var registered = $"event: {ControlPlane.Registered}\ndata: {{\"connectionId\":\"c-{Interlocked.Increment(ref _opened)}\"}}\n\n";
-            await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes(registered), cancellationToken);
-
-            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(pipe.Reader.AsStream()) };
+            var response = await RegisteredAsync($"c-{Interlocked.Increment(ref _opened)}", cancellationToken);
             if (cookie == null && setCookie != null) response.Headers.Add("Set-Cookie", setCookie);
             return response;
         }
+    }
+
+    /// <summary>
+    /// Registers every opening of a stream but those of <c>refusedOpenings</c> (the first is 1), and
+    /// answers those and every other request with a 404, which carries the hub's mark when
+    /// <c>marked</c>.
+    /// </summary>
+    private sealed class NotFoundHub(bool marked, params int[] refusedOpenings) : HttpMessageHandler
+    {
+        private int _openings;
+
+        public int Openings => Volatile.Read(ref _openings);
+
+        public static HttpResponseMessage NotFound(bool marked) =>
+            marked ? HubResponse.With(HttpStatusCode.NotFound) : new HttpResponseMessage(HttpStatusCode.NotFound);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/" + WireRoutes.EventsSegment, StringComparison.Ordinal))
+            {
+                var opening = Interlocked.Increment(ref _openings);
+                if (!refusedOpenings.Contains(opening)) return await RegisteredAsync($"c-{opening}", cancellationToken);
+            }
+
+            return NotFound(marked);
+        }
+    }
+
+    /// <summary>A stream that opens with the registration under <paramref name="connectionId"/>, then carries nothing.</summary>
+    private static async Task<HttpResponseMessage> RegisteredAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        var pipe = new Pipe();
+        var registered = $"event: {ControlPlane.Registered}\ndata: {{\"connectionId\":\"{connectionId}\"}}\n\n";
+        await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes(registered), cancellationToken);
+
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(pipe.Reader.AsStream()) };
     }
 }

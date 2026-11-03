@@ -106,6 +106,7 @@ public class WriteStreamCutTests
         {
             app.MapPost("/data/{id}/send", (HttpContext ctx) =>
             {
+                ctx.Response.Headers[WireRoutes.RefusedHeader] = "1";
                 ctx.Response.StatusCode = StatusCodes.Status404NotFound;
                 return Task.CompletedTask;
             });

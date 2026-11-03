@@ -3,6 +3,7 @@ using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
 using TransportR.Protocol;
+using TransportR.Tests.TestHelpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 
@@ -166,7 +167,7 @@ public class HttpStreamManagerTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var response = new HttpResponseMessage(_statusCode);
+            var response = HubResponse.With(_statusCode);
             response.Content = new ByteArrayContent(Array.Empty<byte>());
             return Task.FromResult(response);
         }

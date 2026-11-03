@@ -198,6 +198,10 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// disconnected, or its connection is being started again. In that last case only, the client
     /// registers by itself once the connection is back.
     /// </exception>
+    /// <exception cref="HttpRequestException">
+    /// The hub could not be asked, or a 404 came back without <see cref="WireRoutes.RefusedHeader"/>:
+    /// no TransportR route served the request.
+    /// </exception>
     public async Task<bool> IsRegisteredAsync(CancellationToken cancellationToken = default)
     {
         await _registration.WaitAsync(cancellationToken);
@@ -446,6 +450,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         using var response = await _channel.SendAsync(HttpMethod.Post,
             $"{WireRoutes.TransfersSegment}/{transferId}/{WireRoutes.PingSegment}",
             body: null, affinity, cancellationToken);
+        ControlChannel.EnsureFromHub(response);
         return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound;
     }
 

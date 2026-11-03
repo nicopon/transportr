@@ -21,7 +21,7 @@ says: a builder method on the client, an options class on the hub.
 | Side | Name | Default | Settable | What it bounds |
 |---|---|---|---|---|
 | client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
-| client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx` or a `404` means the hub answers |
+| client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx`, or a `404` carrying `TransportR-Refused`, means the hub answers |
 | client | Reconnect pause (`DataSession.cs:632`) | 2 s | **fixed** | Pause after a failed probe |
 | client | Closing-phase retry (`DataSession.cs:28`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
 | client | Session loop error pause (`DataSession.cs:659`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |

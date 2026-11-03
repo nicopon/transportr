@@ -195,7 +195,7 @@ public class HubEndedSessionTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             await _forgotten.Task.WaitAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.NotFound);
+            return HubResponse.With(HttpStatusCode.NotFound);
         }
     }
 }

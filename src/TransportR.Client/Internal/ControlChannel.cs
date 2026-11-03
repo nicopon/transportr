@@ -33,6 +33,9 @@ internal sealed class ControlChannel : IAsyncDisposable
     /// <summary>The message of every refusal: the hub answers them all alike, and says why only in its log.</summary>
     internal const string RefusedMessage = "The hub refused the request.";
 
+    /// <summary>The message of a 404 that does not carry <see cref="WireRoutes.RefusedHeader"/>.</summary>
+    internal const string NoHubRouteMessage = "The response did not come from a TransportR route (404).";
+
     // Twice the hub's keepalive interval: a stream that carried nothing for this long is taken as cut.
     private static readonly TimeSpan StreamSilenceLimit = TimeSpan.FromSeconds(30);
 
@@ -176,7 +179,7 @@ internal sealed class ControlChannel : IAsyncDisposable
 
     /// <summary>
     /// Asks the hub whether it still holds a registration for the stream the client holds: false when
-    /// it has forgotten it, and the client must register again.
+    /// it has forgotten it, and the client must register again. A 404 the hub did not mark raises.
     /// </summary>
     public async Task<bool> IsKnownAsync(CancellationToken cancellationToken)
     {
@@ -185,6 +188,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             : throw new InvalidOperationException("The client holds no stream.");
 
         using var response = await SendAsync(HttpMethod.Post, $"{WireRoutes.PresenceSegment}/{connectionId}", body: null, affinity: null, cancellationToken);
+        EnsureFromHub(response);
         if (response.StatusCode == HttpStatusCode.NotFound) return false;
 
         response.EnsureSuccessStatusCode();
@@ -236,6 +240,7 @@ internal sealed class ControlChannel : IAsyncDisposable
     {
         if (response.IsSuccessStatusCode) return;
 
+        EnsureFromHub(response);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             throw new HubRequestFailedException(RefusedMessage);
@@ -248,6 +253,19 @@ internal sealed class ControlChannel : IAsyncDisposable
         }
 
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Fails with an <see cref="HttpRequestException"/> on a 404 without <see cref="WireRoutes.RefusedHeader"/>:
+    /// no TransportR route answered it, so it is no refusal, and whatever stands in front of the hub,
+    /// or the hub's address, is to blame.
+    /// </summary>
+    public static void EnsureFromHub(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.NotFound && !response.Headers.Contains(WireRoutes.RefusedHeader))
+        {
+            throw new HttpRequestException(NoHubRouteMessage, inner: null, HttpStatusCode.NotFound);
+        }
     }
 
     public async Task<string?> GetAccessTokenAsync(bool forceRefresh = false)
@@ -484,6 +502,7 @@ internal sealed class ControlChannel : IAsyncDisposable
 
             response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancel.Token);
             Absorb(response);
+            EnsureFromHub(response);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 throw new HubRequestFailedException(RefusedMessage);

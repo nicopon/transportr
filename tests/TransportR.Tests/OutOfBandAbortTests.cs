@@ -174,7 +174,7 @@ public class OutOfBandAbortTests
 
                 if (AbortAnswer is { } answer)
                 {
-                    return new HttpResponseMessage(answer);
+                    return HubResponse.With(answer);
                 }
 
                 await Task.Delay(Timeout.Infinite, cancellationToken);
@@ -190,7 +190,7 @@ public class OutOfBandAbortTests
 
                 if (HoldTheDataPostForAnAnswer)
                 {
-                    return new HttpResponseMessage(await _dataPostAnswer.Task.WaitAsync(cancellationToken));
+                    return HubResponse.With(await _dataPostAnswer.Task.WaitAsync(cancellationToken));
                 }
 
                 if (dataPostConfirms)

@@ -20,7 +20,8 @@ public static class WireRoutes
     /// <summary>
     /// The last segment of <c>POST {StreamBase}/{transferId}/abort</c>: a participant asking the hub
     /// to end the transfer on a request of its own, for the case where the in-stream <c>Abort</c>
-    /// cannot overtake the data in front of it. Answered 204; every refusal is a 404, as on the streams.
+    /// cannot overtake the data in front of it. Answered 204; every refusal is a 404 carrying
+    /// <see cref="RefusedHeader"/>, as on the streams.
     /// </summary>
     public const string AbortSegment = "abort";
 
@@ -66,4 +67,11 @@ public static class WireRoutes
     /// asks for one, which a handshake waits for.
     /// </summary>
     public const string RepliesSegment = "replies";
+
+    /// <summary>
+    /// The response header on every 404 the hub answers itself, on either plane, with the value
+    /// <c>1</c> whatever the reason. A 404 without it comes from no TransportR route: a proxy that does
+    /// not route the path, or a wrong base URL, and never a refusal.
+    /// </summary>
+    public const string RefusedHeader = "TransportR-Refused";
 }

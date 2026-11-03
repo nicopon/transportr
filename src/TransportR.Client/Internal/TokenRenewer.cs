@@ -274,6 +274,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
         try
         {
             using var response = await _tokens.SendAsync(request, affinity: null, timeout.Token);
+            ControlChannel.EnsureFromHub(response);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Token renewal refused by the hub with {Status}. The old token stays in place.", (int)response.StatusCode);
