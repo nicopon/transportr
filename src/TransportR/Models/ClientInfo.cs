@@ -16,7 +16,7 @@ public class ClientInfo
     public HashSet<string> Groups { get; set; } = [];
 
     /// <summary>
-    /// When this client's control connection was last seen dropping, or <c>null</c> if it is
+    /// When this client's events stream was last seen ending, or <c>null</c> if it is
     /// currently connected.
     /// </summary>
     /// <remarks>

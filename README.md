@@ -158,7 +158,7 @@ stated, a memory ceiling. `./scripts/test-all.sh` runs them all; see [`scripts/R
 | **Resumes after network faults** from the receiver's last batch, without loss or duplicates | `chaos` (bandwidth cap, latency, connection resets and timeouts injected mid-transfer by Toxiproxy), `chaos-cut-sender`, `chaos-cut-receiver` (one side's link held silent, then closed) |
 | **Bounded memory** against a slow consumer, when bounds are set | `slow-receiver`: receiver under its 300 MB ceiling (182–193 MB measured), where the same run without the byte bound reaches 870 MB |
 | **Authentication on both planes**, groups taken from token scopes | `oidc`, `embedded-idp`; `data-plane-probe` asks the live hub to serve anonymous and wrong-role stream requests and expects refusals |
-| **Two hubs behind a load balancer**, with affinity handoff | `ha-redis` (Redis state store), `ha-no-shared-state` |
+| **Two hubs behind a load balancer**, with affinity handoff | `ha-redis` (Redis state store), `ha-no-shared-state`; `ha-transfer-affinity` (one sender's two transfers on two hubs, every stream back to the hub of its bridge after a cut) |
 | **This page's Quick Start** | Compiled by `tests/TransportR.DocSnippets`; its hub configuration runs in an integration test |
 
 Unit and in-process integration tests run in CI; the scenarios run on demand.

@@ -5,7 +5,7 @@ namespace TransportR.Configuration;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A registration is not deleted when its control connection drops: on an unstable network the
+/// A registration is not deleted when its events stream ends: on an unstable network the
 /// same client usually reconnects within seconds under the same identifier, and removing it would
 /// break a transfer that was about to resume. It is instead marked with
 /// <see cref="Models.ClientInfo.DisconnectedAtUtc"/> and given a grace period.
