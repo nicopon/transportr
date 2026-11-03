@@ -108,9 +108,9 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   is for a host whose own `IClientIdentityProvider` reads rights that change: the hub writes a client's groups when
   it registers and when it renews, and a client that does neither keeps the groups it had. The client opens a new
   stream with the fresh token, closes the old one once the new one is registered, and, with a token provider,
-  presents that token as a renewal. It stays reachable throughout and its transfers stay up; the renewal's
-  reconciliation ends those the new groups no longer allow. An identity that holds no group is refused as it is
-  anywhere else, and the registration stays as it was.
+  presents that token as a renewal. It stays reachable throughout, and a question the hub asked on the old stream
+  is still answered. Its transfers stay up, and the renewal's reconciliation ends those the new groups no longer
+  allow. An identity that holds no group is refused as it is anywhere else, and the registration stays as it was.
 - **Refusals are 404**, as on the data plane: no such registration, a token of another subject, a token already
   past its expiry on the hub's clock. A valid token of the registered subject that carries no
   `transportr:group:*` scope is not a refusal: it withdraws every right, and is applied.

@@ -40,15 +40,28 @@ internal sealed class ClientStreams
         return stream;
     }
 
-    /// <summary>Forgets the stream, and fails every reply still awaited from it.</summary>
+    /// <summary>
+    /// Forgets the stream, and fails every reply still awaited from it, unless the client holds another
+    /// stream on this instance: the reply is then awaited from that one.
+    /// </summary>
     internal void Remove(ClientStream stream)
     {
         _streams.TryRemove(new KeyValuePair<string, ClientStream>(stream.ConnectionId, stream));
         stream.Close();
 
+        // A client replacing its stream opens the new one before it closes the old, and posts its reply
+        // whichever stream carried the question: a reply names the client and the request, not a stream.
+        var successor = _streams.Values.FirstOrDefault(s => s.ClientId == stream.ClientId);
+
         foreach (var (requestId, pending) in _pending)
         {
-            if (ReferenceEquals(pending.Stream, stream) && _pending.TryRemove(requestId, out _))
+            if (!ReferenceEquals(pending.Stream, stream)) continue;
+
+            if (successor != null)
+            {
+                _pending.TryUpdate(requestId, pending with { Stream = successor }, pending);
+            }
+            else if (_pending.TryRemove(requestId, out _))
             {
                 pending.Answer.TrySetException(new IOException("The client's stream closed before it answered."));
             }
