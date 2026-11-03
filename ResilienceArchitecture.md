@@ -30,7 +30,8 @@ says: a builder method on the client, an options class on the hub.
 | client | Abort write (`DataSession.cs:32`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
 | client | Abort request (`DataSession.cs:35`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
 | client | Receiver release (`DataSession.cs:39`) | 2 s | **fixed** | Wait, when a completed receiver's handle is released, for the hub to end its data GET |
-| client | Handshake (`TransportRClient.cs:46`) | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
+| client | `ClientOptions.HandshakeTimeout` | 20 s | **fixed** for a client; a host opening a transfer passes `timeoutMs` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes |
+| client | Handshake margin (`TransportRClient.cs:47`) | 10 s | **fixed** | `InitTransferAsync` as a whole, on top of the handshake timeout: the request, its replay after a redirect and the reading of both answers. A hub that has said nothing by then fails the call with a `HubRequestFailedException` |
 | client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat (`POST …/transfers/{transferId}/heartbeat`), which only runs while a transfer does |
 | client | Heartbeat request (`DataSession.cs:42`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
 | client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself |

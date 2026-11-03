@@ -77,6 +77,17 @@ internal class ClientOptions
     public TimeSpan CompleteStallTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// How long the hub waits, for a transfer this client opens, on the receiver's answer. Default: 20
+    /// seconds.
+    /// </summary>
+    /// <remarks>
+    /// The hub declares no default for it: the request carries this value, so one setting in one place
+    /// answers for it. The hub answers within it or not at all, which is what bounds
+    /// <c>InitTransferAsync</c> once a margin is added.
+    /// </remarks>
+    public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(20);
+
+    /// <summary>
     /// How long before a token expires the client asks its provider for a new one and presents it to
     /// the hub. Default: 5 minutes, and never more than half of what is left of the token.
     /// </summary>

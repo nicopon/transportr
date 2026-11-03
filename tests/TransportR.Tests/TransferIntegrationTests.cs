@@ -922,6 +922,36 @@ public class TransferIntegrationTests
     }
 
     [Fact]
+    public async Task InitTransfer_Fails_WhenTheHubNeverAnswersTheRequest()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+
+        // The request leaves and nothing comes back: a cut that closes no connection, which the
+        // client's HttpClient (no timeout, it carries the data streams too) never ends by itself.
+        var handshakeTimeout = TimeSpan.FromMilliseconds(200);
+        await using var sender = CreateClient(
+            new SilentTransferRequests(server.CreateHandler()), "http://localhost", o => o.HandshakeTimeout = handshakeTimeout);
+        await using var receiver = CreateClient(server.CreateHandler(), "http://localhost");
+        receiver.OnTransferStarted += _ => Task.CompletedTask;
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // The 20s keeps a call that never returns from hanging the run; the claim is the bound below.
+        await Assert.ThrowsAsync<HubRequestFailedException>(
+            () => sender.InitTransferAsync(receiver.ClientId, batchSize: 10).WaitAsync(TimeSpan.FromSeconds(20)));
+        stopwatch.Stop();
+
+        // The call ends at the handshake timeout it announces plus a margin of 10s: no sooner than the
+        // hub's own window, which a refusal would, and no later than that bound plus the slack of a
+        // loaded machine.
+        Assert.InRange(stopwatch.Elapsed, handshakeTimeout, TimeSpan.FromSeconds(10) + handshakeTimeout + TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Heartbeat_ReportsWhetherTheHubStillKnowsTheConnection()
     {
         using var host = TestHubServerFactory.CreateHost();
@@ -1095,6 +1125,24 @@ public class TransferIntegrationTests
                 && types.Contains(ConnectionType.Data.ToString());
 
             if (isDataRead && Interlocked.Increment(ref _opens) > limit)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            return await base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Holds every <c>POST …/transfers</c> without an answer until it is cancelled, and passes the rest
+    /// through.
+    /// </summary>
+    private sealed class SilentTransferRequests(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post
+                && request.RequestUri!.AbsolutePath.EndsWith("/" + WireRoutes.TransfersSegment, StringComparison.Ordinal))
             {
                 await Task.Delay(Timeout.Infinite, cancellationToken);
             }
