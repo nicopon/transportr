@@ -312,6 +312,10 @@ if ! wait_for_receivers; then
     fi
     exit 1
 fi
+if ! wait_for_sender; then
+    log_error "❌ Error: the sender was still running ${SENDER_EXIT_WAIT_SECONDS}s after the receivers finished"
+    exit 1
+fi
 stop_rss_sampler
 
 # Validation
@@ -371,7 +375,7 @@ assert_peak_rss sender "$MAX_SENDER_RSS_MB" || exit 1
 # A finished transfer whose handle was released leaves the client's registry. A client still
 # holding one has leaked it, and no line count or memory ceiling would say so.
 for role in SENDER RECEIVER; do
-    live_line=$(grep -h "\[$role\]\[SESSIONS\]" "$OUTPUT_DIR"/*.log 2>/dev/null | tail -1)
+    live_line=$(wait_for_log_lines "\[$role\]\[SESSIONS\]" | tail -1)
     if [ -z "$live_line" ]; then
         log_error "❌ Error: $role never reported its live session count"
         exit 1
@@ -390,8 +394,9 @@ log_info "Sessions released: sender and receiver both hold 0 transfers."
 # verdict can, and it is logged once per sender on the path where CompleteAsync returned.
 # Counted by distinct transfer id because OUTPUT_DIR holds both the console capture and the
 # structured log, and every line appears in both.
-completed_senders=$(grep -h "\[SENDER\]\[STATS\] Transfer .* complete:" "$OUTPUT_DIR"/*.log 2>/dev/null \
-    | sed -E 's/.*\[SENDER\]\[STATS\] Transfer ([0-9a-zA-Z]+) complete:.*/\1/' | sort -u | wc -l | tr -d ' ')
+completed_key='s/.*\[SENDER\]\[STATS\] Transfer ([0-9a-zA-Z]+) complete:.*/\1/'
+completed_senders=$(wait_for_log_lines "\[SENDER\]\[STATS\] Transfer .* complete:" "$NUM_SENDERS" "$completed_key" \
+    | sed -E "$completed_key" | sort -u | wc -l | tr -d ' ')
 
 if [ "$completed_senders" -ne "$NUM_SENDERS" ]; then
     log_error "❌ Error: $completed_senders of $NUM_SENDERS sender(s) reported a completed transfer"

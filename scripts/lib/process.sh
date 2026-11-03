@@ -94,3 +94,21 @@ wait_for_receivers() {
         wait $pid 2>/dev/null || true
     done
 }
+
+SENDER_EXIT_WAIT_SECONDS=30
+
+wait_for_sender() {
+    if [ -z "$SENDER_PID" ]; then
+        return 0
+    fi
+
+    local waited=0
+    while ps -p $SENDER_PID > /dev/null 2>&1; do
+        if [ "$waited" -ge "$SENDER_EXIT_WAIT_SECONDS" ]; then
+            return 1
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    wait $SENDER_PID 2>/dev/null || true
+}
