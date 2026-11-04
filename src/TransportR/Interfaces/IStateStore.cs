@@ -82,6 +82,11 @@ public interface IStateStore
     /// <summary>
     /// Extends the expiry of a session (Heartbeat).
     /// </summary>
+    /// <remarks>
+    /// A session that is absent stays absent. The heartbeat of a transfer races its removal, so an
+    /// extension that reads the session and writes it back must be one step with its read, or it
+    /// brings back a session deleted in between, and the ended transfer with it.
+    /// </remarks>
     Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry);
 
     /// <summary>

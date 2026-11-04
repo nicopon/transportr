@@ -218,6 +218,42 @@ public class InMemoryStateStoreTests
     }
 
     [Fact]
+    public async Task ExtendSessionExpiry_RacingADelete_DoesNotBringTheSessionBack()
+    {
+        // The extension reads the clock between its read of the session and its write: the clock
+        // deletes the session there, which puts the delete in a window a few instructions wide on
+        // every run. A session brought back stays for the whole TTL, and a stream that reopens
+        // finds the ended transfer again.
+        var clock = new HookedClock();
+        var store = new InMemoryStateStore(timeProvider: clock);
+        const string transferId = "transfer-extend-delete";
+        await store.SaveSessionAsync(new TransferSession(transferId, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow, DateTime.UtcNow.AddMinutes(5)));
+
+        clock.OnNextRead = () => store.DeleteSessionAsync(transferId).GetAwaiter().GetResult();
+        await store.ExtendSessionExpiryAsync(transferId, DateTime.UtcNow.AddMinutes(10));
+
+        Assert.True(clock.Fired, "the delete did not run inside the extension");
+        Assert.Null(await store.GetSessionAsync(transferId));
+    }
+
+    private sealed class HookedClock : TimeProvider
+    {
+        public Action? OnNextRead;
+        public bool Fired;
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            if (Interlocked.Exchange(ref OnNextRead, null) is { } hook)
+            {
+                hook();
+                Fired = true;
+            }
+
+            return base.GetUtcNow();
+        }
+    }
+
+    [Fact]
     public async Task DeleteSession_RemovesSession()
     {
         // Arrange

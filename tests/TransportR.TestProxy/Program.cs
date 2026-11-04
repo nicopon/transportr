@@ -241,13 +241,12 @@ public class ProxyStateStore : IStateStore
 
     public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
-        if (_sessions.TryGetValue(transferId, out var session))
+        // One step with its read, as IStateStore asks: a delete in between must not be undone.
+        while (_sessions.TryGetValue(transferId, out var session) && session.ExpiresAtUtc > DateTime.UtcNow)
         {
-             if (session.ExpiresAtUtc > DateTime.UtcNow)
-             {
-                 _sessions[transferId] = session with { ExpiresAtUtc = newExpiry };
-             }
+            if (_sessions.TryUpdate(transferId, session with { ExpiresAtUtc = newExpiry }, session)) break;
         }
+
         return Task.CompletedTask;
     }
 

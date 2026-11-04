@@ -147,21 +147,21 @@ public class InMemoryStateStore : IStateStore
             if (session.ExpiresAtUtc > Now)
                 return Task.FromResult<TransferSession?>(session);
             
-            // Lazy expiration
-            _sessions.TryRemove(transferId, out _);
+            // Lazy expiration, of the value read only: an extension that landed since is kept.
+            _sessions.TryRemove(new KeyValuePair<string, TransferSession>(transferId, session));
         }
         return Task.FromResult<TransferSession?>(null);
     }
 
     public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
-        if (_sessions.TryGetValue(transferId, out var session))
+        while (_sessions.TryGetValue(transferId, out var session) && session.ExpiresAtUtc > Now)
         {
-            if (session.ExpiresAtUtc > Now)
-            {
-                _sessions[transferId] = session with { ExpiresAtUtc = newExpiry };
-            }
+            // Compare-and-swap on the session read above: a delete that landed in between ends the
+            // loop, where a plain write would bring the ended transfer back for a whole TTL.
+            if (_sessions.TryUpdate(transferId, session with { ExpiresAtUtc = newExpiry }, session)) break;
         }
+
         return Task.CompletedTask;
     }
 
