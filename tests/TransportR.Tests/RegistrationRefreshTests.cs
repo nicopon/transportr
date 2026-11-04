@@ -5,6 +5,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Services;
@@ -166,14 +167,78 @@ public class RegistrationRefreshTests
     }
 
     [Fact]
-    public async Task Refresh_WhileTheConnectionIsDown_IsAnInvalidOperation()
+    public async Task Refresh_WhileTheConnectionIsDown_RegistersTheClientAtOnce()
     {
         await using var node = await Node.StartAsync(["alpha"], outlive: false);
+        var before = await node.RegistrationAsync();
+        node.Rights.Set(Sender, "beta");
 
-        // The client opens a lost stream again, after a delay of at least half a second.
+        // The client opens a lost stream again after a delay of at least half a second: the refresh
+        // comes first.
+        await node.CutAsync();
+        await node.Client.RefreshRegistrationAsync();
+
+        Assert.True(node.Client.Channel.IsOpen);
+        var after = await node.RegistrationAsync();
+        Assert.NotEqual(before.ConnectionId, after.ConnectionId);
+        Assert.Equal(["beta"], after.Groups.Order());
+
+        // The reopening's own attempt, due within a second of the cut, must find the stream back and
+        // open none: a second registration, closed at once, would take the connection over and leave
+        // it marked disconnected.
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        var settled = await node.RegistrationAsync();
+        Assert.Equal(after.ConnectionId, settled.ConnectionId);
+        Assert.Null(settled.DisconnectedAtUtc);
+    }
+
+    [Fact]
+    public async Task Refresh_WhileTheHubRefusesTheConnectionAgain_RaisesTheRefusal_AndTheClientKeepsTrying()
+    {
+        // A renewal that leaves the identity no group closes its stream, and every attempt to open it
+        // again is refused. The host's refresh must say so, not that the client is merely offline.
+        await using var node = await Node.StartAsync(["alpha"], outlive: false);
+        node.Rights.Set(Sender);
         await node.CutAsync();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => node.Client.RefreshRegistrationAsync());
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => node.Client.RefreshRegistrationAsync());
+        Assert.False(node.Client.Channel.IsOpen);
+
+        node.Rights.Set(Sender, "beta");
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (!node.Client.Channel.IsOpen)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the client stopped opening its stream again");
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(["beta"], (await node.RegistrationAsync()).Groups.Order());
+    }
+
+    [Fact]
+    public async Task Refresh_WhileTheHubIsOutOfReach_IsAnInvalidOperation()
+    {
+        // A host keeps a client the hub cannot be reached for: its id and its transfers outlive the cut.
+        var rights = new Rights();
+        rights.Set(Sender, "alpha");
+        var host = await AuthenticatedHubServerFactory.StartLoopbackAsync(configureServices: services =>
+        {
+            Node.Replacing(rights, new RecordingStateStore())(services);
+            services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(1));
+        });
+        await using var client = TestClients.Create(null, host.BaseUrl, new Tokens(Sender).GetAsync);
+        await client.ConnectAsync();
+
+        await host.DisposeAsync();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (client.Channel.IsOpen)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the client never saw its stream close");
+            await Task.Delay(20);
+        }
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.RefreshRegistrationAsync());
+        Assert.NotNull(ex.InnerException);
     }
 
     [Fact]

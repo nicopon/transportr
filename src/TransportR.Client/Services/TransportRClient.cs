@@ -143,29 +143,48 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// forgotten the client, and the heartbeat itself take turns (a beat that finds one under way is
     /// skipped); the renewal is ordered against the push by the renewer, which makes one attempt at a time.
     /// </para>
+    /// <para>
+    /// While the connection is being started again, the refresh is that start, made at once: the hub
+    /// answers it as it answers a registration, so the identity holding no group is raised as a
+    /// <see cref="HubRequestFailedException"/> here too. The client goes on starting the connection
+    /// again whatever the outcome.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The client is not connected: it has not connected, has disconnected, or its connection is being
-    /// started again. Whether to wait and call again is the caller's.
+    /// started again and the hub could not be reached (the cause is the inner exception). Whether to
+    /// wait and call again is the caller's.
     /// </exception>
     public async Task RefreshRegistrationAsync(CancellationToken cancellationToken = default)
     {
+        const string notConnected = "The registration can only be refreshed while the client is connected to the hub.";
+
         await _registration.WaitAsync(cancellationToken);
         try
         {
-            // Read once the turn is ours: the one before it may have lost the stream.
-            if (!_registered || !_channel.IsOpen)
-            {
-                throw new InvalidOperationException(
-                    "The registration can only be refreshed while the client is connected to the hub.");
-            }
+            // Read once the turn is ours: the one before it may have disconnected the client.
+            if (!_registered) throw new InvalidOperationException(notConnected);
 
             // Asked of the provider first, so that a provider that is down costs nothing, and so that
             // the new stream registers the identity this token attests.
             var token = _renewer != null ? await _channel.AcquireTokenAsync() : null;
 
             _logger.LogInformation("Refreshing the registration of Client (ClientId={ClientId})...", ClientId);
-            await _channel.ReplaceAsync(token, cancellationToken);
+            if (_channel.IsOpen)
+            {
+                await _channel.ReplaceAsync(token, cancellationToken);
+            }
+            else
+            {
+                try
+                {
+                    await _channel.ReopenNowAsync(token, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not HubRequestFailedException && !cancellationToken.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException(notConnected, ex);
+                }
+            }
 
             // The renewer arms its next renewal on the expiry the hub answers with.
             if (token != null)

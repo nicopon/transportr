@@ -72,7 +72,8 @@ await client.RefreshRegistrationAsync();
 The client registers again under the same id, with the groups its identity holds now and a token from its
 provider, and returns once the hub has recorded both. It stays reachable and its transfers are not
 interrupted; the hub ends those the new groups no longer allow. It raises `InvalidOperationException` when the client is
-not connected, and the hub's refusal when the identity holds no group (the registration stays as it was).
+not connected or its lost connection cannot reach the hub, and the hub's refusal when the identity holds no group,
+connection lost or not (the registration stays as it was).
 The hub must be of the same release.
 
 `IsRegisteredAsync()` asks the hub whether it still knows the client. It answers `false` when the hub has

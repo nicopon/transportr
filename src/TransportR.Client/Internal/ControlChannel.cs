@@ -57,6 +57,11 @@ internal sealed class ControlChannel : IAsyncDisposable
 
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _lock = new();
+
+    // One attempt at a time to open a lost stream again, the reopening's or a refresh's: a second
+    // stream would register the client over the first, and closing it would then mark the client
+    // disconnected. Never disposed, like the client's own turn.
+    private readonly SemaphoreSlim _reopenTurn = new(1, 1);
     private EventStream? _current;
     private Task? _reopening;
     private IReadOnlyList<string>? _groups;
@@ -175,6 +180,24 @@ internal sealed class ControlChannel : IAsyncDisposable
             await stream.DisposeAsync();
             throw new InvalidOperationException("The stream was lost while it was being replaced.");
         }
+    }
+
+    /// <summary>
+    /// Registers the client now on a new stream in place of the one it lost, with <paramref name="token"/>,
+    /// rather than at the next attempt of the reopening. A refusal is raised as the hub gives it, and the
+    /// reopening goes on either way. Returns at once when the stream is already back.
+    /// </summary>
+    public async Task ReopenNowAsync(string? token, CancellationToken cancellationToken)
+    {
+        EventStream lost;
+        lock (_lock)
+        {
+            if (_disposed || _current == null) throw new InvalidOperationException("The client holds no stream.");
+            if (!_current.Ended) return;
+            lost = _current;
+        }
+
+        await ReopenOnceAsync(lost, token, cancellationToken);
     }
 
     /// <summary>
@@ -416,17 +439,7 @@ internal sealed class ControlChannel : IAsyncDisposable
                 // must not come back in step.
                 await Task.Delay(delay * (0.5 + Random.Shared.NextDouble() * 0.5), cancellationToken);
 
-                // Asks the token provider for a token, so the stream comes back with the one the old
-                // stream lacked.
-                var stream = await OpenStreamAsync(await GetAccessTokenAsync(), cancellationToken);
-                if (!Install(stream, lost))
-                {
-                    await stream.DisposeAsync();
-                    return;
-                }
-
-                _logger.LogInformation("The stream of events from the hub is back.");
-                if (Reopened is { } reopened) await reopened();
+                await ReopenOnceAsync(lost, token: null, cancellationToken);
                 return;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -440,6 +453,39 @@ internal sealed class ControlChannel : IAsyncDisposable
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReopenDelay.Ticks));
             }
         }
+    }
+
+    /// <summary>
+    /// Opens a stream in place of <paramref name="lost"/> and runs <see cref="Reopened"/> once the client
+    /// is registered on it. Nothing is opened when another attempt has replaced <paramref name="lost"/>
+    /// already, or the channel was disposed.
+    /// </summary>
+    private async Task ReopenOnceAsync(EventStream lost, string? token, CancellationToken cancellationToken)
+    {
+        await _reopenTurn.WaitAsync(cancellationToken);
+        try
+        {
+            lock (_lock)
+            {
+                if (_disposed || !ReferenceEquals(_current, lost)) return;
+            }
+
+            // Without a token of the caller's, one from the provider: the stream comes back with the
+            // token the old stream lacked.
+            var stream = await OpenStreamAsync(token ?? await GetAccessTokenAsync(), cancellationToken);
+            if (!Install(stream, lost))
+            {
+                await stream.DisposeAsync();
+                return;
+            }
+        }
+        finally
+        {
+            _reopenTurn.Release();
+        }
+
+        _logger.LogInformation("The stream of events from the hub is back.");
+        if (Reopened is { } reopened) await reopened();
     }
 
     private async Task DispatchAsync(SseItem<string> item)
