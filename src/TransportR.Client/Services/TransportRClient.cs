@@ -215,7 +215,8 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// <exception cref="InvalidOperationException">
     /// The client is not connected: it has not connected, its <see cref="ConnectAsync"/> failed, it has
     /// disconnected, or its connection is being started again. In that last case only, the client
-    /// registers by itself once the connection is back.
+    /// registers by itself once the connection is back, which a hub that refuses it never lets happen:
+    /// <see cref="RefreshRegistrationAsync"/> asks the hub, and tells that refusal from a hub out of reach.
     /// </exception>
     /// <exception cref="HttpRequestException">
     /// The hub could not be asked, or a 404 came back without <see cref="WireRoutes.RefusedHeader"/>:
