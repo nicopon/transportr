@@ -120,6 +120,35 @@ public class TransferIntegrationTests
     }
 
     [Fact]
+    public async Task HostInitiatedTransfer_EndedDuringItsHandshake_IsRefused_RatherThanReturned()
+    {
+        // A renewal that withdraws a right, the access sweep or the inactivity check can end a transfer
+        // while its sender is still answering. Its id would send the host after a transfer nobody opens.
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var asked = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += async send => { asked.TrySetResult(send); await answer.Task; };
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        var init = initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        await using var send = await asked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(send.TransferId);
+        answer.SetResult();
+
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => init.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
     public async Task SenderInitiatedTransfer_DeliversEveryItem()
     {
         using var host = TestHubServerFactory.CreateHost();

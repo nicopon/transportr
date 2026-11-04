@@ -171,7 +171,7 @@ internal class TransferInitiator : ITransferInitiator
 
             if (!requestSender)
             {
-                return transferId;
+                return StillOpen(transferId);
             }
 
             CallbackOutcome senderReady;
@@ -206,7 +206,20 @@ internal class TransferInitiator : ITransferInitiator
             throw new HubRequestFailedException($"Handshake timed out after {timeoutMs}ms");
         }
 
-        return transferId;
+        return StillOpen(transferId);
+    }
+
+    /// <summary>
+    /// <paramref name="transferId"/>, unless the transfer was ended while its participants were being
+    /// asked: a renewal that withdrew a right, the access sweep or the inactivity check can end it
+    /// then, and its id would send the caller after a transfer nobody will open again.
+    /// </summary>
+    private string StillOpen(string transferId)
+    {
+        if (_transferManager.GetTransfer(transferId) != null) return transferId;
+
+        _logger.LogWarning("Transfer {TransferId} was ended during its handshake", transferId);
+        throw new HubRequestFailedException("The transfer was ended before its handshake completed.");
     }
 
     private async Task AbandonAsync(string transferId, ClientRegistration receiver)
