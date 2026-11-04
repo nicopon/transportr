@@ -245,8 +245,9 @@ public class RegistrationRefreshTests
     public async Task Refresh_WhileTheHubDoesNotAnswerTheConnection_EndsWithItsToken()
     {
         // A hub that takes the connection and never registers it: the caller's token is what bounds
-        // the refresh, well ahead of the stream's silence limit, whether the refresh or the
-        // reopening's own attempt got there first.
+        // the refresh, well ahead of the stream's silence limit. The refresh starts before the
+        // reopening's own attempt, due half a second after the cut at the earliest, so it is the
+        // refresh's opening that the token cuts here, not its wait for that attempt.
         await using var node = await Node.StartAsync(["alpha"], outlive: false);
         var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         node.Store.HoldConnects = held.Task;
