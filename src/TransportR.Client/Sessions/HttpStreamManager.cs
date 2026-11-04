@@ -236,13 +236,13 @@ internal class HttpStreamManager : IAsyncDisposable
             {
                  // The peer sent something this version cannot interpret; reconnecting would only
                  // repeat the violation, so this is fatal rather than retryable.
-                 _config.Logger.LogError("Protocol violation: {Message}. Session failed.", ex.Message);
+                 _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
                  return new StreamResult(StreamOutcome.Fatal, ex.Message);
             }
             catch (Exception ex)
             {
                  // Network errors allow retry
-                 _config.Logger.LogWarning("Stream failed: {Message}. Returning Retryable.", ex.Message);
+                 _config.Logger.LogWarning("Stream failed, returning Retryable: {Message}", ex.Message);
                  return new StreamResult(StreamOutcome.Retryable, ex.Message);
             }
             

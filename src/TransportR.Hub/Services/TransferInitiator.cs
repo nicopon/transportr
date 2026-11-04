@@ -154,7 +154,7 @@ internal class TransferInitiator : ITransferInitiator
                 // The usual cause is a registration that outlived its process: the client is still in
                 // the state store, but no stream of its is open here. Detail stays in the hub log; the
                 // client gets something it can act on.
-                _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}: {Message}. Registration is likely stale.",
+                _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}, registration likely stale: {Message}",
                     receiver.ClientId, receiver.ConnectionId, transferId, ex.Message);
                 await _transferManager.RemoveTransferAsync(transferId);
                 throw new HubRequestFailedException($"Target client {receiver.ClientId} is not reachable.");
@@ -182,7 +182,7 @@ internal class TransferInitiator : ITransferInitiator
             }
             catch (IOException ex)
             {
-                _logger.LogWarning("Sender unreachable for {TransferId}: {Message}. Cancelling Receiver.", transferId, ex.Message);
+                _logger.LogWarning("Sender unreachable for {TransferId}, cancelling Receiver: {Message}", transferId, ex.Message);
                 await AbandonAsync(transferId, receiver);
                 throw new HubRequestFailedException("Source client failed to prepare for the transfer.");
             }

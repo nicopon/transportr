@@ -156,8 +156,8 @@ internal sealed class ControlChannel : IAsyncDisposable
             }
             catch (Exception ex) when (attempt < FirstOpenAttempts && IsTransient(ex) && !cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning("Connection attempt {Attempt}/{MaxRetries} failed: {Message}. Retrying in {Delay}ms...",
-                    attempt, FirstOpenAttempts, ex.Message, delay.TotalMilliseconds);
+                _logger.LogWarning("Connection attempt {Attempt}/{MaxRetries} failed, retrying in {Delay}ms: {Message}",
+                    attempt, FirstOpenAttempts, delay.TotalMilliseconds, ex.Message);
                 await Task.Delay(delay, cancellationToken);
                 delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 5000));
             }
@@ -448,8 +448,8 @@ internal sealed class ControlChannel : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Could not open the stream of events again: {Message}. Next attempt in at most {Delay}s.",
-                    ex.Message, delay.TotalSeconds);
+                _logger.LogWarning("Could not open the stream of events again, next attempt in at most {Delay}s: {Message}",
+                    delay.TotalSeconds, ex.Message);
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReopenDelay.Ticks));
             }
         }
@@ -524,7 +524,7 @@ internal sealed class ControlChannel : IAsyncDisposable
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("Could not open the stream again with the cookies the hub's proxy set: {Message}. Keeping the first one.", ex.Message);
+            _logger.LogWarning("Could not open the stream again with the cookies the hub's proxy set, keeping the first one: {Message}", ex.Message);
             return stream;
         }
     }
