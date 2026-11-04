@@ -147,7 +147,10 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// While the connection is being started again, the refresh is that start, made at once: the hub
     /// answers it as it answers a registration, so the identity holding no group is raised as a
     /// <see cref="HubRequestFailedException"/> here too. The client goes on starting the connection
-    /// again whatever the outcome.
+    /// again whatever the outcome. That start first waits for an attempt the client is already making,
+    /// and gives a hub that does not answer the stream's silence limit (30 s):
+    /// <paramref name="cancellationToken"/> cuts both sooner, but not the token provider, which the
+    /// refresh asks first.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">

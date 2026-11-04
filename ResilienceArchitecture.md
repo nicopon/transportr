@@ -41,9 +41,9 @@ says: a builder method on the client, an options class on the hub.
 | client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
 | client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
 | client | Renewal retry (`TokenRenewer.cs:30-31`) | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
-| client | Events stream, silence (`ControlChannel.cs:37`) | 30 s | **fixed** | A stream that carried nothing, keepalives included, for this long is abandoned and opened again |
-| client | Events stream, first opening (`ControlChannel.cs:41`, `:135-154`) | 5 attempts, 500 ms → 5 s | **fixed** | Attempts to open the first stream, the delay doubling; a refusal is raised at once. Restarting a data stream is not backed off |
-| client | Events stream, reopening (`ControlChannel.cs:39-40`) | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
+| client | Events stream, silence (`ControlChannel.cs:40`) | 30 s | **fixed** | A stream that carried nothing, keepalives included, for this long is abandoned and opened again. An opening the hub has not answered with the registration by then fails |
+| client | Events stream, first opening (`ControlChannel.cs:44`, `:138-165`) | 5 attempts, 500 ms → 5 s | **fixed** | Attempts to open the first stream, the delay doubling; a refusal is raised at once. Restarting a data stream is not backed off |
+| client | Events stream, reopening (`ControlChannel.cs:42-43`) | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
 | hub | Keepalive (`ClientStreams.cs:130`) | 15 s | **fixed** | Quiet on an events stream before the hub writes a `keepalive` event: half the client's silence limit |
 | hub | Client silence | twice the announced presence interval (30 s) | **fixed**, announced by the client | An events stream the hub has heard nothing from is closed; any request the hub admits from that client counts as hearing from it |
 | hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |

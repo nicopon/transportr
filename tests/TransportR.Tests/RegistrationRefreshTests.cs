@@ -242,6 +242,30 @@ public class RegistrationRefreshTests
     }
 
     [Fact]
+    public async Task Refresh_WhileTheHubDoesNotAnswerTheConnection_EndsWithItsToken()
+    {
+        // A hub that takes the connection and never registers it: the caller's token is what bounds
+        // the refresh, well ahead of the stream's silence limit, whether the refresh or the
+        // reopening's own attempt got there first.
+        await using var node = await Node.StartAsync(["alpha"], outlive: false);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        node.Store.HoldConnects = held.Task;
+        try
+        {
+            await node.CutAsync();
+
+            using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => node.Client.RefreshRegistrationAsync(cancel.Token));
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"the refresh outlived its token: {clock.Elapsed}");
+        }
+        finally
+        {
+            held.TrySetResult();
+        }
+    }
+
+    [Fact]
     public async Task AConnectionThatRestarts_RegistersWithTheGroupsOfTheMoment_UnderTheSameSubject()
     {
         // What a host refused a refresh while the connection is down relies on: the client comes
@@ -427,10 +451,14 @@ public class RegistrationRefreshTests
 
         private int _lookupsByConnection;
 
-        public Task SaveClientAsync(ClientRegistration client)
+        /// <summary>Holds every registration of a stream until it completes: a hub that does not answer.</summary>
+        public Task? HoldConnects { get; set; }
+
+        public async Task SaveClientAsync(ClientRegistration client)
         {
+            if (HoldConnects is { } held) await held;
             Writes.Enqueue(new Write("Connect", client.TokenExpiry));
-            return _inner.SaveClientAsync(client);
+            await _inner.SaveClientAsync(client);
         }
 
         public async Task<ClientRegistration?> RenewClientAsync(Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
