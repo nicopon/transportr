@@ -103,6 +103,8 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   expiry it recorded, which is what the next renewal is armed on when the client cannot read its own token
   (an encrypted or opaque one). A failed attempt keeps the old token and is retried, with growing and jittered
   delays, until the expiry; a provider that hands back the token it gave before (a caching one) is asked again.
+  The first renewal presents the token held just after `ConnectAsync` returns: a right the host withdraws in
+  between is applied by it, and a withdrawal that leaves no group closes the stream then.
 - **A host can ask for it now.** `RefreshRegistrationAsync()` registers the client again with the groups its
   identity holds at that moment and a token the provider gives now, and returns once the hub has recorded both. It
   is for a host whose own `IClientIdentityProvider` reads rights that change: the hub writes a client's groups when
