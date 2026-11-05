@@ -170,9 +170,10 @@ On one machine over loopback, the `default` scenario moves 2 million orders (abo
 (five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
 135,000 items per second. Over a real network, bandwidth and item size decide.
 
-One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one HTTP stream on
-each hop, sender to hub and hub to receiver. Over a long round trip, one TCP connection's window bounds the rate,
-and nothing spreads a transfer over several connections. No scenario measures that rate under latency yet: `chaos`
+One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one connection on
+each hop, sender to hub and hub to receiver. Over a long round trip, the first hop sends one segment per round
+trip, the second is bounded by one TCP connection's window, and nothing spreads a transfer over several
+connections. No scenario measures that rate under latency yet: `chaos`
 injects latency and asserts that the transfer completes, not how fast.
 
 ---
@@ -228,8 +229,8 @@ hub. See the [Security guide](./SecurityArchitecture.md).
 - **The hub is on the path.** All traffic crosses it. High availability needs the Redis state store and
   effective session affinity at the load balancer, not merely preferred affinity
   (see [Architecture](./TransportRArchitecture.md#high-availability-ha)).
-- **Tested on a limited set of environments**: one reverse proxy (YARP), HTTP/1.1 to the hub, two identity
-  providers, and the scenarios above on developer machines. Reports from other environments are welcome.
+- **Tested on a limited set of environments**: two reverse proxies (YARP, a stock nginx), Azure App Service,
+  HTTP/1.1 to the hub, two identity providers, and the scenarios above on developer machines. Reports from other environments are welcome.
 
 ---
 

@@ -27,7 +27,7 @@ Provides the hub services that:
 │  └── PUT /api/client/{id}/token                             │
 │                                                             │
 │  StreamController (data plane)                              │
-│  ├── POST /api/stream/{id}/send                             │
+│  ├── POST /api/stream/{id}/send (one segment per request)   │
 │  ├── GET /api/stream/{id}/receive                           │
 │  └── POST /api/stream/{id}/abort                            │
 ├─────────────────────────────────────────────────────────────┤

@@ -34,8 +34,8 @@ says: a builder method on the client, an options class on the hub.
 | client | Handshake margin (`TransportRClient.cs:47`) | 10 s | **fixed** | `InitTransferAsync` as a whole, on top of the handshake timeout: the request, its replay after a redirect and the reading of both answers. A hub that has said nothing by then fails the call with a `HubRequestFailedException` |
 | client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat (`POST …/transfers/{transferId}/heartbeat`), which only runs while a transfer does |
 | client | Heartbeat request (`DataSession.cs:42`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
-| client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself |
-| client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write |
+| client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself. It is also how long a sender's data stream may be idle before it writes a `Ping` |
+| client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write, which is also the largest segment it sends |
 | client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`BatchAccumulator.cs:166`) |
 | client | `ClientOptions.TokenRefreshThreshold` | 5 min | `WithTokenRefreshThreshold` | How long before its expiry a token is renewed, and no more than half of what is left of it |
 | client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
@@ -46,6 +46,8 @@ says: a builder method on the client, an options class on the hub.
 | client | Events stream, reopening (`ControlChannel.cs:42-43`) | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
 | hub | Keepalive (`ClientStreams.cs:130`) | 15 s | **fixed** | Quiet on an events stream before the hub writes a `keepalive` event: half the client's silence limit |
 | hub | Client silence | twice the announced presence interval (30 s) | **fixed**, announced by the client | An events stream the hub has heard nothing from is closed; any request the hub admits from that client counts as hearing from it |
+| hub | Sender's data stream, silence | twice the interval its first segment announces (30 s) | **fixed**, announced by the client | A write epoch of the sender's data stream with no segment is taken as cut. No other write stream is judged on silence |
+| hub | Segment hold (`UploadEpoch.cs:45`) | 30 s | **fixed** | A segment waiting for the peer to read it: answered `202` with what got through, and the client sends the rest again. Below the 60 s a default nginx allows a request without an answer |
 | hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
 | hub | `TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
 | hub | `StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
@@ -146,9 +148,13 @@ receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead o
 serialize fails the sender's session at once, and the receiver is told with `Abort` (`SerializationFailed`). Either
 `Abort` falls back on `POST /api/stream/{id}/abort` when it cannot be written within `AbortWriteTimeout`.
 
-A write stream sees a cut even when its client has nothing to write because its requests carry
-`Expect: 100-continue`; the reason, and what a reverse proxy in front of the hub must accept and forward, are in
-"Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md`.
+A write stream is a succession of segments (see "Data Plane Transport" in `TransportRArchitecture.md`), so no
+connection stays open between two of them to fail: a cut is a segment that fails, which ends the epoch, and the session
+reconnects with a new one. A dead sender is found by its silence instead. One with nothing to write sends a `Ping` every
+`PresenceHeartbeatInterval`, and the hub takes an epoch of its data stream with no segment for two intervals as cut, the
+rule of the presence heartbeat. Only that stream is judged: a receiver's control epoch writes what its read loop gives
+it, which a consumer holding on to a batch parks, so its silence says nothing; a dead receiver shows at its data GET,
+and the sender then fails for want of acknowledgements.
 
 ### 1b. Registration Lifetime (Hub-Side)
 
@@ -252,7 +258,7 @@ In a multi-hub deployment behind a load balancer with sticky sessions, a sender 
 
 A slow consumer must cost the transfer time, not memory. There is no control-plane message for this: the pushback is the data plane throttling itself, end to end, and the hub takes no part in it.
 
-**The chain.** A full receive buffer parks the receiver's read loop. A parked read loop stops draining the HTTP response body, which closes the TCP window back to the hub, which blocks the hub's forwarding write, which blocks the sender's HTTP write. And because a batch is acknowledged only *after* it lands in the receive buffer, the acknowledgement that would reopen the sender's in-flight window is withheld for as long as the consumer is behind. One slow consumer therefore stops the producer, without anyone being told.
+**The chain.** A full receive buffer parks the receiver's read loop. A parked read loop stops draining the HTTP response body, which closes the TCP window back to the hub, which blocks the hub's forwarding write, which holds back the answer to the sender's segment and so its next flush. And because a batch is acknowledged only *after* it lands in the receive buffer, the acknowledgement that would reopen the sender's in-flight window is withheld for as long as the consumer is behind. One slow consumer therefore stops the producer, without anyone being told.
 
 **The two bounds, and their units.**
 
@@ -304,11 +310,11 @@ sequenceDiagram
     S->>R: 1. Complete (LastBatchId), on the data stream
     Note over R: Ignored while a batch up to LastBatchId is missing; the sender re-sends it every 5 s
     R->>S: 2. CompleteAck, on the control stream
-    Note over R: Takes no more data, and ends its control POST after the ack
-    H-->>R: 3. Control POST answered: the hub has read the ack
+    Note over R: Takes no more data, and ends its control stream after the ack
+    H-->>R: 3. Final control segment answered: the hub has read the ack
     Note over R: Completed
     Note over S: 4. CompleteAck read: Completed, the outgoing channel closes
-    S->>H: 5. Data POST ends cleanly (EOF)
+    S->>H: 5. Final data segment: the stream ends cleanly (EOF)
     Note over H: CleanEOF: bridge.Complete(), then RetireAsync
 ```
 
@@ -316,7 +322,7 @@ Steps 3 and 4 have no order between them. A receiver whose stream fails before s
 
 ### Hub Detection
 
-The Hub detects completion via `CopyAndFlushAsync()` which returns `StreamEndReason.CleanEOF` when the sender closes its POST stream cleanly (Step 5).
+The Hub detects completion via `CopyAndFlushAsync()` which returns `StreamEndReason.CleanEOF` when the sender's final segment ends the stream (Step 5).
 
 ```csharp
 var endReason = await CopyAndFlushAsync(inputStream, receiverOutput, bufferSize, token);
@@ -326,11 +332,11 @@ if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Step 5
 }
 ```
 
-That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control POST ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a receiver in its closing phase reads as the end.
+That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control stream ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a receiver in its closing phase reads as the end.
 
-The sender's data POST ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the POST closes after. `DisposeAsync` of a completed session therefore waits for that request (at most `AbortWriteTimeout`, 2 s) before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep ("3. Hub-Driven Timeout", above).
+The sender's data stream ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the final segment follows. `DisposeAsync` of a completed session therefore waits for its answer, which the hub gives once the bridge has closed the stream (at most `AbortWriteTimeout`, 2 s), before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep ("3. Hub-Driven Timeout", above).
 
-The receiver can break that clean end too. It is `Completed` at step 3, which may come before step 4, and the hub cuts a source whose destination has gone: a receiver that closed its data GET then would take the sender's POST down before the sender has read the acknowledgement, and nobody would send it again. A receiver in its closing phase therefore reads its data GET to the end, which the hub reaches after step 5, and `DisposeAsync` of a completed receiver waits for that end (at most 2 s) before it cancels the streams.
+The receiver can break that clean end too. It is `Completed` at step 3, which may come before step 4, and the hub cuts a source whose destination has gone: a receiver that closed its data GET then would take the sender's final segment down before the sender has read the acknowledgement, and nobody would send it again. A receiver in its closing phase therefore reads its data GET to the end, which the hub reaches after step 5, and `DisposeAsync` of a completed receiver waits for that end (at most 2 s) before it cancels the streams.
 
 ### Why Not Control Plane?
 
@@ -354,7 +360,7 @@ stateDiagram-v2
     Streaming --> Completed: [sender] CompleteAck read
     Streaming --> ReceiverCompleteReceived: [receiver] Complete accepted
     Reconnecting --> ReceiverCompleteReceived: [receiver] Complete accepted before the probe answered
-    ReceiverCompleteReceived --> Completed: control POST answered, or 404 on a reopened stream
+    ReceiverCompleteReceived --> Completed: final control segment answered, or 404 on a reopened stream
     Completed --> [*]
 ```
 

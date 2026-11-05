@@ -64,12 +64,12 @@ Both planes are stated separately, because they are armed separately.
 |--------|------------|
 | Unauthenticated access to the control plane | JWT required when auth enabled |
 | Unauthenticated access to the data plane | JWT required when auth enabled; **open in dev mode** |
-| A third party streaming into or out of a transfer, or ending it (`POST /api/stream/{id}/abort`) | The caller's token subject must match a participant that registered |
+| A third party streaming into or out of a transfer, or ending it (`POST /api/stream/{id}/abort`) | The caller's token subject must match a participant that registered, checked when a write stream opens an epoch; each later segment must come from the identity that opened it |
 | A client acting under another's id on the control plane | On every control route the `clientId` of the path must be the identity the request's token attests; refused with a 404 otherwise |
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | The flow control rules, when the host registers them; without them any group reaches any other |
 | Token tampering | Signature verified against IDP |
-| Expired tokens | `exp` validated by the host on each request and when a stream opens; judged by the hub for as long as it runs (see Token Renewal) |
+| Expired tokens | `exp` validated by the host on each request, each segment of a write stream included, and when a stream opens; judged by the hub for as long as it runs (see Token Renewal) |
 
 In dev mode the data plane serves anyone who knows a transfer id, and lets them end it: there is no attested identity to
 compare, so the participant check does not run. The control routes are the same: the `clientId` of the path is compared

@@ -76,23 +76,24 @@ This split is the central design decision and shows up everywhere: the control p
 — a client's stream of server-sent events, which registers it, plus ordinary requests for `receivers`,
 `transfers`, `replies`, `presence`, the transfer heartbeats and the probe a reconnecting session makes
 before it reopens its streams — and never touches bulk bytes. Data itself moves
-over plain HTTP streaming (`StreamController`: `POST /api/stream/{id}/send`, `GET
-/api/stream/{id}/receive`), with the hub acting as a **dumb pipe** that forwards opaque chunks
+over plain HTTP (`StreamController`: a read stream is one long `GET /api/stream/{id}/receive`, a write
+stream a succession of short `POST /api/stream/{id}/send` segments, each at an offset in an epoch), with the hub acting as a **dumb pipe** that forwards opaque chunks
 without deserializing them or parsing their headers: only the clients read a `ChunkHeader`, and a
 change that has the hub read one (to see a `Complete` or an `Abort`, say) reverses this decision
 rather than extending it. Reliability, the resume point and even transfer-completion detection are
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid control-vs-stream
 race conditions. The hub judges a transfer's activity on
-its heartbeats and on the bytes its streams carry, counted and never read. Don't reintroduce a
+its heartbeats and on the bytes its streams carry, counted and never read, and a sender's data stream on its
+silence (an epoch with no segment for two presence intervals is a cut stream). Don't reintroduce a
 control-plane message for something the data plane already decides (see "Why Not Control Plane?"
-in `ResilienceArchitecture.md`). The one request of the data plane that is not a stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
+in `ResilienceArchitecture.md`). The one request of the data plane that carries no stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
 transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
 cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
 
 The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`: do not enable HTTP/2 without reading
-"Data Plane Transport: HTTP/1.1" in `TransportRArchitecture.md` (an upload is capped by the flow-control
-window, and the write side relies on a response meaning the body is over).
+"Data Plane Transport" in `TransportRArchitecture.md` (a continuous upload was capped by the flow-control
+window; segments under HTTP/2 have not been measured).
 
 The handshake itself lives in `TransferInitiator`, not in the controller: `ClientController.InitTransfer`
 drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
@@ -176,10 +177,10 @@ are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.c
 `DataSessionStateMachineTests.cs`) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
 `ConnectionBridge`/`TransferManager`.
-A transfer ends well when the sender's data POST ends cleanly: the bridge takes `OnCompleted` and
+A transfer ends well when the sender's final data segment ends its stream cleanly: the bridge takes `OnCompleted` and
 `ITransferRetirer.RetireAsync` (internal) removes the state and both bridges, telling nobody. Only that
-signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that POST,
-and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the POST.
+signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that segment's answer,
+and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the segment.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer
 through `ITransferTerminator`, and **skips `Active` bridges entirely**; `TransferCleanupService`

@@ -64,7 +64,7 @@ sequenceDiagram
     R-->>S: CompleteAck (in-stream)
     
     Note over S,R: 🔌 Streams close via EOF (pure dataplane)
-    S->>H: POST EOF
+    S->>H: final segment
     H->>R: GET EOF
 ```
 
@@ -91,9 +91,9 @@ TransportR clearly separates responsibilities between coordination and transfer:
 |---------|-----------|-------|
 | **Control plane: events** | HTTP GET, server-sent events (`/api/client/{id}/events`) | Hub → Client. Opening it registers the client and its end marks the client disconnected. Events: `registered` (first, at once), `keepalive`, `ready-to-receive`, `request-send`, `cancel-transfer` |
 | **Control plane: requests** | HTTP (`/api/client/{id}/…`) | Client → Hub: `GET receivers` (discovery), `POST transfers` (open a transfer), `POST replies/{requestId}` (answer to an event that asks), `POST presence/{connectionId}`, `POST transfers/{transferId}/heartbeat`, `POST transfers/{transferId}/ping` (the probe before a session reopens its streams) |
-| **Data Send** | HTTP POST (`/api/stream/{id}/send`, Header: `X-Connection-Type: Data`) | Sender → Hub |
+| **Data Send** | HTTP POST, one segment per request (`/api/stream/{id}/send`, Header: `X-Connection-Type: Data`) | Sender → Hub |
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`, Header: `X-Connection-Type: Data`) | Hub → Receiver |
-| **Control Send** | HTTP POST (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
+| **Control Send** | HTTP POST, one segment per request (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
 | **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |
 | **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
@@ -104,38 +104,55 @@ The events stream is HTTP/1.1 like the data streams (below); a reverse proxy mus
 rather than buffer it, and keep its idle timeout above the hub's keepalive interval (*Key Timings* in
 `ResilienceArchitecture.md`).
 
-### Data Plane Transport: HTTP/1.1
+### Data Plane Transport: HTTP/1.1, in Segments
 
-The data-plane streams are HTTP/1.1, and the client says so on every stream request (`HttpVersion.Version11`,
-`RequestVersionExact`, in `HttpStreamManager`). It is a decision, not a default left alone:
+A write stream, the sender's Data or the receiver's Control, is a succession of short `POST /api/stream/{id}/send`
+requests, not one long one. Each carries the next bytes of one opening of the stream, its **epoch**, at their
+**offset** in it (`DataPlane`). A front end that buffers a request body holds back the few bytes a stream ends on,
+an acknowledgement or a `Pong`, until the request is over; a short request is over at once. The hub reads the epoch
+and the offset from the query, never a byte of the body.
 
-- **HTTP/2 has nothing to offer this traffic.** A participant holds two long-lived streams per transfer:
-  there is nothing to multiplex and no request header worth compressing.
-- **HTTP/2 caps an upload at its flow-control window.** With Kestrel's default windows, one sender-to-hub stream
-  reached 16 MB/s at 20 ms round-trip and 4.7 MB/s at 80 ms (h2c, loopback behind a latency-injecting TCP proxy).
-  A hub host can raise `Http2.InitialStreamWindowSize`; HTTP/1.1 needs no such tuning.
-- **The client's write side relies on HTTP/1.1.** A POST's response is read as the end of its body
-  (`HttpStreamManager`). Under HTTP/2 the response is delivered while the body is still being written, so an
-  early 2xx would end the stream with a writer still running.
+- **One segment in flight.** A flush is a segment, of at most `StreamBufferSize` (512 KB). The hub puts the segments
+  of an epoch end to end into the stream a bridge copies from and answers one once the peer has it, so a peer that
+  reads slowly slows the flushes down. A segment beyond what the hub has taken is refused, nothing is reordered, and
+  the hub keeps no byte past the request. A sender's rate is bounded by one segment per round trip.
+- **The answer.** `200`: all of the segment reached the peer. `202`: the hub held it for 30 s, a fixed bound under the
+  60 s a default nginx allows a request without an answer, and the peer took only part of it; the client sends the
+  rest again, in the same epoch, and the hub skips what it relayed already. Both carry `TransportR-Relayed`, how many
+  bytes of the epoch have reached the peer. `409`: the hub holds no epoch this segment follows on from (it was
+  replaced or is over, or the segment reached an instance other than the one holding it, which is not a `421`: bridges
+  are local to an instance); the client opens a new epoch and the session reconnects as after any cut. `401` took
+  nothing: the client renews its token and sends the segment again. `404` and `410` are the transfer gone.
+- **The end.** The last segment carries `final=true` and goes after the `CompleteAck`. The hub answers it once the
+  bridge has closed the stream (*Transfer Completion* in `ResilienceArchitecture.md`).
+
+The requests are HTTP/1.1, and the client says so on every one (`HttpVersion.Version11`, `RequestVersionExact`, in
+`HttpStreamManager`). It is a decision, not a default left alone:
+
+- **HTTP/2 has nothing to offer this traffic.** A participant holds one long GET per transfer and sends its writes
+  one request at a time: there is nothing to multiplex and no request header worth compressing.
+- **HTTP/2 caps an upload at its flow-control window.** With Kestrel's default windows, one continuous
+  sender-to-hub stream reached 16 MB/s at 20 ms round-trip and 4.7 MB/s at 80 ms (h2c, loopback behind a
+  latency-injecting TCP proxy). A hub host can raise `Http2.InitialStreamWindowSize`; HTTP/1.1 needs no such tuning.
+  That was measured on a continuous upload: segments under HTTP/2 have not been.
 
 For a deployment:
 
-- Kestrel may offer HTTP/2 to other clients; TransportR clients do not ask for it.
-- Write requests carry `Expect: 100-continue`. Over HTTP/1.1 it is what lets the client see a cut on a stream it
-  has nothing to write on (see "Disconnection Detection" in `ResilienceArchitecture.md`). A reverse proxy in front
-  of the hub must accept it: one that answers `417` fails every write stream.
-- A reverse proxy must forward a request body as it arrives, not hold it in a buffer until the buffer fills or the
-  body ends. The acknowledgements and the `Complete` chunk that close a transfer are small writes that follow the
-  last batch after a pause: held back, they leave the sender to fail after its stall bound although every item was
-  delivered. YARP 2.3 with its default HTTP/1.1 upstream does this: 30 bytes written 50 ms after a large write were
-  still held 2.5 s later, where straight to the backend they arrive at once. The reference proxy in
-  `tests/TransportR.TestProxy` flushes every write through a wrapped outbound handler. The hub asks the same of a
-  proxy for the streams it writes to (`X-Accel-Buffering: no`, which nginx honours). No response can ask it for a
-  request body. Behind nginx, its documentation calls for `proxy_request_buffering off`,
-  `proxy_http_version 1.1` (the default only from nginx 1.29.7; before it, a chunked body is buffered whatever the
-  first says) and `client_max_body_size 0` (1 MB by default, then 413). Neither nginx nor any proxy but the reference
-  one has been tried.
-- A reverse proxy that speaks HTTP/2 to the hub is not covered: that hop has not been validated.
+- Kestrel may offer HTTP/2 to other clients; TransportR clients do not ask for it. A reverse proxy that speaks HTTP/2
+  to the hub is not covered: that hop has not been validated.
+- A reverse proxy has to do what the control plane asks of it already: answer short requests in full, and relay a GET
+  as it is written rather than buffer it (`X-Accel-Buffering: no`, which nginx honours; the hub sends the headers
+  before it has a byte to relay).
+- A request body is bounded by the proxy's limit: nginx's `client_max_body_size` is 1 MB by default, which a 512 KB
+  segment fits and a 2 MB one does not (413), so `StreamBufferSize` stays under it behind such a proxy.
+- A GET must carry a byte, and a request must be answered, before the proxy's idle limit: 60 s for a default nginx,
+  240 s for App Service. A sender with nothing to write sends a `Ping` every presence interval (15 s): a byte on the
+  receiver's data GET, and its `Pong` one on the sender's control GET.
+- Validated: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`) with a transfer of 200
+  items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no 408 or 499 on
+  `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a stock nginx
+  (the `nginx-default` scenario, a `proxy_pass` and nothing else) and the reference proxy in
+  `tests/TransportR.TestProxy` (YARP). No other front end has been tried.
 
 ### Resilience & Reliability
 
