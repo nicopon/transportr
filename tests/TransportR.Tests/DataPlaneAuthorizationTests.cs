@@ -42,8 +42,8 @@ public class DataPlaneAuthorizationTests
         using var client = host.GetTestClient();
 
         // A stream is only served once its counterpart has joined the bridge, so an admitted
-        // caller can only be observed as a pair. The sender posts nothing: a clean EOF ends the
-        // bridge and both requests return.
+        // caller can only be observed as a pair. The sender sends only a last, empty segment: a clean
+        // EOF ends the bridge and both requests return.
         var receiver = SendAsync(client, HttpMethod.Get, "receive", ConnectionType.Data, ReceiverSubject);
         var sender = SendAsync(client, HttpMethod.Post, "send", ConnectionType.Data, SenderSubject);
 
@@ -79,8 +79,8 @@ public class DataPlaneAuthorizationTests
         var sender = SendAsync(client, HttpMethod.Get, "receive", ConnectionType.Control, SenderSubject);
         var receiver = SendAsync(client, HttpMethod.Post, "send", ConnectionType.Control, ReceiverSubject);
 
-        // The receiver's POST ends on EOF, but nothing ends a control stream on its own — that is
-        // what it is for. Cancelling the bridge is how it stops in production too.
+        // The receiver's last segment ends its stream, but nothing ends the sender's control GET on its
+        // own — that is what it is for. Cancelling the bridge is how it stops in production too.
         await WithTimeoutAsync(receiver);
 
         host.Services.GetRequiredService<IBridgeManager>()
@@ -185,6 +185,73 @@ public class DataPlaneAuthorizationTests
         return await request;
     }
 
+    [Fact]
+    public async Task ASegmentFromAnotherIdentity_IsRefused_OnAStreamItsParticipantOpened()
+    {
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+        var epoch = Guid.NewGuid();
+
+        // Admission is judged when the stream opens; past that, a segment has to come from the same
+        // identity, or anyone who learned the epoch could write into the transfer.
+        using var opened = await SegmentAsync(client, SenderSubject, epoch, offset: 0, announcesHeartbeat: true);
+        using var foreign = await SegmentAsync(client, ReceiverSubject, epoch, offset: 0, announcesHeartbeat: false);
+
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASegmentOfAStreamTheHubDoesNotHold_IsAConflict_NotAGoneTransfer()
+    {
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+
+        using var response = await SegmentAsync(client, SenderSubject, Guid.NewGuid(), offset: 5, announcesHeartbeat: false);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASegmentOfAnOpenStream_WithoutItsOffset_IsABadRequest()
+    {
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+        var epoch = Guid.NewGuid();
+
+        using var opened = await SegmentAsync(client, SenderSubject, epoch, offset: 0, announcesHeartbeat: true);
+        using var response = await SegmentAsync(client, SenderSubject, epoch, offset: null, announcesHeartbeat: false);
+
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TheOpeningOfAStream_WithoutItsHeartbeatInterval_IsABadRequest()
+    {
+        using var host = await CreateHostWithTransferAsync();
+        using var client = host.GetTestClient();
+
+        using var response = await SegmentAsync(client, SenderSubject, Guid.NewGuid(), offset: 0, announcesHeartbeat: false);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>An empty segment of the sender's data stream, which the hub answers at once.</summary>
+    private static Task<HttpResponseMessage> SegmentAsync(HttpClient client, string subject, Guid epoch, long? offset, bool announcesHeartbeat)
+    {
+        var query = $"?{DataPlane.EpochParameter}={epoch}"
+            + (offset is { } at ? $"&{DataPlane.OffsetParameter}={at}" : "")
+            + (announcesHeartbeat ? $"&{DataPlane.HeartbeatParameter}=15000" : "");
+        var request = new HttpRequestMessage(HttpMethod.Post, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/send{query}")
+        {
+            Content = new ByteArrayContent([]),
+        };
+        request.Headers.Add("X-Connection-Type", nameof(ConnectionType.Data));
+        request.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {subject}");
+        return client.SendAsync(request).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
     private static async Task AssertBothOkAsync(Task<HttpResponseMessage> first, Task<HttpResponseMessage> second)
     {
         var both = Task.WhenAll(first, second);
@@ -226,7 +293,11 @@ public class DataPlaneAuthorizationTests
         ConnectionType type,
         string? subject)
     {
-        var request = new HttpRequestMessage(method, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/{route}");
+        // A write is one stream in one segment, the last: it opens an epoch and ends it.
+        var query = method == HttpMethod.Post
+            ? $"?{DataPlane.EpochParameter}={Guid.NewGuid()}&{DataPlane.OffsetParameter}=0&{DataPlane.FinalParameter}=true&{DataPlane.HeartbeatParameter}=15000"
+            : "";
+        var request = new HttpRequestMessage(method, $"http://localhost{WireRoutes.StreamBase}/{TransferId}/{route}{query}");
         request.Headers.Add("X-Connection-Type", type.ToString());
 
         if (subject != null)

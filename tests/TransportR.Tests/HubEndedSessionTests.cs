@@ -154,7 +154,7 @@ public class HubEndedSessionTests
         return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
     }
 
-    /// <summary>Takes the sender's data POST and keeps what it wrote; answers nothing else.</summary>
+    /// <summary>Relays the segments of the sender's data stream and keeps what they carried; answers nothing else.</summary>
     private sealed class SilentHub : HttpMessageHandler
     {
         private readonly MemoryStream _body = new();
@@ -175,9 +175,7 @@ public class HubEndedSessionTests
         {
             if (request.Method == HttpMethod.Post)
             {
-                try { await request.Content!.CopyToAsync(_body, cancellationToken); }
-                catch (OperationCanceledException) { }
-                catch (IOException) { }
+                return await Segments.RelayAsync(request, _body, cancellationToken);
             }
 
             await Task.Delay(Timeout.Infinite, cancellationToken);

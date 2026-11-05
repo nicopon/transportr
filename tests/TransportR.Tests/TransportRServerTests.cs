@@ -3,12 +3,12 @@ using TransportR.Protocol;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
@@ -509,6 +509,7 @@ public class TransportRServerTests
             hub.Bridges,
             policy: null!,
             terminator: null!,
+            new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -519,12 +520,10 @@ public class TransportRServerTests
     }
 
     [Fact]
-    public async Task Send_WhenTheServerFailsAbnormally_AbortsTheConnectionInsteadOfAnswering()
+    public async Task Send_TheLastSegmentOfAStreamThatEndsShortOfIt_IsAnsweredWithAConflict()
     {
-        var lifetime = new RecordingLifetime();
         var http = new DefaultHttpContext();
         http.Request.Headers["X-Connection-Type"] = nameof(ConnectionType.Data);
-        http.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
 
         // The identity provider, the state store and the policy are only read once a caller is
         // authenticated, and this one is not: dev mode, where the data plane is open.
@@ -536,16 +535,16 @@ public class TransportRServerTests
             new BridgeManager(NullLoggerFactory.Instance),
             policy: null!,
             terminator: null!,
+            new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
         };
 
-        await controller.Send(TransferId);
+        await controller.Send(TransferId, Guid.NewGuid(), offset: 0, final: true, heartbeatMs: 15_000).WaitAsync(Patience);
 
-        // A status line written while the client is still streaming its body is not a signal the
-        // client acts on; a connection that closes is.
-        Assert.True(lifetime.Aborted);
+        // A clean answer would tell the client its stream ended; it has to open a new one instead.
+        Assert.Equal(StatusCodes.Status409Conflict, http.Response.StatusCode);
     }
 
     private static async Task UntilAsync(Func<bool> condition)
@@ -646,13 +645,6 @@ public class TransportRServerTests
             Reached = true;
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class RecordingLifetime : IHttpRequestLifetimeFeature
-    {
-        public CancellationToken RequestAborted { get; set; }
-        public bool Aborted { get; private set; }
-        public void Abort() => Aborted = true;
     }
 
     /// <summary>

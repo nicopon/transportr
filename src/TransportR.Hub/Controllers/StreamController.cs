@@ -2,6 +2,8 @@ using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Hub.Access;
+using TransportR.Hub.Streams;
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -22,6 +24,7 @@ internal class StreamController : ControllerBase
     private readonly IBridgeManager _bridgeManager;
     private readonly AccessPolicy _policy;
     private readonly ITransferTerminator _terminator;
+    private readonly UploadEpochs _epochs;
     private readonly ILogger<StreamController> _logger;
 
     public StreamController(
@@ -32,6 +35,7 @@ internal class StreamController : ControllerBase
         IBridgeManager bridgeManager,
         AccessPolicy policy,
         ITransferTerminator terminator,
+        UploadEpochs epochs,
         ILogger<StreamController> logger)
     {
         _brokerServer = brokerServer;
@@ -41,6 +45,7 @@ internal class StreamController : ControllerBase
         _bridgeManager = bridgeManager;
         _policy = policy;
         _terminator = terminator;
+        _epochs = epochs;
         _logger = logger;
     }
 
@@ -130,9 +135,19 @@ internal class StreamController : ControllerBase
         return false;
     }
 
+    /// <summary>
+    /// Takes one segment of a write stream (see <see cref="DataPlane"/>). Answered 200 once it reached
+    /// the peer, 202 when it was held at the bound with part of it relayed, both with
+    /// <see cref="DataPlane.RelayedHeader"/>; 409 when the hub holds no epoch it follows on from.
+    /// </summary>
     [HttpPost("{transferId}/send")]
     [DisableRequestSizeLimit]
-    public async Task Send(string transferId)
+    public async Task Send(
+        string transferId,
+        [FromQuery(Name = DataPlane.EpochParameter)] Guid? epoch,
+        [FromQuery(Name = DataPlane.OffsetParameter)] long? offset,
+        [FromQuery(Name = DataPlane.FinalParameter)] bool final,
+        [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs)
     {
         if (!TryParseConnectionType(Request, transferId, out var type))
         {
@@ -140,32 +155,98 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        if (!await ValidateTransfer(transferId, type, isWrite: true))
+        var bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        if (epoch is not { } epochId || offset is not >= 0 || !_epochs.TryGet(bridgeKey, epochId, out var upload))
         {
+            upload = await OpenEpochAsync(transferId, type, bridgeKey, epoch, offset, heartbeatMs);
+            if (upload == null) return;
+        }
+        else if (AccessPolicy.SameIdentity(upload.Subject, AttestedSubject()) != AccessVerdict.Allowed)
+        {
+            // The opening was admitted; a segment only has to come from the identity that opened it.
+            _logger.LogWarning("Security: Stream access denied - a segment of {BridgeKey} does not come from the identity that opened its stream", bridgeKey);
             this.Refuse();
             return;
         }
 
         DisableKestrelLimits();
+        SegmentOutcome outcome;
         try
         {
-            await _brokerServer.HandleSendAsync(transferId, type, Request.Body, HttpContext.RequestAborted);
+            outcome = await upload.AcceptAsync(offset!.Value, Request.Body, final, HttpContext.RequestAborted);
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            // An IOException is a peer's connection failing, which the server has already reported as
-            // a warning; anything else is a fault of the hub and keeps its trace.
-            if (ex is not IOException)
-            {
-                _logger.LogError(ex, "Error in StreamController.Send (Transfer: {TransferId})", transferId);
-            }
-
-            // A status written while the client is still sending its body reaches it late or not at
-            // all over HTTP/1.1; a connection that closes is what it reliably reacts to.
-            HttpContext.Abort();
+            return;
         }
+        catch (Exception ex) when (ex is IOException or BadHttpRequestException)
+        {
+            // The client's own connection failed under its segment; it sends it again or reopens.
+            _logger.LogInformation("BRIDGE: A segment of {BridgeKey} broke off ({Message})", bridgeKey, ex.Message);
+            return;
+        }
+
+        Response.Headers[DataPlane.RelayedHeader] = outcome.Relayed.ToString(CultureInfo.InvariantCulture);
+        if (outcome.Status == SegmentStatus.Conflict)
+        {
+            _logger.LogInformation("BRIDGE: Segment of {BridgeKey} at offset {Offset} refused: its stream is over or the segment does not follow on from it", bridgeKey, offset);
+        }
+
+        Response.StatusCode = outcome.Status switch
+        {
+            SegmentStatus.Relayed => StatusCodes.Status200OK,
+            SegmentStatus.Held => StatusCodes.Status202Accepted,
+            _ => StatusCodes.Status409Conflict,
+        };
     }
+
+    /// <summary>
+    /// Opens the epoch a segment names when this hub holds none by that id: the transfer is checked
+    /// and the caller admitted here, once per epoch. Returns null once the response is written.
+    /// </summary>
+    private async Task<UploadEpoch?> OpenEpochAsync(string transferId, ConnectionType type, string bridgeKey, Guid? epoch, long? offset, int? heartbeatMs)
+    {
+        if (!await ValidateTransfer(transferId, type, isWrite: true))
+        {
+            this.Refuse();
+            return null;
+        }
+
+        if (epoch is not { } epochId || offset is not >= 0)
+        {
+            _logger.LogWarning("Segment of {BridgeKey} refused: it names no epoch or no offset", bridgeKey);
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return null;
+        }
+
+        // A 404 would read as the transfer gone: the client reopens on a 409 instead.
+        if (offset != 0)
+        {
+            _logger.LogInformation("BRIDGE: Segment of {BridgeKey} at offset {Offset} refused: this hub holds no stream {Epoch}", bridgeKey, offset, epochId);
+            Response.StatusCode = StatusCodes.Status409Conflict;
+            return null;
+        }
+
+        if (heartbeatMs is not > 0)
+        {
+            _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval", bridgeKey);
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return null;
+        }
+
+        return _epochs.Open(
+            bridgeKey,
+            epochId,
+            AttestedSubject(),
+            TimeSpan.FromMilliseconds(heartbeatMs.Value),
+            (input, token) => _brokerServer.HandleSendAsync(transferId, type, input, token));
+    }
+
+    // Dev mode attests nothing, and two absent subjects are the same identity.
+    private string? AttestedSubject() =>
+        User?.Identity?.IsAuthenticated == true
+            ? _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null)?.Subject
+            : null;
 
     /// <summary>
     /// Ends the transfer at a participant's request, the way a host terminating a run does: state and

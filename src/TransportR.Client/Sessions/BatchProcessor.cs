@@ -417,7 +417,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
             lastBatchIdFromSender, nextExpected, _transferId);
 
         // The session enters its closing phase before the acknowledgement can be written: it reads the
-        // end of the control POST that carries it as the hub having read it only in that phase.
+        // end of the control stream that carries it as the hub having read it only in that phase.
         if (OnCompleteReceived != null) await OnCompleteReceived.Invoke();
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }

@@ -7,17 +7,17 @@ using TransportR.Tests.TestHelpers;
 namespace TransportR.Tests;
 
 /// <summary>
-/// CompleteAsync returns on the acknowledgement. The clean end of the data POST, which is how the hub
-/// learns that the transfer is over and forgets it, comes after, so a sender released straight away
-/// must not cancel the request before the hub has read it to its end. A receiver completes earlier
-/// still, when the hub has read its acknowledgement; released straight away, it must not close its
-/// data GET before the hub ends it, which would cut the sender's POST before the sender has read the
-/// acknowledgement.
+/// CompleteAsync returns on the acknowledgement. The clean end of the data stream, its last segment,
+/// which is how the hub learns that the transfer is over and forgets it, comes after, so a sender
+/// released straight away must not cancel that segment before the hub has answered it. A receiver
+/// completes earlier still, when the hub has read its acknowledgement; released straight away, it must
+/// not close its data GET before the hub ends it, which would cut the sender's data stream before the
+/// sender has read the acknowledgement.
 /// </summary>
 public class CompletedSessionReleaseTests
 {
     [Fact]
-    public async Task DisposeAsync_AfterCompleteAsync_WaitsForTheDataPostToEnd()
+    public async Task DisposeAsync_AfterCompleteAsync_WaitsForTheDataStreamToEnd()
     {
         var hub = new AcknowledgingHub();
         var session = new DataSession<string>(
@@ -28,14 +28,14 @@ public class CompletedSessionReleaseTests
 
         var release = session.DisposeAsync().AsTask();
 
-        // The hub answers the POST only after it has read the body, and it has not answered yet: a
-        // release that cancels the streams instead of waiting for that is over by now.
+        // The hub answers the last segment only once it has closed the stream, and it has not answered
+        // yet: a release that cancels the streams instead of waiting for that is over by now.
         await Task.Delay(300);
         Assert.False(release.IsCompleted, "the session was released before the hub had answered the end of the data stream");
 
-        hub.AnswerThePost();
+        hub.AnswerTheLastSegment();
         await release.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.True(hub.PostBodyEnded, "the data POST was cancelled before its body ended");
+        Assert.True(hub.LastSegmentSent, "the data stream was cancelled before its last segment went out");
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public class CompletedSessionReleaseTests
             new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
         await session.StartReceiverAsync();
 
-        // The enumeration ends on the outcome, which is the hub answering the control POST.
+        // The enumeration ends on the outcome, which is the hub answering the control stream's last segment.
         await DrainAsync(session).WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(SessionState.Completed, session.State);
 
@@ -64,8 +64,8 @@ public class CompletedSessionReleaseTests
     [Fact]
     public async Task DisposeAsync_OfACompletedReceiver_GivesUpOnADataGetTheHubNeverEnds()
     {
-        // The sender died after reading its acknowledgement: its POST never ends cleanly, and the hub
-        // never ends the receiver's GET.
+        // The sender died after reading its acknowledgement: its data stream never ends cleanly, and the
+        // hub never ends the receiver's GET.
         var hub = new CompletingHub();
         var session = new DataSession<string>(
             new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
@@ -84,7 +84,7 @@ public class CompletedSessionReleaseTests
     /// <summary>
     /// The hub as a receiver meets it at the end of a transfer: the data GET carries a Complete for a
     /// transfer of no batch, then stays open until the test ends it, as the hub does once the sender's
-    /// data POST has ended; the control POST is read to its end and answered.
+    /// data stream has ended; the segments of the control stream are relayed.
     /// </summary>
     private sealed class CompletingHub : HttpMessageHandler
     {
@@ -99,8 +99,7 @@ public class CompletedSessionReleaseTests
         {
             if (request.Method == HttpMethod.Post)
             {
-                await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
-                return new HttpResponseMessage(HttpStatusCode.OK);
+                return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
             }
 
             var transferId = Guid.Parse(request.RequestUri!.Segments[^2].TrimEnd('/'));
@@ -154,25 +153,29 @@ public class CompletedSessionReleaseTests
     }
 
     /// <summary>
-    /// Reads the sender's data POST to its end and answers it when told to, which is what the hub does
-    /// with the end of a stream; and acknowledges the completion on the control GET.
+    /// Relays the segments of the sender's data stream and answers the last one when told to, which is
+    /// what the hub does with the end of a stream; and acknowledges the completion on the control GET.
     /// </summary>
     private sealed class AcknowledgingHub : HttpMessageHandler
     {
         private readonly TaskCompletionSource _answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public volatile bool PostBodyEnded;
+        public volatile bool LastSegmentSent;
 
-        public void AnswerThePost() => _answer.TrySetResult();
+        public void AnswerTheLastSegment() => _answer.TrySetResult();
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.Method == HttpMethod.Post)
             {
-                await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
-                PostBodyEnded = true;
+                if (!Segments.IsFinal(request))
+                {
+                    return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
+                }
+
+                LastSegmentSent = true;
                 await _answer.Task.WaitAsync(cancellationToken);
-                return new HttpResponseMessage(HttpStatusCode.OK);
+                return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
             }
 
             var transferId = Guid.Parse(request.RequestUri!.Segments[^2].TrimEnd('/'));

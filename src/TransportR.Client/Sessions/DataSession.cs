@@ -347,7 +347,7 @@ internal class DataSession<T> : IDataSession<T>
                 // Allow WriteLoop to exit
                 _batchProcessor.CompleteSenderChannel();
 
-                // The hub learns the transfer is over from the end of the data POST, which the
+                // The hub learns the transfer is over from the end of the data stream, which the
                 // completed channel above lets the write loop produce.
                 return;
             }
@@ -513,13 +513,13 @@ internal class DataSession<T> : IDataSession<T>
 
         // Best-effort: give the peer a reason to fail on instead of a silence it can only read as a
         // stall. Bounded because a stream stuck on backpressure must not hang disposal, and
-        // DisposeAsync never throws. Waits on the write direction's own HTTP request, not on the
-        // local flush: the server does not see clean EOF until it has read the request to
-        // completion, and cancelling the streams before that turns the clean close into a rupture
-        // the peer never receives Abort from.
+        // DisposeAsync never throws. Waits on the write direction's last segment, which the hub
+        // answers once it has relayed what came before and closed the stream: cancelling the
+        // streams sooner can leave the Abort unsent, and turns the clean close into a rupture the
+        // hub waits out.
         //
         // A session that completed waits too. CompleteAsync returns on the acknowledgement, and the
-        // clean end of the data POST, which is how the hub learns the transfer is over and forgets
+        // clean end of the data stream, which is how the hub learns the transfer is over and forgets
         // it, only starts then; a release straight after loses that race most of the time on a
         // loaded machine.
         if (_abortQueued || _fsm.CurrentState == SessionState.Completed)
@@ -528,8 +528,8 @@ internal class DataSession<T> : IDataSession<T>
         }
 
         // A receiver completes when the hub has read its acknowledgement, which the sender may not have
-        // read yet. The hub ends the receiver's data GET once the sender's data POST has ended cleanly,
-        // and a GET cut before that takes the POST down with it: the sender then loses the
+        // read yet. The hub ends the receiver's data GET once the sender's data stream has ended cleanly,
+        // and a GET cut before that takes that stream down with it: the sender then loses the
         // acknowledgement with its streams, and nobody sends it again.
         if (!IsSender && _fsm.CurrentState == SessionState.Completed && _httpStreamManager.ReadTask is { } readTask)
         {
@@ -555,7 +555,7 @@ internal class DataSession<T> : IDataSession<T>
     }
 
     /// <summary>
-    /// Waits, bounded, for the write direction's HTTP request to end, and falls back on the hub's abort
+    /// Waits, bounded, for the write direction's last segment to be answered, and falls back on the hub's abort
     /// route when an Abort is queued and that end does not confirm it. Runs once: the read loop calls it
     /// before failing on a batch it cannot decode, and the release that follows has nothing to add.
     /// </summary>
@@ -588,9 +588,9 @@ internal class DataSession<T> : IDataSession<T>
 
     /// <summary>
     /// Whether the write direction's end says the Abort is no longer this side's to deliver: the
-    /// request completed, which means the hub read the body to its end, or the hub refused the stream
-    /// for good, which means it has no such transfer to tell. A cut or a cancelled request says
-    /// neither.
+    /// last segment was answered, which means the hub relayed the stream to its end, or the hub
+    /// refused the stream for good, which means it has no such transfer to tell. A cut or a
+    /// cancelled segment says neither.
     /// </summary>
     private static bool AbortConfirmed(HttpStreamManager.StreamResult written) =>
         written.Outcome is StreamOutcome.Ended or StreamOutcome.Gone or StreamOutcome.Fatal;
@@ -683,9 +683,9 @@ internal class DataSession<T> : IDataSession<T>
         
         if (activeTasks.Count > 0)
         {
-            // A receiver's closing phase ends with its control POST, answered once the hub has read the
+            // A receiver's closing phase ends with its control stream, answered once the hub has read the
             // acknowledgement. Its data GET is read on until the hub ends it, after the sender's data
-            // POST, so the attempt as a whole ends a step later than the transfer does.
+            // stream, so the attempt as a whole ends a step later than the transfer does.
             if (receiverTask != null && _httpStreamManager.WriteTask is { } writeTask
                 && await Task.WhenAny(receiverTask, writeTask) == writeTask
                 && writeTask.Result.Outcome == StreamOutcome.Ended
@@ -714,7 +714,7 @@ internal class DataSession<T> : IDataSession<T>
             }
             else if (result.Outcome == StreamOutcome.Gone && IsInCompletingPhase)
             {
-                // The hub forgets a transfer when the sender's data POST ends cleanly, which comes after
+                // The hub forgets a transfer when the sender's data stream ends cleanly, which comes after
                 // the acknowledgement: a stream reopened in the closing phase that finds the transfer
                 // gone has found it finished.
                 _config.Logger.LogInformation("Transfer Gone (404) received while in completing phase. Transfer confirmed Completed.");
@@ -799,7 +799,7 @@ internal class DataSession<T> : IDataSession<T>
     /// </summary>
     private async Task ProcessSendChannelAsync(Stream outputStream, Guid transferGuid, CancellationToken token)
     {
-        while (await _batchProcessor.OutgoingMessages.WaitToReadAsync(token))
+        while (await WaitForOutgoingAsync(outputStream, transferGuid, token))
         {
             while (_batchProcessor.OutgoingMessages.TryRead(out var message))
             {
@@ -824,24 +824,54 @@ internal class DataSession<T> : IDataSession<T>
                         // Ends this side's outgoing stream cleanly, the same way CompleteAck does
                         // below: the hub sees a normal EOF and releases the bridge through its
                         // ordinary path instead of waiting on a reconnection that will never come.
-                        await outputStream.FlushAsync(token);
+                        // Not flushed here: the stream's last segment carries it, with the end.
                         return;
                     }
 
-                    // Ending the control POST is the receiver's step in the domino, and it belongs
+                    // Ending the control stream is the receiver's step in the domino, and it belongs
                     // here rather than at the moment Complete was accepted: EOF after the
                     // acknowledgement means the hub read it, EOF before it was ever written means
                     // the sender waits forever. A stream that fails instead is reopened, and the
-                    // acknowledgement goes out again on the new one.
+                    // acknowledgement goes out again on the new one. It is not flushed apart from the
+                    // end: a sender that has it closes its control stream, and an end sent after that
+                    // finds no stream left to end cleanly.
                     if (!IsSender && ctrlMsg.Type == ChunkType.CompleteAck)
                     {
-                        await outputStream.FlushAsync(token);
                         return;
                     }
                 }
             }
             
             await outputStream.FlushAsync(token);
+        }
+    }
+
+    /// <summary>
+    /// Waits for something to send. A sender that has had nothing to send for a heartbeat interval
+    /// writes a Ping, and the receiver's Pong comes back on the control stream: the hub takes a write
+    /// stream it has had no segment from for two intervals as cut, and a front end cuts a response
+    /// that carries no byte for long enough.
+    /// </summary>
+    private async Task<bool> WaitForOutgoingAsync(Stream outputStream, Guid transferGuid, CancellationToken token)
+    {
+        if (!IsSender)
+        {
+            return await _batchProcessor.OutgoingMessages.WaitToReadAsync(token);
+        }
+
+        while (true)
+        {
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
+            idle.CancelAfter(_config.Options.PresenceHeartbeatInterval);
+            try
+            {
+                return await _batchProcessor.OutgoingMessages.WaitToReadAsync(idle.Token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, token);
+                await outputStream.FlushAsync(token);
+            }
         }
     }
 
@@ -862,8 +892,8 @@ internal class DataSession<T> : IDataSession<T>
                 {
                     // The consumer has everything, and what still comes is the sender asking again for
                     // an acknowledgement already queued. The stream is read to its end rather than
-                    // closed: the hub ends it once the sender's data POST has ended cleanly, and closed
-                    // sooner it takes that POST down with it, possibly before the sender has read the
+                    // closed: the hub ends it once the sender's data stream has ended cleanly, and closed
+                    // sooner it takes that stream down with it, possibly before the sender has read the
                     // acknowledgement.
                     _batchProcessor.CompleteReceiver();
                     await inputStream.CopyToAsync(Stream.Null, token);

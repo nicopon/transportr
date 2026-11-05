@@ -150,8 +150,7 @@ public class HttpStreamManagerTests
         {
             lock (_requests) _requests.Add((request.Version, request.VersionPolicy));
 
-            // A write request has to be consumed, as the server would, or its body callback never runs.
-            if (request.Content != null) await request.Content.CopyToAsync(Stream.Null, cancellationToken);
+            if (request.Method == HttpMethod.Post) return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Array.Empty<byte>()) };
         }
     }
@@ -165,11 +164,17 @@ public class HttpStreamManagerTests
             _statusCode = code;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            // A segment the hub takes is answered with what it relayed; a refusal is answered as is.
+            if (request.Method == HttpMethod.Post && _statusCode == HttpStatusCode.OK)
+            {
+                return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
+            }
+
             var response = HubResponse.With(_statusCode);
             response.Content = new ByteArrayContent(Array.Empty<byte>());
-            return Task.FromResult(response);
+            return response;
         }
     }
 

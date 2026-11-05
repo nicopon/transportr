@@ -104,7 +104,7 @@ internal class TransportRServer : ITransportRServer
                     {
                         _logger.LogInformation("BRIDGE: Data stream for {TransferId} finished cleanly. Signaling Bridge Completion (Step 5).", transferId);
 
-                        // A clean end of the sender's data POST comes after the CompleteAck, or after an
+                        // A clean end of the sender's data stream comes after the CompleteAck, or after an
                         // Abort that was written, so both ends are done with the transfer.
                         if (bridge.Complete())
                         {

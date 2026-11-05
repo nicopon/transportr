@@ -9,6 +9,7 @@ using TransportR.Hub.Access;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Configuration;
 using TransportR.Hub.Services;
+using TransportR.Hub.Streams;
 using TransportR.Identity;
 using TransportR.Interfaces;
 using TransportR.Protocol;
@@ -134,6 +135,7 @@ public static class TransportRHubExtensions
 
         // Register Broker Server
         services.AddSingleton<ITransportRServer, TransportRServer>();
+        services.AddSingleton<UploadEpochs>();
 
         // TransportRServer requires an IHubProgressMonitor; TryAdd so a host that registers its
         // own before Build() keeps seeing it used, whichever order that registration happens in.

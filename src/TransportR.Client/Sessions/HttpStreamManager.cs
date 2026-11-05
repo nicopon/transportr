@@ -58,8 +58,9 @@ internal class HttpStreamManager : IAsyncDisposable
     /// The current attempt's task for whichever direction this side writes on (Data for a sender,
     /// Control for a receiver). Unlike <see cref="SenderTask"/>/<see cref="ReceiverTask"/>, which
     /// only resolve once <b>both</b> directions finish (or one fails), this resolves as soon as the
-    /// write side's own HTTP request completes - which a caller waiting to know a specific message
-    /// actually reached the server needs, since the read side has no reason to end on its own.
+    /// write side's last segment is answered, which the hub does once it has closed the stream - what
+    /// a caller waiting to know a specific message actually reached the server needs, since the read
+    /// side has no reason to end on its own.
     /// </summary>
     public Task<StreamResult>? WriteTask { get; private set; }
 
@@ -119,16 +120,16 @@ internal class HttpStreamManager : IAsyncDisposable
          if (isSender)
          {
              // Sender writes Data, reads Control
-             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, isRead: false, writeAction, readAction, token);
-             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, isRead: true, writeAction, readAction, token);
+             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, writeAction, readAction, token);
+             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, writeAction, readAction, token);
              WriteTask = tData;
              ReadTask = tControl;
          }
          else
          {
              // Receiver reads Data, writes Control
-             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, isRead: true, writeAction, readAction, token);
-             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, isRead: false, writeAction, readAction, token);
+             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, writeAction, readAction, token);
+             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, writeAction, readAction, token);
              WriteTask = tControl;
              ReadTask = tData;
          }
@@ -168,22 +169,64 @@ internal class HttpStreamManager : IAsyncDisposable
         _streamCts.Dispose();
     }
 
-    private async Task<StreamResult> RunHttpStreamAsync(
-        ConnectionType type, 
-        bool isWrite, 
-        bool isRead,
-        Func<Stream, CancellationToken, Task> writeAction, 
+    private Task<StreamResult> RunHttpStreamAsync(
+        ConnectionType type,
+        bool isWrite,
+        Func<Stream, CancellationToken, Task> writeAction,
         Func<Stream, CancellationToken, Task> readAction,
-        CancellationToken token)
+        CancellationToken token) =>
+        isWrite ? RunWriteStreamAsync(type, writeAction, token) : RunReadStreamAsync(type, readAction, token);
+
+    /// <summary>
+    /// Runs the write side as one epoch of segments, ended by a last one once
+    /// <paramref name="writeAction"/> returns. A segment the hub refuses ends the attempt with what
+    /// the refusal means; the epoch's own resends stay inside <see cref="SegmentedWriteStream"/>.
+    /// </summary>
+    private async Task<StreamResult> RunWriteStreamAsync(ConnectionType type, Func<Stream, CancellationToken, Task> writeAction, CancellationToken token)
+    {
+        var stream = new SegmentedWriteStream(
+            _transport,
+            _config.Logger,
+            query => NewRequest(HttpMethod.Post, $"{_dataUrl}/{_transferId}/send?{query}", type),
+            _config.Options.StreamBufferSize,
+            _config.Options.PresenceHeartbeatInterval);
+        try
+        {
+            await writeAction(stream, token);
+            await stream.CompleteAsync(token);
+            return new StreamResult(StreamOutcome.Ended);
+        }
+        catch (OperationCanceledException)
+        {
+            _config.Logger.LogDebug("WriteLoop closed ({Type}) - Transfer={TransferId}", type, _transferId);
+            return new StreamResult(StreamOutcome.Cancelled);
+        }
+        catch (StreamRefusedException ex)
+        {
+            return new StreamResult(ex.Outcome, ex.Message);
+        }
+        catch (WireProtocolViolationException ex)
+        {
+            _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
+            return new StreamResult(StreamOutcome.Fatal, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, ex.Message);
+            return new StreamResult(StreamOutcome.Retryable, ex.Message);
+        }
+    }
+
+    private async Task<StreamResult> RunReadStreamAsync(ConnectionType type, Func<Stream, CancellationToken, Task> readAction, CancellationToken token)
     {
         bool forceRefresh = false;
-        
+
         while (!token.IsCancellationRequested)
         {
             try
             {
-                var request = CreateStreamRequest(type, isWrite, writeAction, token);
-                
+                using var request = NewRequest(HttpMethod.Get, $"{_dataUrl}/{_transferId}/receive", type);
+
                 // Add Authorization Header
                 var tokenStr = await _transport.GetAccessTokenAsync(forceRefresh);
                 if (!string.IsNullOrEmpty(tokenStr))
@@ -218,14 +261,8 @@ internal class HttpStreamManager : IAsyncDisposable
 
                 response.EnsureSuccessStatusCode();
 
-                // 3. Success Execution
-                if (isRead)
-                {
-                    using var stream = await response.Content.ReadAsStreamAsync(token);
-                    await readAction(stream, token);
-                }
-                
-                // If Write, the request.Content callback has finished
+                using var stream = await response.Content.ReadAsStreamAsync(token);
+                await readAction(stream, token);
                 return new StreamResult(StreamOutcome.Ended);
             }
             catch (OperationCanceledException)
@@ -304,56 +341,17 @@ internal class HttpStreamManager : IAsyncDisposable
         }
     }
 
-    private HttpRequestMessage CreateStreamRequest(ConnectionType type, bool isWrite, Func<Stream, CancellationToken, Task> writeAction, CancellationToken token)
+    private HttpRequestMessage NewRequest(HttpMethod method, string url, ConnectionType type)
     {
-        string method = isWrite ? "send" : "receive";
-        string url = $"{_dataUrl}/{_transferId}/{method}";
-        
-        var request = new HttpRequestMessage(isWrite ? HttpMethod.Post : HttpMethod.Get, url);
+        var request = new HttpRequestMessage(method, url);
         request.Headers.Add("X-Connection-Type", type.ToString());
 
-        // Stated rather than inherited: the write side below reads a response as the end of the
-        // request body, which only HTTP/1.1 guarantees, and HTTP/2 caps an upload at its flow-control
-        // window. See "Data plane transport" in TransportRArchitecture.md.
+        // Stated rather than inherited, on the segments as on the read side: the data plane runs on
+        // HTTP/1.1, see "Data Plane Transport: HTTP/1.1" in TransportRArchitecture.md.
         request.Version = HttpVersion.Version11;
         request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
 
         AddAffinity(request);
-
-        if (isWrite)
-        {
-            // Over HTTP/1.1 nothing reads the socket while a request body is being sent, so a
-            // connection the hub closes is only noticed by the next write - which a sender with a
-            // full window, or a receiver with nothing to acknowledge, may not make for minutes. A
-            // 404 answered before the body is read is lost the same way: the request stays
-            // pending. Expect makes the handler read the response alongside the body, and sends
-            // the request headers at once, so the hub also learns of a stream whose body is still
-            // empty.
-            request.Headers.ExpectContinue = true;
-
-            request.Content = new PushStreamContent(async (stream, _, _) =>
-            {
-                // Flushed but never disposed, and the stream underneath is never closed: HttpClient
-                // owns the request body and writes its terminating chunk after this returns.
-                // Closing it here made every POST that finished cleanly come back as a failed
-                // request, which is why a receiver could never end its control POST on purpose.
-                var bufferedStream = new BufferedStream(stream, bufferSize: _config.Options.StreamBufferSize);
-                try
-                {
-                    await writeAction(bufferedStream, token);
-                    await bufferedStream.FlushAsync(token);
-                }
-                catch (Exception ex)
-                {
-                    if (token.IsCancellationRequested)
-                        _config.Logger.LogDebug("WriteLoop closed ({Type}) - Transfer={TransferId}", type, _transferId);
-                    else
-                        _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, ex.Message);
-                    throw;
-                }
-            });
-        }
-        
         return request;
     }
 

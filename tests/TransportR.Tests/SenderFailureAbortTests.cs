@@ -82,8 +82,8 @@ public class SenderFailureAbortTests
     }
 
     /// <summary>
-    /// Answers the sender's data POST by reading its body to the end, which is what the hub does,
-    /// and never answers the control GET, which keeps the session loop waiting on its streams.
+    /// Relays every segment of the sender's data stream, which is what the hub does while the receiver
+    /// reads, and never answers the control GET, which keeps the session loop waiting on its streams.
     /// </summary>
     private sealed class CapturedDataStream : HttpMessageHandler
     {
@@ -93,7 +93,7 @@ public class SenderFailureAbortTests
 
         public CapturedDataStream(TimeSpan writeDelay = default) => _writeDelay = writeDelay;
 
-        /// <summary>Completes when the body has been read to its end, that is on a clean close.</summary>
+        /// <summary>Completes on the last segment, that is on a clean close.</summary>
         public Task Ended => _ended.Task;
 
         public async Task<List<(ChunkType Type, int BatchId)>> ChunksAsync()
@@ -120,9 +120,9 @@ public class SenderFailureAbortTests
                 throw new OperationCanceledException(cancellationToken);
             }
 
-            await request.Content!.CopyToAsync(new SlowSink(_body, _writeDelay, cancellationToken), cancellationToken);
-            _ended.TrySetResult();
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            var response = await Segments.RelayAsync(request, new SlowSink(_body, _writeDelay, cancellationToken), cancellationToken);
+            if (Segments.IsFinal(request)) _ended.TrySetResult();
+            return response;
         }
     }
 

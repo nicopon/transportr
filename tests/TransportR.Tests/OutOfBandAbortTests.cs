@@ -21,7 +21,7 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_WhenTheAbortStaysBehindTheData_AsksTheHubToEndTheTransfer()
     {
-        var hub = new Hub(dataPostConfirms: false);
+        var hub = new Hub(dataSegmentsConfirm: false);
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
 
@@ -36,7 +36,7 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_WhenTheAbortReachedTheWire_DoesNotAskTheHub()
     {
-        var hub = new Hub(dataPostConfirms: true);
+        var hub = new Hub(dataSegmentsConfirm: true);
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
 
@@ -50,7 +50,7 @@ public class OutOfBandAbortTests
     [InlineData(HttpStatusCode.InternalServerError)]
     public async Task DisposeAsync_WhenTheHubRefusesTheRequest_StillReleasesTheSession(HttpStatusCode answer)
     {
-        var hub = new Hub(dataPostConfirms: false) { AbortAnswer = answer };
+        var hub = new Hub(dataSegmentsConfirm: false) { AbortAnswer = answer };
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
 
@@ -62,7 +62,7 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_WhenTheHubNeverAnswersTheRequest_IsStillBounded()
     {
-        var hub = new Hub(dataPostConfirms: false) { AbortAnswer = null };
+        var hub = new Hub(dataSegmentsConfirm: false) { AbortAnswer = null };
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
 
@@ -77,7 +77,7 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_WhenTheDataStreamWasCutBeforeTheAbortWasWritten_AsksTheHub()
     {
-        var hub = new Hub(dataPostConfirms: false) { DataPostFails = true };
+        var hub = new Hub(dataSegmentsConfirm: false) { DataSegmentsFail = true };
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
 
@@ -89,12 +89,12 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_WhenTheHubSaidItHasNoSuchTransfer_DoesNotAskIt()
     {
-        // The data POST is answered 404 after the sender gave up and queued its Abort: the hub refused
-        // the stream, so it has no transfer left to end.
-        var hub = new Hub(dataPostConfirms: false) { HoldTheDataPostForAnAnswer = true };
+        // The data stream's segment is answered 404 after the sender gave up and queued its Abort: the
+        // hub refused the stream, so it has no transfer left to end.
+        var hub = new Hub(dataSegmentsConfirm: false) { HoldTheDataSegmentsForAnAnswer = true };
         var session = await StartedSenderAsync(hub);
         await FailOnTheWindowAsync(session);
-        hub.AnswerTheDataPost(HttpStatusCode.NotFound);
+        hub.AnswerTheDataSegments(HttpStatusCode.NotFound);
         await Task.Delay(300);
 
         await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
@@ -105,9 +105,9 @@ public class OutOfBandAbortTests
     [Fact]
     public async Task DisposeAsync_AfterACompletedTransfer_NeverAsksTheHub()
     {
-        // The data POST of a completed session is waited for as well, and may take as long as the hub
-        // likes to answer; that is no reason to abort a transfer that succeeded.
-        var hub = new Hub(dataPostConfirms: false) { AcknowledgeComplete = true };
+        // The last segment of a completed session is waited for as well, and may take as long as the
+        // hub likes to answer; that is no reason to abort a transfer that succeeded.
+        var hub = new Hub(dataSegmentsConfirm: false) { AcknowledgeComplete = true };
         var session = await StartedSenderAsync(hub, o => o.MaxInFlightBatches = null);
 
         await session.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
@@ -136,11 +136,11 @@ public class OutOfBandAbortTests
     }
 
     /// <summary>
-    /// The hub as a sender meets it. Its data POST either reads the body to the end, as a hub does
-    /// when the stream is not full, or reads nothing and never answers, which is a stream whose pipe
-    /// is full: what is written stays queued. The control GET is never answered.
+    /// The hub as a sender meets it. The segments of its data stream are either relayed, as a hub does
+    /// when the stream is not full, or never answered, which is a stream whose pipe is full: what is
+    /// written stays queued. The control GET is never answered.
     /// </summary>
-    private sealed class Hub(bool dataPostConfirms) : HttpMessageHandler
+    private sealed class Hub(bool dataSegmentsConfirm) : HttpMessageHandler
     {
         private readonly List<(HttpMethod Method, string Path, Version Version)> _abortRequests = [];
 
@@ -149,15 +149,15 @@ public class OutOfBandAbortTests
 
         public bool AcknowledgeComplete { get; init; }
 
-        /// <summary>The data POST fails the way a cut connection does.</summary>
-        public bool DataPostFails { get; init; }
+        /// <summary>Every segment of the data stream fails the way a cut connection does.</summary>
+        public bool DataSegmentsFail { get; init; }
 
-        /// <summary>The data POST waits for <see cref="AnswerTheDataPost"/> instead of being left pending for good.</summary>
-        public bool HoldTheDataPostForAnAnswer { get; init; }
+        /// <summary>The data stream's segments wait for <see cref="AnswerTheDataSegments"/> instead of being left pending for good.</summary>
+        public bool HoldTheDataSegmentsForAnAnswer { get; init; }
 
-        private readonly TaskCompletionSource<HttpStatusCode> _dataPostAnswer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<HttpStatusCode> _dataSegmentsAnswer = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public void AnswerTheDataPost(HttpStatusCode status) => _dataPostAnswer.TrySetResult(status);
+        public void AnswerTheDataSegments(HttpStatusCode status) => _dataSegmentsAnswer.TrySetResult(status);
 
         public IReadOnlyList<(HttpMethod Method, string Path, Version Version)> AbortRequests
         {
@@ -183,26 +183,21 @@ public class OutOfBandAbortTests
 
             if (request.Method == HttpMethod.Post)
             {
-                if (DataPostFails)
+                if (DataSegmentsFail)
                 {
                     throw new HttpRequestException("connection reset");
                 }
 
-                if (HoldTheDataPostForAnAnswer)
+                if (HoldTheDataSegmentsForAnAnswer)
                 {
-                    return HubResponse.With(await _dataPostAnswer.Task.WaitAsync(cancellationToken));
+                    return HubResponse.With(await _dataSegmentsAnswer.Task.WaitAsync(cancellationToken));
                 }
 
-                if (dataPostConfirms)
+                // A completed session's segments are relayed, and the last one, which ends the stream,
+                // goes unanswered.
+                if (dataSegmentsConfirm || (AcknowledgeComplete && !Segments.IsFinal(request)))
                 {
-                    await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
-                    return new HttpResponseMessage(HttpStatusCode.OK);
-                }
-
-                // A completed session's body is read to its end and the POST then goes unanswered.
-                if (AcknowledgeComplete)
-                {
-                    await request.Content!.CopyToAsync(Stream.Null, cancellationToken);
+                    return await Segments.RelayAsync(request, Stream.Null, cancellationToken);
                 }
 
                 await Task.Delay(Timeout.Infinite, cancellationToken);

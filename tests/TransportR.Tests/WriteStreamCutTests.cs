@@ -9,16 +9,12 @@ using TransportR.Tests.TestHelpers;
 namespace TransportR.Tests;
 
 /// <summary>
-/// A write stream that the hub cuts, or refuses, while its client has nothing to write has to fail
-/// the attempt at once. A client with a full send window, or a receiver with nothing to
-/// acknowledge, only learns of a cut on its next write otherwise, and that write can be minutes
-/// away.
+/// A segment of a write stream that the hub cuts, or refuses, fails the attempt at once: a client
+/// waiting on the answer to its segment learns of the cut from that answer, and reopens.
 /// </summary>
 /// <remarks>
-/// These run against a real socket. What is under test is the order in which
-/// <see cref="System.Net.Http.SocketsHttpHandler"/> sends a request body and reads the response,
-/// which an in-memory handler does not reproduce: a handler that throws from SendAsync is already
-/// green on the code before the fix.
+/// These run against a real socket: a cut is a connection that closes under a request in flight,
+/// which an in-memory handler does not reproduce.
 /// </remarks>
 public class WriteStreamCutTests
 {
@@ -27,7 +23,7 @@ public class WriteStreamCutTests
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(3);
 
     [Fact]
-    public async Task SenderDataStream_CutWhileIdle_FailsTheAttemptAtOnce()
+    public async Task SenderDataStream_CutUnderItsSegment_FailsTheAttemptAtOnce()
     {
         await using var hub = await LoopbackHub.StartAsync(app =>
         {
@@ -59,41 +55,6 @@ public class WriteStreamCutTests
             sessionToken: CancellationToken.None);
 
         var result = await manager.SenderTask!.WaitAsync(Bound);
-
-        Assert.Equal(StreamOutcome.Retryable, result.Outcome);
-    }
-
-    [Fact]
-    public async Task ReceiverControlStream_CutWhileNothingIsWritten_FailsTheAttemptAtOnce()
-    {
-        var arrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var hub = await LoopbackHub.StartAsync(app =>
-        {
-            app.MapPost("/data/{id}/send", async (HttpContext ctx) =>
-            {
-                arrived.TrySetResult();
-                BeginReading(ctx);
-                await Task.Delay(200);
-                ctx.Abort();
-            });
-            app.MapGet("/data/{id}/receive", ParkedResponseAsync);
-        });
-
-        var context = new StubSessionContext(hub.CreateClient());
-        var transferId = Guid.NewGuid().ToString();
-        await using var manager = new HttpStreamManager(context, context, transferId, hub.DataUrl, affinity: null);
-
-        manager.StartStreams(
-            isSender: false,
-            writeAction: (_, token) => Task.Delay(Timeout.Infinite, token),
-            readAction: ReadUntilCancelledAsync,
-            sessionToken: CancellationToken.None);
-
-        // A POST whose body is still empty must reach the hub all the same: until it does, the hub
-        // has no source to release when the peer goes, and nothing to cut.
-        await arrived.Task.WaitAsync(Bound);
-
-        var result = await manager.ReceiverTask!.WaitAsync(Bound);
 
         Assert.Equal(StreamOutcome.Retryable, result.Outcome);
     }
@@ -151,15 +112,6 @@ public class WriteStreamCutTests
 
         Assert.Equal(-1, await waiting.WaitAsync(TimeSpan.FromSeconds(2)));
     }
-
-    /// <summary>Reads without waiting for the result, which is what lets a client's 100-continue through.</summary>
-    private static void BeginReading(HttpContext ctx) =>
-        _ = Task.Run(async () =>
-        {
-            var buffer = new byte[256];
-            try { while (await ctx.Request.Body.ReadAsync(buffer) > 0) { } }
-            catch (Exception) { }
-        });
 
     private static async Task ReadAtLeastAsync(HttpContext ctx, int count)
     {
