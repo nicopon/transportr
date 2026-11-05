@@ -14,6 +14,13 @@ log_warn() { echo -e "${YELLOW}$1${NC}"; }
 log_error() { echo -e "${RED}$1${NC}"; }
 log_step() { echo -e "${YELLOW}$1${NC}"; }
 
+# True when a container runtime is usable right now. `docker info` rather than
+# `command -v docker`, because the CLI being installed says nothing about the
+# daemon answering.
+docker_available() {
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
 # Wait for a URL to respond (health check)
 wait_for_url() {
     local url=$1

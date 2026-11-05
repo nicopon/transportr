@@ -11,6 +11,7 @@
 #   oidc     - OIDC with TestIdp
 #   data-plane-probe - OIDC, plus refusal checks against the live stream routes
 #   chaos    - Network chaos simulation
+#   nginx-default - Dev mode, through a stock nginx in a container
 #   ha-redis - Redis State Store (no chaos)
 #
 # Examples:
@@ -70,6 +71,9 @@ cleanup() {
     fi
     if [ -n "$USE_REDIS" ]; then
         stop_redis 2>/dev/null || true
+    fi
+    if [ "$ENABLE_NGINX" == "true" ]; then
+        stop_nginx 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -196,6 +200,12 @@ export Logging__LogLevel__Default="Information"
 export Logging__LogLevel__TransportR="Information"
 export ShowProgress=true
 
+# nginx fronts a single hub: HA and chaos each place their own proxy in the clients' path
+if [ "$ENABLE_NGINX" == "true" ] && { [ "$ENABLE_HA" == "true" ] || [ "$ENABLE_CHAOS" == "true" ]; }; then
+    log_error "ENABLE_NGINX stands in front of a single hub and cannot be combined with ENABLE_HA or ENABLE_CHAOS"
+    exit 1
+fi
+
 # Start Infrastructure
 if [ "$ENABLE_HA" == "true" ]; then
     log_info "Starting HA Infrastructure (TestProxy + 2 Hubs)..."
@@ -237,6 +247,11 @@ if [ "$ENABLE_HA" == "true" ]; then
 else
     # Standard Single Hub Start
     start_hub || exit 1
+
+    if [ "$ENABLE_NGINX" == "true" ]; then
+        source "$SCRIPT_DIR/lib/nginx.sh"
+        start_nginx || exit 1
+    fi
 fi
 
 # Setup chaos proxy after hub is ready

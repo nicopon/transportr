@@ -30,13 +30,6 @@ find_redis_binary() {
     fi
 }
 
-# True when a container runtime is usable right now. `docker info` rather than
-# `command -v docker`, because the CLI being installed says nothing about the
-# daemon answering.
-docker_available() {
-    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
-}
-
 # Start Redis server
 start_redis() {
     local port=${1:-$REDIS_PORT}

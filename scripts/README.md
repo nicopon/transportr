@@ -75,6 +75,7 @@ Unified benchmark runner with scenario support.
 | `ha-no-shared-state` | HA mode (2 hubs behind the TestProxy, sticky sessions); the hubs share state through the TestProxy's own store rather than Redis |
 | `ha-redis` | HA mode (2 hubs behind the TestProxy, sticky sessions) with the Redis state store |
 | `ha-transfer-affinity` | One sender opens two staggered transfers to two receivers placed on different hubs, then both links are cut while the first transfer is still flowing; each transfer's streams must reopen on the hub that holds its bridge, which a client that kept one affinity for all its transfers fails |
+| `nginx-default` | The `default` transfer through an nginx container configured with nothing but a `proxy_pass` (needs a container runtime) |
 | `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
 
