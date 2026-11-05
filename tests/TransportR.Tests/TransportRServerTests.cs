@@ -1,4 +1,7 @@
 using System.Threading.Channels;
+using TransportR.Protocol;
+using Microsoft.Extensions.DependencyInjection;
+using System.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -469,6 +472,26 @@ public class TransportRServerTests
 
         Assert.Equal(StatusCodes.Status200OK, http.Response.StatusCode);
         Assert.True(server.Reached);
+    }
+
+    [Fact]
+    public async Task Receive_OverASocket_SendsItsHeadersBeforeThereIsAnythingToRelay()
+    {
+        // In memory, a response counts as started on StartAsync; Kestrel sends nothing until a write.
+        await using var host = await TestHubServerFactory.StartLoopbackAsync();
+        await host.Services.GetRequiredService<ITransferManager>().RegisterParticipantsAsync(TransferId, Guid.NewGuid(), Guid.NewGuid());
+
+        using var client = new HttpClient(new SocketsHttpHandler()) { Timeout = Timeout.InfiniteTimeSpan };
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{host.BaseUrl}{WireRoutes.StreamBase}/{TransferId}/receive")
+        {
+            Version = HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+        };
+        request.Headers.Add("X-Connection-Type", nameof(ConnectionType.Data));
+
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).WaitAsync(Patience);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<DefaultHttpContext> ReceiveAsync(Harness hub, ITransportRServer server, ConnectionType type)

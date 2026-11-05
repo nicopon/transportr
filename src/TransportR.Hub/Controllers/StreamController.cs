@@ -229,6 +229,9 @@ internal class StreamController : ControllerBase
         Response.Headers["X-Accel-Buffering"] = "no";
         HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
         await Response.StartAsync();
+        // Kestrel holds the headers until the first write, and a stream may have nothing to write
+        // for a heartbeat interval; the client's request waits on them until then.
+        await Response.Body.FlushAsync();
 
         try
         {
