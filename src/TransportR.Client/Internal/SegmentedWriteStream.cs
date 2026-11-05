@@ -24,7 +24,7 @@ internal sealed class SegmentedWriteStream : Stream
     private readonly IStreamTransport _transport;
     private readonly ILogger _logger;
     private readonly Func<string, HttpRequestMessage> _newRequest;
-    private readonly long _heartbeatMs;
+    private readonly long? _heartbeatMs;
     private readonly Guid _epoch = Guid.NewGuid();
     private readonly byte[] _buffer;
     private int _count;
@@ -35,13 +35,17 @@ internal sealed class SegmentedWriteStream : Stream
     /// <param name="newRequest">
     /// Builds the POST of a segment, its route and stream headers set, from the query that names it.
     /// </param>
-    public SegmentedWriteStream(IStreamTransport transport, ILogger logger, Func<string, HttpRequestMessage> newRequest, int bufferSize, TimeSpan heartbeatInterval)
+    /// <param name="heartbeatInterval">
+    /// Announced on the opening segment when the writer keeps to it, which only the sender's data
+    /// stream does; null otherwise.
+    /// </param>
+    public SegmentedWriteStream(IStreamTransport transport, ILogger logger, Func<string, HttpRequestMessage> newRequest, int bufferSize, TimeSpan? heartbeatInterval)
     {
         _transport = transport;
         _logger = logger;
         _newRequest = newRequest;
         _buffer = new byte[bufferSize];
-        _heartbeatMs = (long)heartbeatInterval.TotalMilliseconds;
+        _heartbeatMs = heartbeatInterval is { } interval ? (long)interval.TotalMilliseconds : null;
     }
 
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> source, CancellationToken cancellationToken = default)
@@ -123,9 +127,9 @@ internal sealed class SegmentedWriteStream : Stream
     private string Query(long offset, bool final)
     {
         var query = $"{DataPlane.EpochParameter}={_epoch}&{DataPlane.OffsetParameter}={offset.ToString(CultureInfo.InvariantCulture)}";
-        if (offset == 0)
+        if (offset == 0 && _heartbeatMs is { } heartbeatMs)
         {
-            query += $"&{DataPlane.HeartbeatParameter}={_heartbeatMs.ToString(CultureInfo.InvariantCulture)}";
+            query += $"&{DataPlane.HeartbeatParameter}={heartbeatMs.ToString(CultureInfo.InvariantCulture)}";
         }
 
         return final ? query + $"&{DataPlane.FinalParameter}=true" : query;

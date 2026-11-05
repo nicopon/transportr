@@ -88,6 +88,29 @@ public class DataSessionStateMachineTests
     }
 
     [Fact]
+    public void AReceiverThatAcceptedComplete_WhileReconnecting_StaysClosing_WhenTheHubAnswers()
+    {
+        // The probe of a reconnection and the read loop of the attempt it ends run apart: Complete
+        // can be accepted between the two, and the probe's answer must not reopen streaming over it.
+        _fsm.TransitionTo(SessionState.Streaming);
+        _fsm.OnStreamsLost();
+        _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
+
+        Assert.False(_fsm.TransitionTo(SessionState.Streaming));
+        Assert.Equal(SessionState.ReceiverCompleteReceived, _fsm.CurrentState);
+    }
+
+    [Fact]
+    public void AReceiverClosing_KeepsItsPhase_WhenItsStreamsAreLost()
+    {
+        _fsm.TransitionTo(SessionState.Streaming);
+        _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
+
+        Assert.False(_fsm.OnStreamsLost());
+        Assert.Equal(SessionState.ReceiverCompleteReceived, _fsm.CurrentState);
+    }
+
+    [Fact]
     public void Stopped_IsPending_UntilAFinalStateIsReached()
     {
         _fsm.TransitionTo(SessionState.Starting);

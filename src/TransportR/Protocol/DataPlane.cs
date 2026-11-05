@@ -29,9 +29,9 @@ internal static class DataPlane
     public const string FinalParameter = "final";
 
     /// <summary>
-    /// The query parameter that announces, in milliseconds, on the segment that opens an epoch, how
-    /// often the client writes when it has nothing to say: the hub ends an epoch it has had no segment
-    /// from for two of them.
+    /// The query parameter that announces, in milliseconds, on the segment that opens an epoch of the
+    /// sender's data stream, how often the sender writes when it has nothing to say: the hub ends an
+    /// epoch it has had no segment from for two of them. The receiver's control stream announces none.
     /// </summary>
     public const string HeartbeatParameter = "heartbeatMs";
 

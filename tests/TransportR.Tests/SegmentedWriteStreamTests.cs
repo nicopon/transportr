@@ -120,15 +120,30 @@ public class SegmentedWriteStreamTests
         await Assert.ThrowsAsync<WireProtocolViolationException>(() => stream.FlushAsync());
     }
 
+    [Fact]
+    public async Task AStreamWithoutAHeartbeat_AnnouncesNone()
+    {
+        var hub = new ScriptedHub();
+        var stream = Open(new Transport(hub), 512 * 1024, heartbeat: null);
+
+        await WriteAsync(stream, "abc");
+        await stream.CompleteAsync(CancellationToken.None);
+
+        Assert.All(hub.Segments, s => Assert.False(s.AnnouncesHeartbeat));
+    }
+
     private static SegmentedWriteStream Open(ScriptedHub hub, int bufferSize = 512 * 1024) => Open(new Transport(hub), bufferSize);
 
     private static SegmentedWriteStream Open(Transport transport, int bufferSize = 512 * 1024) =>
+        Open(transport, bufferSize, TimeSpan.FromSeconds(15));
+
+    private static SegmentedWriteStream Open(Transport transport, int bufferSize, TimeSpan? heartbeat) =>
         new(transport, new StubLogger(), query =>
         {
             var request = new HttpRequestMessage(HttpMethod.Post, $"http://test/data/t-1/send?{query}");
             request.Headers.Add("X-Connection-Type", nameof(ConnectionType.Data));
             return request;
-        }, bufferSize, TimeSpan.FromSeconds(15));
+        }, bufferSize, heartbeat);
 
     private static Task WriteAsync(Stream stream, string text) => stream.WriteAsync(Encoding.ASCII.GetBytes(text)).AsTask();
 

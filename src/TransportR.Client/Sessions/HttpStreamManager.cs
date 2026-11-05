@@ -189,7 +189,7 @@ internal class HttpStreamManager : IAsyncDisposable
             _config.Logger,
             query => NewRequest(HttpMethod.Post, $"{_dataUrl}/{_transferId}/send?{query}", type),
             _config.Options.StreamBufferSize,
-            _config.Options.PresenceHeartbeatInterval);
+            type == ConnectionType.Data ? _config.Options.PresenceHeartbeatInterval : null);
         try
         {
             await writeAction(stream, token);

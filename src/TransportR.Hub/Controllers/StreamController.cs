@@ -227,18 +227,28 @@ internal class StreamController : ControllerBase
             return null;
         }
 
-        if (heartbeatMs is not > 0)
+        // Only the sender's silence is judged: a dead sender leaves an Active bridge the reaper skips,
+        // while the receiver's heartbeat keeps the transfer alive. The receiver writes what its read
+        // loop gives it, which a consumer holding on to a batch parks, so its silence says nothing; a
+        // dead receiver shows at its data GET, and the sender then fails for want of acknowledgements.
+        TimeSpan? heartbeat = null;
+        if (type == ConnectionType.Data)
         {
-            _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval", bridgeKey);
-            Response.StatusCode = StatusCodes.Status400BadRequest;
-            return null;
+            if (heartbeatMs is not > 0)
+            {
+                _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval", bridgeKey);
+                Response.StatusCode = StatusCodes.Status400BadRequest;
+                return null;
+            }
+
+            heartbeat = TimeSpan.FromMilliseconds(heartbeatMs.Value);
         }
 
         return _epochs.Open(
             bridgeKey,
             epochId,
             AttestedSubject(),
-            TimeSpan.FromMilliseconds(heartbeatMs.Value),
+            heartbeat,
             (input, token) => _brokerServer.HandleSendAsync(transferId, type, input, token));
     }
 

@@ -622,7 +622,8 @@ internal class DataSession<T> : IDataSession<T>
                          {
                              // The hub answers. The handshake rides the new data stream rather
                              // than the control plane, so there is nothing to do here but arm it
-                             // and let Streaming open that stream.
+                             // and let Streaming open that stream. A receiver that accepted Complete
+                             // in the meantime stays closing, and reopens its streams from there.
                              _reconnectionHandler.PrepareForHandshake();
                              _fsm.TransitionTo(SessionState.Streaming);
                          }
@@ -848,7 +849,7 @@ internal class DataSession<T> : IDataSession<T>
 
     /// <summary>
     /// Waits for something to send. A sender that has had nothing to send for a heartbeat interval
-    /// writes a Ping, and the receiver's Pong comes back on the control stream: the hub takes a write
+    /// writes a Ping, and the receiver's Pong comes back on the control stream: the hub takes a data
     /// stream it has had no segment from for two intervals as cut, and a front end cuts a response
     /// that carries no byte for long enough.
     /// </summary>

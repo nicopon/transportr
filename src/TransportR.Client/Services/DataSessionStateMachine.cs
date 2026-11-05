@@ -43,7 +43,9 @@ internal class DataSessionStateMachine
     }
 
     /// <summary>
-    /// Attempts to transition to a new state.
+    /// Attempts to transition to a new state. A closing receiver leaves its phase only for an outcome:
+    /// a reconnection that started before it accepted Complete, and ends after, would otherwise put it
+    /// back to streaming, where nothing waits for the hub to read its acknowledgement.
     /// </summary>
     /// <returns>True if transition valid and executed, False if ignored.</returns>
     public bool TransitionTo(SessionState newState)
@@ -58,6 +60,12 @@ internal class DataSessionStateMachine
                 return false;
             }
 
+            if (_currentState == SessionState.ReceiverCompleteReceived && !IsFinal(newState))
+            {
+                _logger.LogDebug("Transition to {New} refused: Transfer={TransferId} is closing", newState, _transferId);
+                return false;
+            }
+
             Enter(newState);
             return true;
         }
@@ -66,14 +74,16 @@ internal class DataSessionStateMachine
     /// <summary>
     /// Records that the streams ended without the transfer having, which a session that is still
     /// working answers by reconnecting. A session that has stopped keeps its state: its own release
-    /// or failure is what cancelled the streams, and their ending says nothing new.
+    /// or failure is what cancelled the streams, and their ending says nothing new. A closing receiver
+    /// keeps its phase too, and reopens its streams from it.
     /// </summary>
     /// <returns>True when the session moved to <see cref="SessionState.Reconnecting"/>.</returns>
     public bool OnStreamsLost()
     {
         lock (_lock)
         {
-            if (IsFinal(_currentState) || _currentState == SessionState.Reconnecting) return false;
+            if (IsFinal(_currentState)
+                || _currentState is SessionState.Reconnecting or SessionState.ReceiverCompleteReceived) return false;
 
             Enter(SessionState.Reconnecting);
             return true;

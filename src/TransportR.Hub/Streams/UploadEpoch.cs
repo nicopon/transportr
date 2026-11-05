@@ -51,7 +51,7 @@ internal sealed class UploadEpoch
     private readonly CancellationTokenSource _cts = new();
     private readonly string _bridgeKey;
     private readonly TimeSpan _holdBound;
-    private readonly TimeSpan _silenceLimit;
+    private readonly TimeSpan? _silenceLimit;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
 
@@ -68,7 +68,11 @@ internal sealed class UploadEpoch
     private long _lastHeard;
     private Task _run = Task.CompletedTask;
 
-    public UploadEpoch(Guid id, string bridgeKey, string? subject, TimeSpan heartbeatInterval, TimeProvider time, ILogger logger, TimeSpan? holdBound = null)
+    /// <param name="heartbeatInterval">
+    /// How often the client writes when it has nothing to say, for an epoch whose silence is judged;
+    /// null for one whose silence says nothing, which is never ended for it.
+    /// </param>
+    public UploadEpoch(Guid id, string bridgeKey, string? subject, TimeSpan? heartbeatInterval, TimeProvider time, ILogger logger, TimeSpan? holdBound = null)
     {
         Id = id;
         Subject = subject;
@@ -97,13 +101,16 @@ internal sealed class UploadEpoch
 
     /// <summary>
     /// Hands <see cref="Input"/> to <paramref name="handle"/>, which must not throw, and starts judging
-    /// the epoch's silence: no segment for two heartbeat intervals is a stream that was cut, the rule
-    /// of the presence heartbeat.
+    /// the epoch's silence, when it has a heartbeat interval: no segment for two of them is a stream
+    /// that was cut, the rule of the presence heartbeat.
     /// </summary>
     public void Start(Func<Stream, CancellationToken, Task> handle, Action onOver)
     {
         _run = RunAsync(handle, onOver);
-        _ = WatchSilenceAsync();
+        if (_silenceLimit is { } limit)
+        {
+            _ = WatchSilenceAsync(limit);
+        }
     }
 
     /// <summary>Ends the epoch: a newer one of the same stream took its place.</summary>
@@ -289,7 +296,7 @@ internal sealed class UploadEpoch
         }
     }
 
-    private async Task WatchSilenceAsync()
+    private async Task WatchSilenceAsync(TimeSpan limit)
     {
         try
         {
@@ -299,16 +306,16 @@ internal sealed class UploadEpoch
                 lock (_gate)
                 {
                     var silentFor = _time.GetElapsedTime(_lastHeard);
-                    if (_segmentsUnderway == 0 && silentFor >= _silenceLimit) break;
+                    if (_segmentsUnderway == 0 && silentFor >= limit) break;
 
                     // A segment under way is not silence; its end sets the clock again.
-                    wait = _segmentsUnderway > 0 ? _silenceLimit : _silenceLimit - silentFor;
+                    wait = _segmentsUnderway > 0 ? limit : limit - silentFor;
                 }
 
                 await Task.Delay(wait, _time, _cts.Token).ConfigureAwait(false);
             }
 
-            _logger.LogWarning("BRIDGE: No segment of {BridgeKey} for {Seconds:0.#}s: its stream is taken as cut", _bridgeKey, _silenceLimit.TotalSeconds);
+            _logger.LogWarning("BRIDGE: No segment of {BridgeKey} for {Seconds:0.#}s: its stream is taken as cut", _bridgeKey, limit.TotalSeconds);
             _cts.Cancel();
         }
         catch (OperationCanceledException)

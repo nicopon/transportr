@@ -40,11 +40,12 @@ internal sealed class UploadEpochs
     /// Opens an epoch and hands its stream to <paramref name="handle"/>, which copies from it until it
     /// ends; the epoch's token cancels it. The epoch it replaces, if any, is ended.
     /// </summary>
+    /// <param name="heartbeatInterval">Null for a stream whose silence is not judged.</param>
     public UploadEpoch Open(
         string bridgeKey,
         Guid epochId,
         string? subject,
-        TimeSpan heartbeatInterval,
+        TimeSpan? heartbeatInterval,
         Func<Stream, CancellationToken, Task> handle)
     {
         var epoch = new UploadEpoch(epochId, bridgeKey, subject, heartbeatInterval, _time, _logger);

@@ -3,6 +3,8 @@ using TransportR.Protocol;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Time.Testing;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Tests.Infrastructure;
@@ -237,8 +239,57 @@ public class DataPlaneAuthorizationTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    /// <summary>An empty segment of the sender's data stream, which the hub answers at once.</summary>
-    private static Task<HttpResponseMessage> SegmentAsync(HttpClient client, string subject, Guid epoch, long? offset, bool announcesHeartbeat)
+    [Fact]
+    public async Task TheSendersDataStream_IsCut_AfterTwoHeartbeatIntervalsWithoutASegment()
+    {
+        var time = new FakeTimeProvider();
+        using var host = await CreateHostWithTransferAsync(time: time);
+        using var client = host.GetTestClient();
+        var epoch = Guid.NewGuid();
+
+        using var opened = await SegmentAsync(client, SenderSubject, epoch, offset: 0, announcesHeartbeat: true);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+
+        time.Advance(SilenceWait);
+        await UntilAsync(() => !HoldsEpoch(host, ConnectionType.Data, epoch));
+    }
+
+    [Fact]
+    public async Task TheReceiversControlStream_AnnouncesNoHeartbeat_AndIsNotCutOnSilence()
+    {
+        // What the receiver writes, its read loop gives it, and a consumer holding on to a batch parks
+        // that loop: its silence says nothing. A dead receiver shows at its data GET instead.
+        var time = new FakeTimeProvider();
+        using var host = await CreateHostWithTransferAsync(time: time);
+        using var client = host.GetTestClient();
+        var epoch = Guid.NewGuid();
+
+        using var opened = await SegmentAsync(client, ReceiverSubject, epoch, offset: 0, announcesHeartbeat: false, ConnectionType.Control);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+
+        time.Advance(SilenceWait);
+        await Task.Delay(200);
+        Assert.True(HoldsEpoch(host, ConnectionType.Control, epoch), "the receiver's control stream was cut on its silence");
+    }
+
+    // Past two of the 15 s intervals SegmentAsync announces, and short of the transfer's own inactivity bound.
+    private static readonly TimeSpan SilenceWait = TimeSpan.FromSeconds(45);
+
+    private static bool HoldsEpoch(IHost host, ConnectionType type, Guid epoch) =>
+        host.Services.GetRequiredService<UploadEpochs>().TryGet(IBridgeManager.KeyFor(TransferId, type), epoch, out _);
+
+    private static async Task UntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the condition did not hold in time");
+            await Task.Delay(20);
+        }
+    }
+
+    /// <summary>An empty segment of a write stream, which the hub answers at once.</summary>
+    private static Task<HttpResponseMessage> SegmentAsync(HttpClient client, string subject, Guid epoch, long? offset, bool announcesHeartbeat, ConnectionType type = ConnectionType.Data)
     {
         var query = $"?{DataPlane.EpochParameter}={epoch}"
             + (offset is { } at ? $"&{DataPlane.OffsetParameter}={at}" : "")
@@ -247,7 +298,7 @@ public class DataPlaneAuthorizationTests
         {
             Content = new ByteArrayContent([]),
         };
-        request.Headers.Add("X-Connection-Type", nameof(ConnectionType.Data));
+        request.Headers.Add("X-Connection-Type", type.ToString());
         request.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {subject}");
         return client.SendAsync(request).WaitAsync(TimeSpan.FromSeconds(30));
     }
@@ -269,9 +320,10 @@ public class DataPlaneAuthorizationTests
 
     private static async Task<IHost> CreateHostWithTransferAsync(
         string? senderSubject = SenderSubject,
-        string? receiverSubject = ReceiverSubject)
+        string? receiverSubject = ReceiverSubject,
+        TimeProvider? time = null)
     {
-        var host = AuthenticatedHubServerFactory.CreateHost();
+        var host = AuthenticatedHubServerFactory.CreateHost(configureServices: time == null ? null : services => services.AddSingleton<TimeProvider>(time));
 
         var store = host.Services.GetRequiredService<IStateStore>();
         await store.SaveClientAsync(NewRegistration(SenderId, "conn-sender", senderSubject));

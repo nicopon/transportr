@@ -170,7 +170,8 @@ stream and a receiver stream (`BridgeManager` is only the `ConcurrentDictionary`
 drive it into a state its table forbids, and `SenderConnected`/`ReceiverConnected` are derived from
 the state rather than stored beside it. Its client-side counterpart, `DataSessionStateMachine`
 (driven by `DataSession`), takes events for the endings (`OnStreamsLost`, `OnReleased`, `OnAborted`,
-`OnEndedByHub`) and `TransitionTo` for the rest, which refuses only a move out of a terminal state. They
+`OnEndedByHub`) and `TransitionTo` for the rest, which refuses a move out of a terminal state, and out
+of a receiver's closing phase to anything but one. They
 are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.cs`,
 `DataSessionStateMachineTests.cs`) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in

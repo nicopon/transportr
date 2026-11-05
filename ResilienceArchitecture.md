@@ -353,11 +353,12 @@ stateDiagram-v2
     Reconnecting --> Streaming: probe answered
     Streaming --> Completed: [sender] CompleteAck read
     Streaming --> ReceiverCompleteReceived: [receiver] Complete accepted
+    Reconnecting --> ReceiverCompleteReceived: [receiver] Complete accepted before the probe answered
     ReceiverCompleteReceived --> Completed: control POST answered, or 404 on a reopened stream
     Completed --> [*]
 ```
 
-`DataSessionStateMachine` holds the state. The endings are events (`OnStreamsLost`, `OnReleased`, `OnAborted`, `OnEndedByHub`) and the rest goes through `TransitionTo`, which refuses only a move out of a final state. Every state that is not final can end in:
+`DataSessionStateMachine` holds the state. The endings are events (`OnStreamsLost`, `OnReleased`, `OnAborted`, `OnEndedByHub`) and the rest goes through `TransitionTo`, which refuses a move out of a final state, and out of `ReceiverCompleteReceived` to anything but one: a closing receiver that loses a stream reopens it from its phase. Every state that is not final can end in:
 
 - `Failed`: a fatal stream (protocol violation, `404` outside the closing phase), the peer's `Abort`, the hub ending the transfer, nothing acknowledged for `CompleteStallTimeout`, or a batch that does not serialize or decode;
 - `Disposed`: the handle was released first, which queues an `Abort` for the peer.
