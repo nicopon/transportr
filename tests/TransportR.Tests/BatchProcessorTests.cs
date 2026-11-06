@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Threading.Channels;
 using System.Text;
+using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
 using TransportR.Interfaces;
@@ -320,6 +321,32 @@ public class BatchProcessorTests
         // Assert: the same enumeration receives it.
         Assert.True(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(2, processor.NextExpectedBatchId);
+    }
+
+    [Fact]
+    public async Task ProcessChunk_AStreamBatchInItemMode_IsRefusedAsUndecodable_AndNothingIsDelivered()
+    {
+        // Arrange: a well-formed item payload, under the type of the other mode.
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+        var payload = new byte[4 + 10];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, 1);
+        var header = ChunkHeader.CreateBatch(_transferId, 0, 1, payload.Length) with { Type = ChunkType.StreamBatch };
+
+        // Act & Assert: the exception the session answers by telling the sender.
+        var refused = await Assert.ThrowsAsync<UndecodableBatchException>(
+            () => processor.ProcessChunkAsync(new ChunkData(header, new ArrayMemoryOwner(payload), payload.Length)));
+        Assert.DoesNotContain("StreamBatch", refused.Message);
+        Assert.Equal(0, processor.NextExpectedBatchId);
+        Assert.Equal(0, processor.ItemsReceived);
+    }
+
+    [Fact]
+    public void ByteStreamMode_WithAnItemTypeOtherThanByteArray_RefusesToBeBuilt()
+    {
+        _stubContext.Options.ByteStreamBatchBytes = 1024;
+
+        Assert.Throws<InvalidOperationException>(() => CreateProcessor());
     }
 
     private sealed class ArrayMemoryOwner(byte[] data) : IMemoryOwner<byte>

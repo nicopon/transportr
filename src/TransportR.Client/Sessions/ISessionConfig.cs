@@ -24,7 +24,11 @@ internal interface ISessionConfig
 /// <summary>
 /// Adds the serializer, which is where the item type enters a session.
 /// </summary>
+/// <remarks>
+/// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where the
+/// payload crosses the wire as it is.
+/// </remarks>
 internal interface ISessionConfig<T> : ISessionConfig
 {
-    IBatchSerializer<T> Serializer { get; }
+    IBatchSerializer<T>? Serializer { get; }
 }

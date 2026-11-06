@@ -11,5 +11,6 @@ public enum ChunkType : byte
     CompleteAck = 0x04,  // Receiver confirms receipt of Complete
     Ping = 0x05,         // Connection probe after reconnection
     Pong = 0x06,         // Response to connection probe
-    Abort = 0x07         // One end is giving up; BatchId carries an AbortReason
+    Abort = 0x07,        // One end is giving up; BatchId carries an AbortReason
+    StreamBatch = 0x08   // Batch of a transfer without a serializer: the payload is raw bytes
 }

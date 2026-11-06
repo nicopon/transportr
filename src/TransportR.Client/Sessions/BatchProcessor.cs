@@ -1,10 +1,12 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
+using TransportR.Interfaces;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Sessions;
@@ -22,7 +24,12 @@ internal class BatchProcessor<T> : IAsyncDisposable
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
     private ReceiveBuffer<T>? _receiveBuffer;
+    private ByteChunkSink? _byteSink;
     private IChunkSink? _sink;
+
+    // Null in the byte-stream mode, the only one without a serializer.
+    private readonly IBatchSerializer<T>? _serializer;
+    private readonly bool _byteStream;
     
     // Sender State
     private BatchAccumulator<T>? _batchAccumulator;
@@ -79,10 +86,25 @@ internal class BatchProcessor<T> : IAsyncDisposable
         _transferId = transferId;
         _batchSize = batchSize;
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
+
+        _byteStream = context.Options.ByteStreamBatchBytes is not null;
+        if (_byteStream)
+        {
+            if (typeof(T) != typeof(byte[]))
+                throw new InvalidOperationException("The byte-stream mode carries byte[] only.");
+        }
+        else
+        {
+            _serializer = context.Serializer
+                ?? throw new InvalidOperationException("A serializer is required outside the byte-stream mode.");
+        }
     }
 
     public Task StartSenderAsync(CancellationToken token)
     {
+        if (_byteStream)
+            throw new InvalidOperationException("Sending in the byte-stream mode is not available.");
+
         _unackedBatches.Clear();
 
         // maxCount is set as well as initialCount: an over-release means the slot accounting is
@@ -103,8 +125,20 @@ internal class BatchProcessor<T> : IAsyncDisposable
     {
         // Buffer and sink are kept across reconnections: the consumer's enumeration is over this
         // buffer, and a new one would leave it waiting on a buffer nothing writes to.
-        _receiveBuffer ??= new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
-        _sink ??= new ItemChunkSink<T>(_receiveBuffer, _context.Serializer);
+        if (_sink is null)
+        {
+            if (_byteStream)
+            {
+                _byteSink = new ByteChunkSink(new ReceiveBuffer<ByteChunk>(_context.Options.ReceiveBufferCapacity));
+                _sink = _byteSink;
+            }
+            else
+            {
+                _receiveBuffer = new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
+                _sink = new ItemChunkSink<T>(_receiveBuffer, _serializer!);
+            }
+        }
+
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
 
         // A reconnection replaces the state; the chunks it held out of order go back to the pool
@@ -127,10 +161,43 @@ internal class BatchProcessor<T> : IAsyncDisposable
             await _batchAccumulator.AddRangeAsync(items, token);
     }
 
+    /// <summary>
+    /// The items of the transfer; in the byte-stream mode, one <c>byte[]</c> per batch received.
+    /// </summary>
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken token)
     {
+        if (_byteStream)
+            return (IAsyncEnumerable<T>)(object)CopyChunksAsync(ReceiveChunksAsync(token), token);
+
         if (_receiveBuffer == null) throw new InvalidOperationException("Receiver not started");
         return _receiveBuffer.ReadAllAsync(token);
+    }
+
+    /// <summary>
+    /// The batches of a byte-stream transfer as they were received. Each <see cref="ByteChunk"/> is
+    /// the consumer's to dispose; one it leaves unread when the session is released is disposed there.
+    /// </summary>
+    public IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken token)
+    {
+        if (!_byteStream) throw new InvalidOperationException("Not a byte-stream transfer");
+        if (_byteSink == null) throw new InvalidOperationException("Receiver not started");
+        return _byteSink.ReadAllAsync(token);
+    }
+
+    private static async IAsyncEnumerable<byte[]> CopyChunksAsync(
+        IAsyncEnumerable<ByteChunk> chunks, [EnumeratorCancellation] CancellationToken token)
+    {
+        await foreach (var chunk in chunks.WithCancellation(token).ConfigureAwait(false))
+        {
+            try
+            {
+                yield return chunk.Memory.ToArray();
+            }
+            finally
+            {
+                chunk.Dispose();
+            }
+        }
     }
 
     public async Task CompleteSenderAsync(CancellationToken token)
@@ -155,7 +222,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public void CompleteReceiver()
     {
-        _receiveBuffer?.Complete();
+        _sink?.Complete();
     }
     
     public void CompleteSenderChannel()
@@ -181,6 +248,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         switch (chunk.Header.Type)
         {
             case ChunkType.Batch:
+            case ChunkType.StreamBatch:
                 await HandleBatchChunkAsync(chunk, ct);
                 break;
             case ChunkType.BatchAck:
@@ -266,7 +334,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
         using var memoryStream = _context.StreamManager.GetStream();
         var countBytes = BitConverter.GetBytes(items.Count);
         await memoryStream.WriteAsync(countBytes.AsMemory(), ct);
-        await _context.Serializer.SerializeBatchAsync(memoryStream, items);
+        // Not null: StartSenderAsync refuses the only mode without a serializer.
+        await _serializer!.SerializeBatchAsync(memoryStream, items);
         
         var totalLen = (int)memoryStream.Length;
         var owner = new PooledMemoryOwner(memoryStream.GetBuffer().AsMemory(0, totalLen));
@@ -294,7 +363,14 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private async Task HandleBatchChunkAsync(ChunkData chunk, CancellationToken ct)
     {
         if (_receiverState == null) return;
-        
+
+        // Checked before any memory is rented. An UndecodableBatchException, because it is the one
+        // that makes the session tell the sender; a plain protocol violation would only end this side.
+        if ((chunk.Header.Type == ChunkType.StreamBatch) != _byteStream)
+            throw new UndecodableBatchException("A batch of a kind this transfer does not carry was received.");
+
+        // The copy is what is handed on: the byte-stream mode gives this owner away, never the
+        // chunk's own, whose copies would each dispose it.
         var owner = new PooledMemoryOwner(chunk.Payload);
         var rxResult = await _receiverState.ProcessBatchAsync(chunk.Header.BatchId, owner, owner.Memory, ct);
         
@@ -559,7 +635,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
         // Same reason, other end: a read loop parked on the byte gate has to be let go. The
         // session token reaches it too, but only one of the two is an explicit release, and the
         // parked loop cannot reach the finally that would otherwise complete the buffer.
-        _receiveBuffer?.Complete();
+        _sink?.Complete();
+        _byteSink?.DiscardUnread();
         _receiverState?.DiscardReordered();
         
         foreach(var kvp in _unackedBatches)

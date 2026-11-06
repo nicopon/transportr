@@ -254,5 +254,57 @@ public class ChunkIOTests
         Assert.Equal(0x04, (byte)ChunkType.CompleteAck);
         Assert.Equal(0x05, (byte)ChunkType.Ping);
         Assert.Equal(0x06, (byte)ChunkType.Pong);
+        Assert.Equal(0x07, (byte)ChunkType.Abort);
+        Assert.Equal(0x08, (byte)ChunkType.StreamBatch);
+    }
+
+    [Fact]
+    public async Task WriteBatchAsync_WithStreamBatch_RoundTripsTheTypeAndThePayload()
+    {
+        // Arrange
+        var transferId = Guid.NewGuid();
+        byte[] payload = [9, 8, 7, 6, 5];
+        using var ms = new MemoryStream();
+
+        // Act
+        await ChunkIO.WriteBatchAsync(ms, transferId, ChunkType.StreamBatch, batchId: 4, count: payload.Length, payload);
+        ms.Position = 0;
+        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+
+        // Assert
+        Assert.NotNull(chunk);
+        Assert.Equal(ChunkType.StreamBatch, chunk.Value.Header.Type);
+        Assert.Equal(ChunkHeader.CurrentVersion, chunk.Value.Header.Version);
+        Assert.Equal(4, chunk.Value.Header.BatchId);
+        Assert.Equal(payload.Length, chunk.Value.Header.Count);
+        Assert.Equal(transferId, chunk.Value.Header.TransferId);
+        Assert.Equal(payload, chunk.Value.Payload.ToArray());
+    }
+
+    [Fact]
+    public async Task WriteBatchAsync_WithoutAType_StillWritesABatch()
+    {
+        using var ms = new MemoryStream();
+
+        await ChunkIO.WriteBatchAsync(ms, Guid.NewGuid(), batchId: 0, count: 1, new byte[] { 1 });
+        ms.Position = 0;
+        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+
+        Assert.Equal(ChunkType.Batch, chunk!.Value.Header.Type);
+    }
+
+    [Theory]
+    [InlineData(ChunkType.BatchAck)]
+    [InlineData(ChunkType.Complete)]
+    [InlineData(ChunkType.Abort)]
+    [InlineData((ChunkType)0xFF)]
+    public async Task WriteBatchAsync_WithANonBatchType_IsRefused(ChunkType type)
+    {
+        using var ms = new MemoryStream();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => ChunkIO.WriteBatchAsync(ms, Guid.NewGuid(), type, batchId: 0, count: 1, new byte[] { 1 }));
+
+        Assert.Equal(0, ms.Length);
     }
 }

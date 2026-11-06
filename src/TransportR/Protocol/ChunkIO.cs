@@ -19,7 +19,30 @@ public static class ChunkIO
         ReadOnlyMemory<byte> payload,
         CancellationToken ct = default)
     {
-        var header = ChunkHeader.CreateBatch(transferId, batchId, count, payload.Length);
+        await WriteBatchAsync(stream, transferId, ChunkType.Batch, batchId, count, payload, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes a batch chunk of the given type (<see cref="ChunkType.Batch"/> or
+    /// <see cref="ChunkType.StreamBatch"/>) to the stream.
+    /// </summary>
+    /// <remarks>
+    /// The type tells the receiver how the payload is to be read. A receiver expecting the other one
+    /// refuses the chunk and aborts the transfer, so the type is the sender's to get right.
+    /// </remarks>
+    public static async Task WriteBatchAsync(
+        Stream stream,
+        Guid transferId,
+        ChunkType type,
+        int batchId,
+        int count,
+        ReadOnlyMemory<byte> payload,
+        CancellationToken ct = default)
+    {
+        if (type is not (ChunkType.Batch or ChunkType.StreamBatch))
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Not a batch chunk type.");
+
+        var header = ChunkHeader.CreateBatch(transferId, batchId, count, payload.Length) with { Type = type };
         await WriteChunkAsync(stream, header, payload, ct).ConfigureAwait(false);
     }
 

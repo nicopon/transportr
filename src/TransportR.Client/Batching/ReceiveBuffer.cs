@@ -194,6 +194,31 @@ internal sealed class ReceiveBuffer<T>
         _channel.Writer.TryComplete(error);
     }
 
+    /// <summary>
+    /// Takes whatever was admitted and the consumer has not taken, and gives each entry to
+    /// <paramref name="discard"/>, which owns it from there.
+    /// </summary>
+    /// <remarks>
+    /// Meant for a released session, after <see cref="Complete"/>. It cannot belong to
+    /// <see cref="Complete"/>: a consumer still reads what was admitted once the transfer is over.
+    /// An entry leaves the channel once, to this method or to the consumer, so none is discarded
+    /// that the consumer holds. Capacity is given back as for a consumed entry.
+    /// </remarks>
+    public void Drain(Action<T> discard)
+    {
+        while (_channel.Reader.TryRead(out var entry))
+        {
+            try
+            {
+                discard(entry.Item);
+            }
+            finally
+            {
+                Release(items: 1, entry.Cost);
+            }
+        }
+    }
+
     /// <remarks>
     /// <para>
     /// The waiter is a single re-armed <see cref="TaskCompletionSource"/> rather than a queue: in
