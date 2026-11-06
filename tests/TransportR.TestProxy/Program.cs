@@ -24,6 +24,20 @@ var stateStore = new ProxyStateStore();
 // needs the placement to be a fact names a policy, RoundRobin for one that alternates.
 var loadBalancingPolicy = Environment.GetEnvironmentVariable("PROXY_LOAD_BALANCING");
 
+// What the proxy makes of a request that asks to upgrade to a WebSocket, to stand in for a path that
+// refuses one or does not carry one, which no hub can be made to look like from the inside.
+//   pass  relay it like any other request (the default)
+//   strip remove Upgrade and Connection, as a proxy that forwards no hop-by-hop header does: the hub
+//         sees a plain GET
+//   hold  accept the upgrade here and relay nothing, the connection left open: a front end that takes
+//         the handshake and then carries no bytes
+var upgradeMode = Environment.GetEnvironmentVariable("PROXY_UPGRADE");
+if (string.IsNullOrEmpty(upgradeMode)) upgradeMode = "pass";
+if (upgradeMode is not ("pass" or "strip" or "hold"))
+{
+    throw new InvalidOperationException($"Unknown PROXY_UPGRADE: {upgradeMode} (pass, strip or hold)");
+}
+
 // YARP configuration with sticky sessions
 var routes = new[]
 {
@@ -133,12 +147,51 @@ stateApi.MapDelete("/sessions/{transferId}", async (string transferId, ProxyStat
     return Results.NoContent();
 });
 
+// Ahead of the proxy. A request that does not ask to upgrade is relayed in every mode.
+if (upgradeMode == "strip")
+{
+    app.Use((context, next) =>
+    {
+        context.Request.Headers.Remove("Upgrade");
+        context.Request.Headers.Remove("Connection");
+        return next(context);
+    });
+}
+else if (upgradeMode == "hold")
+{
+    app.UseWebSockets();
+    app.Use(async (context, next) =>
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            await next(context);
+            return;
+        }
+
+        using var socket = await context.WebSockets.AcceptWebSocketAsync();
+        Console.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} Holding the upgrade of {context.Request.Path}: accepted, nothing relayed");
+
+        // Read and discard until the client gives up, so that its closing is seen.
+        var buffer = new byte[1024];
+        try
+        {
+            while ((await socket.ReceiveAsync(buffer, context.RequestAborted)).MessageType != System.Net.WebSockets.WebSocketMessageType.Close)
+            {
+            }
+        }
+        catch (Exception ex) when (ex is System.Net.WebSockets.WebSocketException or OperationCanceledException)
+        {
+        }
+    });
+}
+
 // YARP proxy
 app.MapReverseProxy();
 
 Console.WriteLine("TransportR TestProxy started on http://localhost:5000");
 Console.WriteLine("  YARP -> Hub A (5001), Hub B (5002)");
 Console.WriteLine("  State API: /api/state/*");
+Console.WriteLine($"  Upgrade requests: {upgradeMode}");
 
 app.Run();
 
