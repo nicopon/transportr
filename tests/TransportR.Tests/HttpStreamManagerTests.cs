@@ -135,6 +135,38 @@ public class HttpStreamManagerTests
         });
     }
 
+    [Fact]
+    public async Task AnUpgrade_AsksForHttp11Exactly_Too()
+    {
+        // The handler answers it 200, which is no upgrade: the stream falls back, and the check below
+        // covers all three requests.
+        var capture = new CapturingHandler();
+        var client = new HttpClient(capture)
+        {
+            DefaultRequestVersion = HttpVersion.Version20,
+            DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrHigher,
+        };
+        var context = new StubSessionContext(client);
+        context.Options.WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.PreferWebSocket;
+        await using var manager = new HttpStreamManager(context, context, _transferId, "http://test/data", affinity: null);
+
+        manager.StartStreams(
+            isSender: true,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => Task.CompletedTask,
+            sessionToken: CancellationToken.None);
+        await manager.SenderTask!;
+
+        Assert.Equal(3, capture.Requests.Count);
+        Assert.All(capture.Requests, request =>
+        {
+            Assert.Equal(HttpVersion.Version11, request.Version);
+            Assert.Equal(HttpVersionPolicy.RequestVersionExact, request.VersionPolicy);
+        });
+        Assert.Equal(TransportR.Models.WriteTransport.Segments, manager.WriteTransport);
+        Assert.Contains("200", manager.WriteTransportFallback);
+    }
+
     // ========== STUBS ==========
 
     private class CapturingHandler : HttpMessageHandler
@@ -185,7 +217,7 @@ public class HttpStreamManagerTests
         
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
-        public ClientOptions Options { get; } = new ClientOptions();
+        public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
         public StubSessionContext(HttpClient httpClient)
         {
             HttpClient = httpClient;

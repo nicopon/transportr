@@ -19,7 +19,7 @@ namespace TransportR.Client.Internal;
 /// for an expired token, once, with a renewed one. Any other failure ends the epoch, and the session
 /// opens a new one.
 /// </remarks>
-internal sealed class SegmentedWriteStream : Stream
+internal sealed class SegmentedWriteStream : WriteStream
 {
     private readonly IStreamTransport _transport;
     private readonly ILogger _logger;
@@ -70,11 +70,7 @@ internal sealed class SegmentedWriteStream : Stream
     public override Task FlushAsync(CancellationToken cancellationToken) =>
         _count == 0 ? Task.CompletedTask : SendAsync(final: false, cancellationToken);
 
-    /// <summary>
-    /// Sends what is left as the last segment, which ends the stream. Returns once the hub has closed
-    /// it: for a sender's data stream, once the hub has seen the transfer through and forgotten it.
-    /// </summary>
-    public Task CompleteAsync(CancellationToken cancellationToken) => SendAsync(final: true, cancellationToken);
+    public override Task CompleteAsync(CancellationToken cancellationToken) => SendAsync(final: true, cancellationToken);
 
     private async Task SendAsync(bool final, CancellationToken cancellationToken)
     {
@@ -157,27 +153,9 @@ internal sealed class SegmentedWriteStream : Stream
         return (int)covered;
     }
 
-    // Every write the client makes is asynchronous; one that blocked would hold a thread for as long as
-    // the peer takes to read a segment.
-    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override void Flush() => throw new NotSupportedException();
-
-    public override bool CanRead => false;
-    public override bool CanSeek => false;
-    public override bool CanWrite => true;
-    public override long Length => throw new NotSupportedException();
-    public override long Position
-    {
-        get => throw new NotSupportedException();
-        set => throw new NotSupportedException();
-    }
-
-    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException();
 }
 
-/// <summary>A segment the hub refused, with what the refusal means for the attempt.</summary>
+/// <summary>The hub refused a write stream, with what the refusal means for the attempt.</summary>
 internal sealed class StreamRefusedException(StreamOutcome outcome, string message) : Exception(message)
 {
     public StreamOutcome Outcome { get; } = outcome;

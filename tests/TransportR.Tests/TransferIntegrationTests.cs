@@ -1112,7 +1112,8 @@ public class TransferIntegrationTests
         HttpMessageHandler? handler, string url, Action<ClientOptions>? configure = null,
         HttpMessageHandler? networkHandler = null, IBatchSerializer<string>? serializer = null)
     {
-        var options = new ClientOptions();
+        // These transfers run on segments; a WebSocket has its own, in WebSocketTransferTests.
+        var options = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
         configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
         

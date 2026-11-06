@@ -4,6 +4,7 @@ using Microsoft.IO;
 using TransportR.Interfaces;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
+using TransportR.Models;
 
 namespace TransportR.Tests.TestHelpers;
 
@@ -16,7 +17,7 @@ internal class StubSessionContext: ISessionContext<string>
     
     public int BatchFlushIntervalMs => 50;
     public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
-    public ClientOptions Options { get; } = new ClientOptions();
+    public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly };
 
     public StubSessionContext(HttpClient? httpClient = null, ILogger? logger = null)
     {

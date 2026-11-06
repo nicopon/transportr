@@ -1,3 +1,5 @@
+using TransportR.Models;
+
 namespace TransportR.Client.Configuration;
 
 /// <summary>
@@ -15,6 +17,17 @@ internal class ClientOptions
     /// Buffer size for HTTP stream writes. Default: 512KB.
     /// </summary>
     public int StreamBufferSize { get; set; } = 512 * 1024;
+
+    /// <summary>
+    /// What may carry this client's write streams. Default: a WebSocket where the path carries one.
+    /// </summary>
+    public WriteTransportPolicy WriteTransportPolicy { get; set; } = WriteTransportPolicy.PreferWebSocket;
+
+    /// <summary>
+    /// How long opening a WebSocket may take, the upgrade and the probe together, before the path is
+    /// taken as not carrying one. Default: 5 seconds.
+    /// </summary>
+    public TimeSpan WebSocketOpenBound { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Interval for per-transfer heartbeat reporting. Default: 1 second.

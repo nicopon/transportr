@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
+using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
 
@@ -24,6 +25,14 @@ internal static class TestClients
         string? accessToken = null)
     {
         var options = new ClientOptions();
+
+        // A TestServer handler cannot carry a ClientWebSocket: over it, a client would fall back on
+        // every transfer. A client on the network keeps the default.
+        if (handler != null)
+        {
+            options.WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly;
+        }
+
         configure?.Invoke(options);
 
         logger ??= NullLogger.Instance;

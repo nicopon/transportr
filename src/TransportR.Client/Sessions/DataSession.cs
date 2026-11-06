@@ -81,6 +81,8 @@ internal class DataSession<T> : IDataSession<T>
     // Public properties for GetTransfers()
     public bool IsSender => _isSender;
     public SessionState State => _fsm.CurrentState;
+    public WriteTransport? WriteTransport => _httpStreamManager.WriteTransport;
+    public string? WriteTransportFallback => _httpStreamManager.WriteTransportFallback;
 
     /// <summary>
     /// True once the session has stopped, whether it succeeded or failed.
@@ -509,7 +511,7 @@ internal class DataSession<T> : IDataSession<T>
 
         // Best-effort: give the peer a reason to fail on instead of a silence it can only read as a
         // stall. Bounded because a stream stuck on backpressure must not hang disposal, and
-        // DisposeAsync never throws. Waits on the write direction's last segment, which the hub
+        // DisposeAsync never throws. Waits on the end of the write direction, which the hub
         // answers once it has relayed what came before and closed the stream: cancelling the
         // streams sooner can leave the Abort unsent, and turns the clean close into a rupture the
         // hub waits out.
@@ -551,7 +553,7 @@ internal class DataSession<T> : IDataSession<T>
     }
 
     /// <summary>
-    /// Waits, bounded, for the write direction's last segment to be answered, and falls back on the hub's abort
+    /// Waits, bounded, for the end of the write direction to be answered, and falls back on the hub's abort
     /// route when an Abort is queued and that end does not confirm it. Runs once: the read loop calls it
     /// before failing on a batch it cannot decode, and the release that follows has nothing to add.
     /// </summary>
@@ -584,9 +586,9 @@ internal class DataSession<T> : IDataSession<T>
 
     /// <summary>
     /// Whether the write direction's end says the Abort is no longer this side's to deliver: the
-    /// last segment was answered, which means the hub relayed the stream to its end, or the hub
-    /// refused the stream for good, which means it has no such transfer to tell. A cut or a
-    /// cancelled segment says neither.
+    /// end was answered, which means the hub relayed the stream to its end, or the hub refused
+    /// the stream for good, which means it has no such transfer to tell. A cut or a cancelled
+    /// write says neither.
     /// </summary>
     private static bool AbortConfirmed(HttpStreamManager.StreamResult written) =>
         written.Outcome is StreamOutcome.Ended or StreamOutcome.Gone or StreamOutcome.Fatal;
@@ -821,7 +823,7 @@ internal class DataSession<T> : IDataSession<T>
                         // Ends this side's outgoing stream cleanly, the same way CompleteAck does
                         // below: the hub sees a normal EOF and releases the bridge through its
                         // ordinary path instead of waiting on a reconnection that will never come.
-                        // Not flushed here: the stream's last segment carries it, with the end.
+                        // Not flushed here: the end of the stream carries it.
                         return;
                     }
 
@@ -846,7 +848,7 @@ internal class DataSession<T> : IDataSession<T>
     /// <summary>
     /// Waits for something to send. A sender that has had nothing to send for a heartbeat interval
     /// writes a Ping, and the receiver's Pong comes back on the control stream: the hub takes a data
-    /// stream it has had no segment from for two intervals as cut, and a front end cuts a response
+    /// stream it has heard nothing from for two intervals as cut, and a front end cuts a response
     /// that carries no byte for long enough.
     /// </summary>
     private async Task<bool> WaitForOutgoingAsync(Stream outputStream, Guid transferGuid, CancellationToken token)

@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
+using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Interfaces;
 
@@ -54,7 +56,16 @@ internal class HttpStreamManager : IAsyncDisposable
     /// </summary>
     internal static readonly TimeSpan ReadSideEndTimeout = TimeSpan.FromSeconds(2);
 
+    // A path that cuts a proven WebSocket, on the size of a message for one, would otherwise have the
+    // session reconnect for ever where segments pass. A connection that lives this long has carried
+    // something, and says nothing of the kind.
+    private const int ShortLivedRupturesUntilFallback = 3;
+    private static readonly TimeSpan ShortLived = TimeSpan.FromSeconds(30);
+
     private CancellationTokenSource _streamCts;
+    private int _shortLivedRuptures;
+    private volatile string? _webSocketUnavailable;
+    private WriteTransport? _writeTransport;
     private Task<StreamResult>? _senderTask;
     private Task<StreamResult>? _receiverTask;
     
@@ -62,12 +73,18 @@ internal class HttpStreamManager : IAsyncDisposable
     public Task<StreamResult>? SenderTask => _senderTask;
     public Task<StreamResult>? ReceiverTask => _receiverTask;
 
+    /// <summary>What carries the write stream of the current attempt; null before the first opens.</summary>
+    public WriteTransport? WriteTransport => _writeTransport;
+
+    /// <summary>Why this session does not use a WebSocket, once it has given up on one.</summary>
+    public string? WriteTransportFallback => _webSocketUnavailable;
+
     /// <summary>
     /// The current attempt's task for whichever direction this side writes on (Data for a sender,
     /// Control for a receiver). Unlike <see cref="SenderTask"/>/<see cref="ReceiverTask"/>, which
     /// only resolve once <b>both</b> directions finish (or one fails), this resolves as soon as the
-    /// write side's last segment is answered, which the hub does once it has closed the stream - what
-    /// a caller waiting to know a specific message actually reached the server needs, since the read
+    /// hub answers the end of the write side, which it does once it has closed the stream - what a
+    /// caller waiting to know a specific message actually reached the server needs, since the read
     /// side has no reason to end on its own.
     /// </summary>
     public Task<StreamResult>? WriteTask { get; private set; }
@@ -205,43 +222,243 @@ internal class HttpStreamManager : IAsyncDisposable
         isWrite ? RunWriteStreamAsync(type, writeAction, token) : RunReadStreamAsync(type, readAction, token);
 
     /// <summary>
-    /// Runs the write side as one epoch of segments, ended by a last one once
-    /// <paramref name="writeAction"/> returns. A segment the hub refuses ends the attempt with what
-    /// the refusal means; the epoch's own resends stay inside <see cref="SegmentedWriteStream"/>.
+    /// Runs the write side as one opening of the stream, over what <see cref="OpenWriteStreamAsync"/>
+    /// picks, ended once <paramref name="writeAction"/> returns. A refusal from the hub ends the attempt
+    /// with what it means; a segment's own resends stay inside <see cref="SegmentedWriteStream"/>.
     /// </summary>
     private async Task<StreamResult> RunWriteStreamAsync(ConnectionType type, Func<Stream, CancellationToken, Task> writeAction, CancellationToken token)
     {
-        var stream = new SegmentedWriteStream(
+        WriteStream stream;
+        try
+        {
+            stream = await OpenWriteStreamAsync(type, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return new StreamResult(StreamOutcome.Cancelled);
+        }
+        catch (Exception ex)
+        {
+            return WriteStreamFailed(ex, type);
+        }
+
+        var openedAtMs = Environment.TickCount64;
+        await using (stream)
+        {
+            using var writing = CancellationTokenSource.CreateLinkedTokenSource(token, stream.Lost);
+            try
+            {
+                await writeAction(stream, writing.Token);
+                await stream.CompleteAsync(writing.Token);
+                return new StreamResult(StreamOutcome.Ended);
+            }
+            catch (OperationCanceledException) when (stream.Failure is null || token.IsCancellationRequested)
+            {
+                _config.Logger.LogDebug("WriteLoop closed ({Type}) - Transfer={TransferId}", type, _transferId);
+                return new StreamResult(StreamOutcome.Cancelled);
+            }
+            catch (Exception ex)
+            {
+                var result = WriteStreamFailed(stream.Failure ?? ex, type);
+                if (stream is WebSocketWriteStream && result is { Outcome: StreamOutcome.Retryable, Refused: false })
+                {
+                    CountRupture(openedAtMs);
+                }
+
+                return result;
+            }
+        }
+    }
+
+    private StreamResult WriteStreamFailed(Exception failure, ConnectionType type)
+    {
+        switch (failure)
+        {
+            case StreamRefusedException refused:
+                return new StreamResult(refused.Outcome, refused.Message, Refused: true);
+
+            case WireProtocolViolationException:
+                _config.Logger.LogError("Protocol violation, session failed: {Message}", failure.Message);
+                return new StreamResult(StreamOutcome.Fatal, failure.Message);
+
+            default:
+                _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, failure.Message);
+                return new StreamResult(StreamOutcome.Retryable, failure.Message);
+        }
+    }
+
+    private void CountRupture(long openedAtMs)
+    {
+        if (Environment.TickCount64 - openedAtMs >= ShortLived.TotalMilliseconds)
+        {
+            _shortLivedRuptures = 0;
+        }
+        else if (++_shortLivedRuptures >= ShortLivedRupturesUntilFallback)
+        {
+            GiveUpOnWebSocket($"{_shortLivedRuptures} connections in a row were cut within {ShortLived.TotalSeconds:0}s of opening");
+        }
+    }
+
+    /// <summary>
+    /// Opens the write stream over a WebSocket while the session has not given up on one, and over
+    /// segments otherwise. Giving up lasts until the session ends: a transport that changes back and
+    /// forth would have to pay for the test again at each reconnection.
+    /// </summary>
+    /// <exception cref="StreamRefusedException">The hub refused the stream, or a WebSocket is required and the path carries none.</exception>
+    private async Task<WriteStream> OpenWriteStreamAsync(ConnectionType type, CancellationToken token)
+    {
+        var policy = _config.Options.WriteTransportPolicy;
+        if (policy != WriteTransportPolicy.SegmentsOnly && _webSocketUnavailable == null
+            && await TryOpenWebSocketAsync(type, token) is { } socket)
+        {
+            LogOpened(type, Models.WriteTransport.WebSocket);
+            return new WebSocketWriteStream(socket, _config.Options.StreamBufferSize);
+        }
+
+        if (policy == WriteTransportPolicy.RequireWebSocket)
+        {
+            throw new StreamRefusedException(StreamOutcome.Fatal, "The data stream requires a WebSocket, and the path to the hub does not carry one.");
+        }
+
+        LogOpened(type, Models.WriteTransport.Segments);
+        return new SegmentedWriteStream(
             _transport,
             _config.Logger,
             query => NewRequest(HttpMethod.Post, $"{_dataUrl}/{_transferId}/send?{query}", type),
             _config.Options.StreamBufferSize,
             type == ConnectionType.Data ? _config.Options.PresenceHeartbeatInterval : null);
-        try
+    }
+
+    private void LogOpened(ConnectionType type, WriteTransport transport)
+    {
+        _writeTransport = transport;
+        _config.Logger.LogInformation("Write stream ({Type}) of Transfer={TransferId} opened over {Transport}", type, _transferId, transport);
+    }
+
+    /// <summary>
+    /// Opens a WebSocket and proves that the path carries it. Returns null once the session has given up
+    /// on one: anything short of a proven socket that is not the hub's own verdict says the path does
+    /// not carry one, and an actual outage then fails on the first segment and reconnects as usual.
+    /// </summary>
+    /// <exception cref="StreamRefusedException">The hub refused the stream.</exception>
+    private async Task<WebSocket?> TryOpenWebSocketAsync(ConnectionType type, CancellationToken token)
+    {
+        var refreshed = false;
+        while (true)
         {
-            await writeAction(stream, token);
-            await stream.CompleteAsync(token);
-            return new StreamResult(StreamOutcome.Ended);
+            var accessToken = await _transport.GetAccessTokenAsync(refreshed);
+            var socket = NewWebSocket(type, accessToken);
+            using var bound = CancellationTokenSource.CreateLinkedTokenSource(token);
+            bound.CancelAfter(_config.Options.WebSocketOpenBound);
+
+            var proven = false;
+            try
+            {
+                await socket.ConnectAsync(WebSocketUri(), _transport.HttpClient, bound.Token);
+                await ProveAsync(socket, bound.Token);
+                proven = true;
+                return socket;
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                var seconds = _config.Options.WebSocketOpenBound.TotalSeconds;
+                GiveUpOnWebSocket(socket.HttpStatusCode == HttpStatusCode.SwitchingProtocols
+                    ? $"the path accepted the upgrade but did not carry its probe within {seconds:0.#}s"
+                    : $"the upgrade was not answered within {seconds:0.#}s");
+                return null;
+            }
+            catch (WebSocketException)
+            {
+                switch (socket.HttpStatusCode)
+                {
+                    case HttpStatusCode.Gone:
+                    case HttpStatusCode.NotFound when CarriesRefusal(socket):
+                        throw new StreamRefusedException(StreamOutcome.Gone, $"Transfer Gone ({socket.HttpStatusCode})");
+
+                    case HttpStatusCode.Unauthorized when !refreshed:
+                        _config.Logger.LogWarning("Stream Unauthorized (401). Refreshing token and retrying...");
+                        refreshed = true;
+                        continue;
+
+                    case HttpStatusCode.Unauthorized:
+                        throw new StreamRefusedException(StreamOutcome.Retryable, "Unauthorized (401) - Check credentials");
+
+                    case HttpStatusCode.SwitchingProtocols:
+                        GiveUpOnWebSocket("the path accepted the upgrade but did not carry its probe");
+                        return null;
+
+                    case 0:
+                        GiveUpOnWebSocket("the connection failed before the upgrade was answered");
+                        return null;
+
+                    default:
+                        GiveUpOnWebSocket($"the upgrade was answered {(int)socket.HttpStatusCode}");
+                        return null;
+                }
+            }
+            finally
+            {
+                if (!proven)
+                {
+                    socket.Dispose();
+                }
+            }
         }
-        catch (OperationCanceledException)
+    }
+
+    private void GiveUpOnWebSocket(string reason)
+    {
+        _webSocketUnavailable = reason;
+        _config.Logger.LogWarning("No WebSocket for the write stream of Transfer={TransferId}: {Reason}", _transferId, reason);
+    }
+
+    private static bool CarriesRefusal(ClientWebSocket socket) =>
+        socket.HttpResponseHeaders?.Keys.Any(name => string.Equals(name, WireRoutes.RefusedHeader, StringComparison.OrdinalIgnoreCase)) == true;
+
+    private static async Task ProveAsync(WebSocket socket, CancellationToken token)
+    {
+        await socket.SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Text, endOfMessage: true, token);
+
+        var answer = await socket.ReceiveAsync(new byte[1].AsMemory(), token);
+        if (answer.MessageType != WebSocketMessageType.Text)
         {
-            _config.Logger.LogDebug("WriteLoop closed ({Type}) - Transfer={TransferId}", type, _transferId);
-            return new StreamResult(StreamOutcome.Cancelled);
+            throw new WebSocketException(WebSocketError.InvalidMessageType, "The probe was not answered with a text message.");
         }
-        catch (StreamRefusedException ex)
+    }
+
+    // No KeepAliveTimeout: it aborts a sound stream as soon as the hub stops reading, which is what a
+    // hub parked on a slow peer does. The interval alone sends what a front end's idle timer needs.
+    private ClientWebSocket NewWebSocket(ConnectionType type, string? accessToken)
+    {
+        var socket = new ClientWebSocket();
+        var options = socket.Options;
+        options.HttpVersion = HttpVersion.Version11;
+        options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
+        options.CollectHttpResponseDetails = true;
+        options.KeepAliveInterval = _config.Options.PresenceHeartbeatInterval;
+        options.SetRequestHeader("X-Connection-Type", type.ToString());
+
+        if (!string.IsNullOrEmpty(_affinity))
         {
-            return new StreamResult(ex.Outcome, ex.Message, Refused: true);
+            options.SetRequestHeader("Cookie", _affinity);
         }
-        catch (WireProtocolViolationException ex)
+
+        if (!string.IsNullOrEmpty(accessToken))
         {
-            _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
-            return new StreamResult(StreamOutcome.Fatal, ex.Message);
+            options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
         }
-        catch (Exception ex)
+
+        return socket;
+    }
+
+    private Uri WebSocketUri()
+    {
+        var uri = new UriBuilder($"{_dataUrl}/{_transferId}/send")
         {
-            _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, ex.Message);
-            return new StreamResult(StreamOutcome.Retryable, ex.Message);
-        }
+            Query = $"{DataPlane.HeartbeatParameter}={(long)_config.Options.PresenceHeartbeatInterval.TotalMilliseconds}"
+        };
+        uri.Scheme = uri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws";
+        return uri.Uri;
     }
 
     private async Task<StreamResult> RunReadStreamAsync(ConnectionType type, Func<Stream, CancellationToken, Task> readAction, CancellationToken token)

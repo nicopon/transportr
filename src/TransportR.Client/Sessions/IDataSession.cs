@@ -35,7 +35,14 @@ internal interface IDataSession<T> : IAsyncDisposable
     /// means the transfer is still under way.
     /// </summary>
     SessionState State { get; }
-    
+
+    /// <summary>What carries this session's write stream; null before it first opens.</summary>
+    WriteTransport? WriteTransport { get; }
+
+    /// <summary>Why this session does not use a WebSocket, once it has given up on one.</summary>
+    string? WriteTransportFallback { get; }
+
+
     /// <summary>
     /// Number of items processed (sent or received).
     /// </summary>
