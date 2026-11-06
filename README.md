@@ -173,8 +173,10 @@ On one machine over loopback, the `default` scenario moves 2 million orders (abo
 One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one connection on
 each hop, sender to hub and hub to receiver. Over a long round trip, the first hop sends one segment per round
 trip, the second is bounded by one TCP connection's window, and nothing spreads a transfer over several
-connections. No scenario measures that rate under latency yet: `chaos`
-injects latency and asserts that the transfer completes, not how fast.
+connections. For the first hop, over loopback behind a proxy that injects the latency (simulated latency, not a WAN), a
+transfer moved about 22, 9.3 and 4.7 MB/s at 20, 50 and 100 ms of round trip: 84 to 90 % of one 512 KB segment per round
+trip. The bound is the price of a segment being a short request, which is what lets a transfer through a front end that
+holds a request body back.
 
 ---
 
