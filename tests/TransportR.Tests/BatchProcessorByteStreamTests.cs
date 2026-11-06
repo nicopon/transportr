@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
 using TransportR.Interfaces;
 using TransportR.Protocol;
@@ -11,7 +12,7 @@ using TransportR.Tests.TestHelpers;
 namespace TransportR.Tests;
 
 /// <summary>
-/// The receiving side of the byte-stream mode, through <see cref="BatchProcessor{T}"/>. How the
+/// The byte-stream mode through <see cref="BatchProcessor{T}"/>, receiving and sending. How the
 /// session reacts to the refusals is <c>DataSession</c>'s, covered end to end with the public surface.
 /// </summary>
 public class BatchProcessorByteStreamTests
@@ -258,12 +259,252 @@ public class BatchProcessorByteStreamTests
         Assert.Throws<InvalidOperationException>(() => new BatchProcessor<byte[]>(context, _transferId.ToString(), 10));
     }
 
-    [Fact]
-    public async Task StartSenderAsync_InByteStreamMode_IsRefused()
-    {
-        await using var processor = CreateProcessor();
+    // ---- Sending ----
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => processor.StartSenderAsync(CancellationToken.None));
+    private async Task<BatchProcessor<byte[]>> StartSenderAsync(int budget = 4, int? window = null)
+    {
+        _context.Options.ByteStreamBatchBytes = budget;
+        _context.Options.MaxInFlightBatches = window;
+        var processor = new BatchProcessor<byte[]>(_context, _transferId.ToString(), batchSize: 1024);
+        await processor.StartSenderAsync(CancellationToken.None);
+        return processor;
+    }
+
+    private static byte[] Sequence(int length, byte from = 1) =>
+        Enumerable.Range(0, length).Select(i => (byte)(from + i)).ToArray();
+
+    /// <summary>
+    /// Writes the next <paramref name="count"/> batches the processor queued, as the write loop does,
+    /// and reads them back off that wire.
+    /// </summary>
+    private async Task<List<(ChunkHeader Header, byte[] Body)>> WriteQueuedAsync(BatchProcessor<byte[]> processor, int count)
+    {
+        using var wire = new MemoryStream();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        for (var i = 0; i < count; i++)
+        {
+            var message = Assert.IsType<BatchControlMessage>(await processor.OutgoingMessages.ReadAsync(deadline.Token));
+            Assert.True(await processor.WriteBatchAsync(wire, _transferId, message.BatchId, message.Entry, deadline.Token));
+        }
+        return await ReadWireAsync(wire);
+    }
+
+    private static async Task<List<(ChunkHeader Header, byte[] Body)>> ReadWireAsync(MemoryStream wire)
+    {
+        wire.Position = 0;
+        var chunks = new List<(ChunkHeader, byte[])>();
+        while (await ChunkIO.ReadChunkAsync(wire) is { } chunk)
+        {
+            using (chunk) chunks.Add((chunk.Header, chunk.Payload.ToArray()));
+        }
+        return chunks;
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The condition was not met in time.");
+            await Task.Delay(10);
+        }
+    }
+
+    private Task AckAsync(BatchProcessor<byte[]> processor, int batchId) =>
+        processor.ProcessChunkAsync(new ChunkData(ChunkHeader.CreateControl(_transferId, batchId, ChunkType.BatchAck), null, 0));
+
+    [Fact]
+    public async Task StartSenderAsync_InByteStreamMode_SendsWhatItIsGivenAsAStreamBatch()
+    {
+        await using var processor = await StartSenderAsync();
+
+        await processor.SendAsync([7], CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+
+        var chunk = Assert.Single(await WriteQueuedAsync(processor, 1));
+        Assert.Equal(ChunkType.StreamBatch, chunk.Header.Type);
+        Assert.Equal([7], chunk.Body);
+    }
+
+    [Fact]
+    public async Task SendAsync_InByteStreamMode_SendsStreamBatchesOfAtMostTheBudget_CountedInBytes()
+    {
+        await using var processor = await StartSenderAsync(budget: 4);
+        var bytes = Sequence(9);
+
+        await processor.SendAsync(bytes[..3], CancellationToken.None);
+        await processor.SendAsync(bytes[3..8], CancellationToken.None);
+        await processor.SendAsync(bytes[8..], CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+
+        var chunks = await WriteQueuedAsync(processor, 3);
+        Assert.All(chunks, c => Assert.Equal(ChunkType.StreamBatch, c.Header.Type));
+        Assert.Equal([4, 4, 1], chunks.Select(c => c.Header.Count));
+        Assert.All(chunks, c => Assert.Equal(c.Header.Count, c.Header.PayloadLength));
+        Assert.Equal([0, 1, 2], chunks.Select(c => c.Header.BatchId));
+        Assert.Equal(bytes, chunks.SelectMany(c => c.Body));
+        Assert.Equal(9, processor.ItemsSent);
+    }
+
+    [Fact]
+    public async Task SendBytesAsync_AndSendRangeAsync_AppendToTheSameStream()
+    {
+        await using var processor = await StartSenderAsync(budget: 4);
+        var bytes = Sequence(10);
+
+        await processor.SendBytesAsync(bytes.AsMemory(0, 5), CancellationToken.None);
+        await processor.SendRangeAsync([bytes[5..7], bytes[7..]], CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+
+        var chunks = await WriteQueuedAsync(processor, 3);
+        Assert.Equal(bytes, chunks.SelectMany(c => c.Body));
+        Assert.Equal(10, processor.ItemsSent);
+    }
+
+    [Fact]
+    public async Task SendAsync_BelowTheBudget_IsSentOnceTheFlushIntervalElapses()
+    {
+        await using var processor = await StartSenderAsync(budget: 1024);
+
+        await processor.SendAsync(Sequence(3), CancellationToken.None);
+
+        var chunk = Assert.Single(await WriteQueuedAsync(processor, 1));
+        Assert.Equal(3, chunk.Header.Count);
+        Assert.Equal(Sequence(3), chunk.Body);
+    }
+
+    [Fact]
+    public async Task ResendUnackedBatches_InByteStreamMode_ResendsTheSameBytes_UnderTheSameTypeAndCount()
+    {
+        await using var processor = await StartSenderAsync(budget: 4);
+        await processor.SendAsync(Sequence(10), CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+        var sent = await WriteQueuedAsync(processor, 3);
+
+        using var reopened = new MemoryStream();
+        await processor.ResendUnackedBatchesAsync(reopened, _transferId, didPingPong: true, nextExpectedFromPong: 1, CancellationToken.None);
+
+        var resent = await ReadWireAsync(reopened);
+        Assert.Equal([1, 2], resent.Select(c => c.Header.BatchId));
+        for (var i = 0; i < resent.Count; i++)
+        {
+            Assert.Equal(sent[i + 1].Header, resent[i].Header);
+            Assert.Equal(sent[i + 1].Body, resent[i].Body);
+        }
+        Assert.All(resent, c => Assert.Equal(ChunkType.StreamBatch, c.Header.Type));
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenTheWindowIsFull_ParksTheProducerBeforeRentingABatch_UntilAnAck()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        await using var processor = await StartSenderAsync(budget: 4, window: 2);
+        await processor.SendAsync(Sequence(8), CancellationToken.None);
+        await WaitUntil(() => processor.UnackedCount == 2);
+
+        var parked = processor.SendAsync(Sequence(1), CancellationToken.None);
+
+        Assert.NotSame(parked, await Task.WhenAny(parked, Task.Delay(300)));
+        Assert.Equal(2, streams.Created);
+
+        await AckAsync(processor, 0);
+
+        await parked.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(3, streams.Created);
+    }
+
+    [Fact]
+    public async Task Exit1_ARegisteredBatch_HasItsStreamDisposedOnce_AndItsSlotBackOnlyWithItsAck()
+    {
+        var logs = new Infrastructure.LogRecorder();
+        _context.Logger = logs.CreateLogger("test");
+        var streams = new StreamCounts(_context.StreamManager);
+        await using var processor = await StartSenderAsync(budget: 4, window: 1);
+
+        await processor.SendAsync(Sequence(4), CancellationToken.None);
+        await WaitUntil(() => processor.UnackedCount == 1);
+        Assert.Equal(1, streams.Disposed);
+
+        var parked = processor.SendAsync(Sequence(1), CancellationToken.None);
+        Assert.NotSame(parked, await Task.WhenAny(parked, Task.Delay(200)));
+        await AckAsync(processor, 0);
+        await parked.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, streams.DisposedTwice);
+        Assert.Empty(logs.MessagesFrom(LogLevel.Error));
+    }
+
+    [Fact]
+    public async Task Exit3_AbandonSender_InByteStreamMode_ReleasesAProducerParkedOnTheWindow()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        await using var processor = await StartSenderAsync(budget: 4, window: 1);
+        await processor.SendAsync(Sequence(4), CancellationToken.None);
+        await WaitUntil(() => processor.UnackedCount == 1);
+        var parked = processor.SendAsync(Sequence(1), CancellationToken.None);
+        Assert.NotSame(parked, await Task.WhenAny(parked, Task.Delay(200)));
+
+        processor.AbandonSender();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => parked.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, streams.Created);
+    }
+
+    [Fact]
+    public async Task Exit4_DisposeAsync_InByteStreamMode_DisposesEveryStreamOnce()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        var processor = await StartSenderAsync(budget: 4, window: 3);
+        await processor.SendAsync(Sequence(9), CancellationToken.None);
+        await WaitUntil(() => processor.UnackedCount == 2);
+        Assert.Equal(3, streams.Created);
+
+        await processor.DisposeAsync();
+
+        await WaitUntil(() => streams.Disposed == 3);
+        await Task.Delay(50);
+        Assert.Equal(3, streams.Disposed);
+        Assert.Equal(0, streams.DisposedTwice);
+    }
+
+    [Fact]
+    public async Task Exit6_ABatchThatFailsOnceRegistered_LeavesItsSlotToItsAck()
+    {
+        var logs = new Infrastructure.LogRecorder();
+        _context.Logger = logs.CreateLogger("test");
+        await using var processor = await StartSenderAsync(budget: 4, window: 1);
+        var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        processor.OnSerializationFailed += ex => failed.TrySetResult(ex);
+
+        // The queue to the write loop is closed: the batch is registered, then cannot be queued.
+        processor.CompleteSenderChannel();
+        await processor.SendAsync(Sequence(4), CancellationToken.None);
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, processor.UnackedCount);
+
+        await AckAsync(processor, 0);
+
+        // The ack gave the slot back once; a second release would have been logged as an over-release.
+        Assert.False(logs.Has(LogLevel.Error, "over-released"));
+        await processor.SendAsync(Sequence(1), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private sealed class StreamCounts
+    {
+        private int _created;
+        private int _disposed;
+        private int _disposedTwice;
+
+        public StreamCounts(RecyclableMemoryStreamManager manager)
+        {
+            manager.StreamCreated += (_, _) => Interlocked.Increment(ref _created);
+            manager.StreamDisposed += (_, _) => Interlocked.Increment(ref _disposed);
+            manager.StreamDoubleDisposed += (_, _) => Interlocked.Increment(ref _disposedTwice);
+        }
+
+        public int Created => Volatile.Read(ref _created);
+        public int Disposed => Volatile.Read(ref _disposed);
+        public int DisposedTwice => Volatile.Read(ref _disposedTwice);
     }
 
     private sealed class ArrayOwner(byte[] data) : IMemoryOwner<byte>
@@ -274,7 +515,7 @@ public class BatchProcessorByteStreamTests
 
     private class ByteStreamSessionContext : ISessionContext<byte[]>
     {
-        public ILogger Logger { get; } = new StubLogger();
+        public ILogger Logger { get; set; } = new StubLogger();
         public IBatchSerializer<byte[]>? Serializer => null;
         public HttpClient HttpClient => null!;
         public int BatchFlushIntervalMs => 50;
