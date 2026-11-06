@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using Microsoft.IO;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
@@ -336,7 +337,19 @@ internal class BatchProcessor<T> : IAsyncDisposable
         await memoryStream.WriteAsync(countBytes.AsMemory(), ct);
         // Not null: StartSenderAsync refuses the only mode without a serializer.
         await _serializer!.SerializeBatchAsync(memoryStream, items);
-        
+
+        await RegisterBatchAsync(memoryStream, batchId, items.Count, onRegistered, ct);
+    }
+
+    /// <summary>
+    /// Copies a batch - its 4-byte count, then its body - out of <paramref name="memoryStream"/> into a
+    /// <see cref="BatchEntry"/>, registers it as unacknowledged and queues it for the write loop. The
+    /// stream stays the caller's to dispose. <paramref name="onRegistered"/> runs once the entry is in
+    /// <see cref="_unackedBatches"/>: from then on, the ack path owns the batch's slot.
+    /// </summary>
+    private async Task RegisterBatchAsync(
+        RecyclableMemoryStream memoryStream, int batchId, int count, Action onRegistered, CancellationToken ct)
+    {
         var totalLen = (int)memoryStream.Length;
         var owner = new PooledMemoryOwner(memoryStream.GetBuffer().AsMemory(0, totalLen));
         
@@ -353,7 +366,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         entry.TryRetain();
 
         Interlocked.Increment(ref _pendingBatches);
-        Interlocked.Add(ref _itemsSent, items.Count);
+        Interlocked.Add(ref _itemsSent, count);
         
         UpdateMaxBatchIdSent(batchId);
         
