@@ -19,6 +19,7 @@ dotnet run --urls http://localhost:5252
 | `GET /health` | Health check |
 | `GET /api/client/{id}/events` | A client's stream of server-sent events: opening it registers the client |
 | `/api/client/{id}/…` | The other control requests: discovery, transfers, replies, presence, heartbeats and probe (see "Communication Channels" in `TransportRArchitecture.md`) |
+| `GET /api/stream/{id}/send` | Data upload over a WebSocket (an upgrade request) |
 | `POST /api/stream/{id}/send` | Data upload, one segment of a write stream per request |
 | `GET /api/stream/{id}/receive` | Data download |
 | `POST /api/stream/{id}/abort` | A participant ends its transfer when its `Abort` cannot be written to the stream |

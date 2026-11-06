@@ -80,6 +80,18 @@ The hub must be of the same release.
 forgotten it (a restart, an eviction); the next presence heartbeat registers it again, and
 `RefreshRegistrationAsync()` does so at once.
 
+### Write transport
+A write stream (the sender's data, the receiver's acknowledgements) goes over a WebSocket where the path to the hub
+carries one, and over short POST requests (segments) otherwise:
+```csharp
+.WithWriteTransport(WriteTransportPolicy.PreferWebSocket) // the default
+```
+`PreferWebSocket` falls back on segments for the rest of the transfer, with a logged warning, when the path does not
+carry a WebSocket; `RequireWebSocket` fails the transfer (`TransferFailedException`) instead; `SegmentsOnly` never asks
+for an upgrade. `GetTransfers()` reports `TransferInfo.WriteTransport` (`WebSocket` or `Segments`, null before the first
+opening) and `TransferInfo.WriteTransportFallback` (why a transfer has no WebSocket, null otherwise). A proxy in front of
+the hub must relay the upgrade: see the hub's README.
+
 ### Serialization
 MessagePack is the recommended default: on par with Protobuf in our benchmark, and it takes any POCO
 without attributes or schema. Protobuf needs annotated contracts and produces the most compact payload;

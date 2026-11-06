@@ -27,6 +27,7 @@ Provides the hub services that:
 │  └── PUT /api/client/{id}/token                             │
 │                                                             │
 │  StreamController (data plane)                              │
+│  ├── GET /api/stream/{id}/send (WebSocket upgrade)          │
 │  ├── POST /api/stream/{id}/send (one segment per request)   │
 │  ├── GET /api/stream/{id}/receive                           │
 │  └── POST /api/stream/{id}/abort                            │
@@ -37,6 +38,12 @@ Provides the hub services that:
 │  └── TransportRServer (dumb pipe bridge)                    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+A write stream arrives as a WebSocket (`GET` with an upgrade) or as segments (`POST`) on the same path: whatever filters
+requests by method in front of the hub must let both through. For a client to use a WebSocket it has to relay `Upgrade`
+and `Connection` and the socket's bytes as they come, both ways; a front end that does not relay the upgrade, or holds
+back the opening proof, makes the client use segments. The route brings `UseWebSockets` with it, so the host's pipeline
+needs nothing. See "Data Plane Transport" in `TransportRArchitecture.md`.
 
 ## Integration
 

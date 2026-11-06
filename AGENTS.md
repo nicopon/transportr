@@ -76,24 +76,28 @@ This split is the central design decision and shows up everywhere: the control p
 — a client's stream of server-sent events, which registers it, plus ordinary requests for `receivers`,
 `transfers`, `replies`, `presence`, the transfer heartbeats and the probe a reconnecting session makes
 before it reopens its streams — and never touches bulk bytes. Data itself moves
-over plain HTTP (`StreamController`: a read stream is one long `GET /api/stream/{id}/receive`, a write
-stream a succession of short `POST /api/stream/{id}/send` segments, each at an offset in an epoch), with the hub acting as a **dumb pipe** that forwards opaque chunks
+over plain HTTP (`StreamController`: a read stream is one long `GET /api/stream/{id}/receive`; a write
+stream is a WebSocket, `GET /api/stream/{id}/send` with an upgrade, or, as the fallback, a succession of short
+`POST /api/stream/{id}/send` segments, each at an offset in an epoch), with the hub acting as a **dumb pipe** that forwards opaque chunks
 without deserializing them or parsing their headers: only the clients read a `ChunkHeader`, and a
 change that has the hub read one (to see a `Complete` or an `Abort`, say) reverses this decision
-rather than extending it. Reliability, the resume point and even transfer-completion detection are
+rather than extending it. What the hub reads of a write stream is its transport's: a segment's epoch and offset,
+a WebSocket's probe and `Close` status. Reliability, the resume point and even transfer-completion detection are
 data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid control-vs-stream
 race conditions. The hub judges a transfer's activity on
 its heartbeats and on the bytes its streams carry, counted and never read, and a sender's data stream on its
-silence (an epoch with no segment for two presence intervals is a cut stream). Don't reintroduce a
+silence (two presence intervals without a segment, or without a byte on a WebSocket, is a cut stream). Don't reintroduce a
 control-plane message for something the data plane already decides (see "Why Not Control Plane?"
 in `ResilienceArchitecture.md`). The one request of the data plane that carries no stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
 cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
 transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
 cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
 
-The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`: do not enable HTTP/2 without reading
-"Data Plane Transport" in `TransportRArchitecture.md` (a continuous upload was capped by the flow-control
-window; segments under HTTP/2 have not been measured).
+The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`, a WebSocket's upgrade included: do not enable
+HTTP/2 without reading "Data Plane Transport" in `TransportRArchitecture.md` (a continuous upload was capped by the
+flow-control window; segments under HTTP/2 have not been measured, and a WebSocket over HTTP/2 is excluded). The
+client chooses the write transport (`WriteTransportPolicy`), and a fallback from WebSocket to segments is
+observable, never silent: in its log and on `TransferInfo`.
 
 The handshake itself lives in `TransferInitiator`, not in the controller: `ClientController.InitTransfer`
 drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
@@ -158,9 +162,10 @@ sender through `OnSendRequested` instead; a client with no handler refuses it. `
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
 loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands decoded items to
 `ReceiveBuffer`. `ControlChannel` owns the stream of events and the requests made of the control
-plane, and opens the stream again when it is lost; `HttpStreamManager` owns the data-plane HTTP
-streams and restarts them on `IOException`/`HttpRequestException` (the hub never proactively
-notifies clients of a disconnect — see "Disconnection Detection" in `ResilienceArchitecture.md`).
+plane, and opens the stream again when it is lost; `HttpStreamManager` owns the data-plane
+streams, picks what carries each write stream and reports how every attempt ended, and `DataSession` reopens them
+after a cut (the hub never proactively notifies clients of a disconnect — see "Disconnection Detection" in
+`ResilienceArchitecture.md`).
 
 ### Hub-side lifecycle
 
@@ -177,10 +182,10 @@ are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.c
 `DataSessionStateMachineTests.cs`) — a
 change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
 `ConnectionBridge`/`TransferManager`.
-A transfer ends well when the sender's final data segment ends its stream cleanly: the bridge takes `OnCompleted` and
+A transfer ends well when the sender's data stream ends cleanly (its final segment, or a WebSocket's `Close(4000)`): the bridge takes `OnCompleted` and
 `ITransferRetirer.RetireAsync` (internal) removes the state and both bridges, telling nobody. Only that
-signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for that segment's answer,
-and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the segment.
+signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for the answer to that end,
+and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the end.
 `BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
 `BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer
 through `ITransferTerminator`, and **skips `Active` bridges entirely**; `TransferCleanupService`

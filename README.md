@@ -172,11 +172,17 @@ On one machine over loopback, the `default` scenario moves 2 million orders (abo
 
 One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one connection on
 each hop, sender to hub and hub to receiver. Over a long round trip, the first hop sends one segment per round
-trip, the second is bounded by one TCP connection's window, and nothing spreads a transfer over several
-connections. For the first hop, over loopback behind a proxy that injects the latency (simulated latency, not a WAN), a
-transfer moved about 22, 9.3 and 4.7 MB/s at 20, 50 and 100 ms of round trip: 84 to 90 % of one 512 KB segment per round
-trip. The bound is the price of a segment being a short request, which is what lets a transfer through a front end that
-holds a request body back.
+trip when the write stream is sent in segments, the fallback; the second is bounded by one TCP connection's window, and
+nothing spreads a transfer over several connections. For the first hop in segments, over loopback behind a proxy that
+injects the latency (simulated latency, not a WAN), a transfer moved about 22, 9.3 and 4.7 MB/s at 20, 50 and 100 ms of
+round trip: 84 to 90 % of one 512 KB segment per round trip. The bound is the price of a segment being a short request,
+which is what lets a transfer through a front end that holds a request body back.
+
+A write stream goes over a WebSocket where the path to the hub carries one (it waits for no answer between messages),
+and falls back on segments otherwise (`WithWriteTransport`). The front end has to relay the upgrade and the socket's
+bytes; one that does not relay the upgrade, or holds back the proof that follows it, is found when the stream opens, and
+the transfer goes on in segments. No WebSocket rate is
+given here, and the figures above are those of segments. Details: [Architecture](./TransportRArchitecture.md#data-plane-transport-http11-websocket-or-segments).
 
 ---
 
@@ -232,7 +238,9 @@ hub. See the [Security guide](./SecurityArchitecture.md).
   effective session affinity at the load balancer, not merely preferred affinity
   (see [Architecture](./TransportRArchitecture.md#high-availability-ha)).
 - **Tested on a limited set of environments**: two reverse proxies (YARP, a stock nginx), Azure App Service,
-  HTTP/1.1 to the hub, two identity providers, and the scenarios above on developer machines. Reports from other environments are welcome.
+  HTTP/1.1 to the hub, two identity providers, and the scenarios above on developer machines. The nginx and App Service
+  runs carried write streams in segments: a WebSocket has been carried on loopback only, directly and through YARP and
+  Toxiproxy. Reports from other environments are welcome.
 
 ---
 

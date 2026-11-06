@@ -64,11 +64,11 @@ sequenceDiagram
     R-->>S: CompleteAck (in-stream)
     
     Note over S,R: 🔌 Streams close via EOF (pure dataplane)
-    S->>H: final segment
-    H->>R: GET EOF
+    S->>H: end of the data stream
+    H->>R: end of the stream
 ```
 
-> **Note**: Transfer completion uses pure dataplane signals (HTTP EOF), not the control plane.
+> **Note**: Transfer completion uses pure dataplane signals (the end of a stream), not the control plane.
 > See [ResilienceArchitecture.md](./ResilienceArchitecture.md#transfer-completion-eof-domino-sequence) for details.
 
 ### Control Plane vs Data Plane
@@ -82,7 +82,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 2. **Data Plane (HTTP Streaming)**
     - **Role**: "The Pipe"
-    - **Methods**: `POST /api/stream/{id}/send`, `GET /api/stream/{id}/receive`, and `POST /api/stream/{id}/abort` for the one case a stream cannot carry (see *Abort request* below)
+    - **Methods**: `GET` (a WebSocket) or `POST` (segments) `/api/stream/{id}/send`, `GET /api/stream/{id}/receive`, and `POST /api/stream/{id}/abort` for the one case a stream cannot carry (see *Abort request* below)
     - **Responsibility**: Moves batches of data. The **Hub** acts as a **Dumb Pipe**, forwarding opaque binary chunks from Sender to Receiver without inspecting or deserializing the payload.
 
 ### Communication Channels
@@ -91,9 +91,9 @@ TransportR clearly separates responsibilities between coordination and transfer:
 |---------|-----------|-------|
 | **Control plane: events** | HTTP GET, server-sent events (`/api/client/{id}/events`) | Hub → Client. Opening it registers the client and its end marks the client disconnected. Events: `registered` (first, at once), `keepalive`, `ready-to-receive`, `request-send`, `cancel-transfer` |
 | **Control plane: requests** | HTTP (`/api/client/{id}/…`) | Client → Hub: `GET receivers` (discovery), `POST transfers` (open a transfer), `POST replies/{requestId}` (answer to an event that asks), `POST presence/{connectionId}`, `POST transfers/{transferId}/heartbeat`, `POST transfers/{transferId}/ping` (the probe before a session reopens its streams) |
-| **Data Send** | HTTP POST, one segment per request (`/api/stream/{id}/send`, Header: `X-Connection-Type: Data`) | Sender → Hub |
+| **Data Send** | WebSocket (`GET /api/stream/{id}/send`), or HTTP POST, one segment per request (`POST` on the same path); Header: `X-Connection-Type: Data` | Sender → Hub |
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`, Header: `X-Connection-Type: Data`) | Hub → Receiver |
-| **Control Send** | HTTP POST, one segment per request (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
+| **Control Send** | WebSocket or HTTP POST segments, as Data Send (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
 | **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |
 | **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
@@ -104,13 +104,67 @@ The events stream is HTTP/1.1 like the data streams (below); a reverse proxy mus
 rather than buffer it, and keep its idle timeout above the hub's keepalive interval (*Key Timings* in
 `ResilienceArchitecture.md`).
 
-### Data Plane Transport: HTTP/1.1, in Segments
+### Data Plane Transport: HTTP/1.1, WebSocket or Segments
 
-A write stream, the sender's Data or the receiver's Control, is a succession of short `POST /api/stream/{id}/send`
-requests, not one long one. Each carries the next bytes of one opening of the stream, its **epoch**, at their
-**offset** in it (`DataPlane`). A front end that buffers a request body holds back the few bytes a stream ends on,
-an acknowledgement or a `Pong`, until the request is over; a short request is over at once. The hub reads the epoch
-and the offset from the query, never a byte of the body.
+A write stream, the sender's Data or the receiver's Control, goes over a **WebSocket** (one `GET /api/stream/{id}/send`
+with an upgrade) where the path to the hub carries one, and over **segments** (a succession of short
+`POST /api/stream/{id}/send` requests) otherwise. The client picks at each opening (`WithWriteTransport`):
+`PreferWebSocket`, the default, falls back; `RequireWebSocket` fails the transfer where there is no WebSocket;
+`SegmentsOnly` never asks. Read streams are long GETs either way. Above the transport nothing differs (`Ping`/`Pong`,
+resumption, the end sequence), and the hub copies the bytes of both unread: what it reads is the transport's own, an
+epoch and an offset, a WebSocket's probe and `Close` status.
+
+**A WebSocket opens in this order.**
+
+1. The client sends the upgrade with `X-Connection-Type`, the token, the affinity cookie and `heartbeatMs` (the presence
+   interval, which every WebSocket announces).
+2. The hub answers `426` to a request that is not an upgrade (a front end did not relay it; logged as a warning), `400`
+   to an unreadable `X-Connection-Type`, `404` with `TransportR-Refused` to an unknown transfer or a caller who is not
+   its participant, `400` to a missing `heartbeatMs`; otherwise it accepts. The route brings `UseWebSockets` with it:
+   the host adds nothing to its pipeline.
+3. **The proof.** The client sends an empty `Text` message, the hub answers with one, and the upgrade and the proof
+   together have 5 s. A front end can accept an upgrade and still hold bytes back; this is the one test of the
+   client-hub hop that depends neither on the peer nor on a hub parked on a slow one, and a path that carries it and
+   holds bytes back later is not detected by it. The hub reads that message's type and nothing else: the socket then
+   carries `Binary` messages only, copied to the bridge unread.
+4. **The first byte.** The socket enters the bridge only when it carries one, as an epoch does with its first segment,
+   or a side with nothing to say yet would cut its peer's stream at each reconnection of the peer and be cut in turn.
+   It replaces the source the bridge holds, a segment epoch included, whose late segments are answered `409`.
+5. **The stream.** A flush is one binary message of at most `StreamBufferSize` (512 KB) and waits for no answer: a peer
+   that reads slowly fills the socket, which blocks the flush. That is the backpressure. Each end sends a keepalive
+   frame every presence interval, with no keepalive timeout, which would abandon a sound stream whenever the hub is
+   parked on a slow peer.
+
+**Whatever is neither a verdict of the hub nor a proven WebSocket reads as a path that does not carry one.** `404` with
+`TransportR-Refused` and `410` are the transfer gone; `401` renews the token and opens once more. Any other answer than
+`101` (a `404` without that header, `200`, `403`, `405`, `421`, `426`, `5xx`), a connection cut before the answer, no
+answer within 5 s, and a `101` whose proof goes unanswered or is cut are the path. The client then uses segments until
+the session ends, in the same attempt and before the first byte, and says why in its log (a warning) and in
+`TransferInfo.WriteTransportFallback`; the next transfer tries a WebSocket again. Under `RequireWebSocket` the transfer
+fails instead, with a message that names no path or setting. A path that passes no segment either fails on the first
+one, and the session reconnects as after any cut.
+
+A cut of a proven WebSocket is reopened as any cut is (probe, new opening, `Ping`/`Pong`), over a WebSocket again. A path
+that cuts every one, on a frame size or a firewall, would have the session reconnect for ever where segments pass:
+three cuts in a row, each within 30 s of its opening, read as the path too, and a connection that lives 30 s clears the
+count. A refusal is not a cut.
+
+**A WebSocket ends in one of three ways.**
+
+- **Cleanly**: `Close(4000)` in each direction, the client's after its last flush and the hub's once the bridge has
+  closed the stream. A private status, because that end retires the transfer: a front end that cuts with a `Close` of
+  its own, 1000 or 1001, has to read as the cut it is. The hub reads any other `Close` as a cut.
+- **Refused**: `Close(4409)` from the hub, what a `409` says to a segment (the stream was replaced, its peer was lost,
+  the transfer is over), read as retryable and refused. It goes at the client's next write, not at once, as a `409`
+  does: sent sooner, a client whose peer reconnected would reconnect in turn and cut that peer. A transfer gone is a
+  `404` at the reopening, as for an epoch.
+- **Cut**: the connection fails, or closes with another status. The client keeps a read pending for this, since a
+  `Close` nobody reads leaves its writes succeeding as if nothing had happened.
+
+**Segments** are the fallback, and pass wherever a request does. A front end that buffers a request body holds back the
+few bytes a stream ends on, an acknowledgement or a `Pong`, until the request is over; a short request is over at once.
+Each segment carries the next bytes of one opening of the stream, its **epoch**, at their **offset** in it (`DataPlane`).
+The hub reads the epoch and the offset from the query, never a byte of the body.
 
 - **One segment in flight.** A flush is a segment, of at most `StreamBufferSize` (512 KB). The hub puts the segments
   of an epoch end to end into the stream a bridge copies from and answers one once the peer has it, so a peer that
@@ -123,20 +177,21 @@ and the offset from the query, never a byte of the body.
   replaced or is over, or the segment reached an instance other than the one holding it, which is not a `421`: bridges
   are local to an instance); the client opens a new epoch and the session reconnects as after any cut. `401` took
   nothing: the client renews its token and sends the segment again. `404` and `410` are the transfer gone. On any
-  refusal the attempt ends only once its read stream has, 2 s at most: what the hub relayed before refusing, a
-  sender's `Abort` for one, is read first.
+  refusal, of a segment or a WebSocket, the attempt ends only once its read stream has, 2 s at most: what the hub
+  relayed before refusing, a sender's `Abort` for one, is read first.
 - **The end.** The last segment carries `final=true` and goes after the `CompleteAck`. The hub answers it once the
   bridge has closed the stream (*Transfer Completion* in `ResilienceArchitecture.md`).
 
-The requests are HTTP/1.1, and the client says so on every one (`HttpVersion.Version11`, `RequestVersionExact`, in
-`HttpStreamManager`). It is a decision, not a default left alone:
+Both transports are HTTP/1.1, and the client says so on every request, an upgrade included (`HttpVersion.Version11`,
+`RequestVersionExact`, in `HttpStreamManager`). It is a decision, not a default left alone:
 
-- **HTTP/2 has nothing to offer this traffic.** A participant holds one long GET per transfer and sends its writes
-  one request at a time: there is nothing to multiplex and no request header worth compressing.
+- **HTTP/2 has nothing to offer this traffic.** A participant holds one long GET per transfer and writes on one socket,
+  or one request at a time: there is nothing to multiplex and no request header worth compressing.
 - **HTTP/2 caps an upload at its flow-control window.** With Kestrel's default windows, one continuous
   sender-to-hub stream reached 16 MB/s at 20 ms round-trip and 4.7 MB/s at 80 ms (h2c, loopback behind a
   latency-injecting TCP proxy). A hub host can raise `Http2.InitialStreamWindowSize`; HTTP/1.1 needs no such tuning.
-  That was measured on a continuous upload: segments under HTTP/2 have not been.
+  That was measured on a continuous upload: segments under HTTP/2 have not been, and a WebSocket over HTTP/2
+  (RFC 8441) is excluded.
 
 For a deployment:
 
@@ -145,16 +200,23 @@ For a deployment:
 - A reverse proxy has to do what the control plane asks of it already: answer short requests in full, and relay a GET
   as it is written rather than buffer it (`X-Accel-Buffering: no`, which nginx honours; the hub sends the headers
   before it has a byte to relay).
-- A request body is bounded by the proxy's limit: nginx's `client_max_body_size` is 1 MB by default, which a 512 KB
-  segment fits and a 2 MB one does not (413), so `StreamBufferSize` stays under it behind such a proxy.
-- A GET must carry a byte, and a request must be answered, before the proxy's idle limit: 60 s for a default nginx,
+- For a WebSocket it also has to relay the upgrade (`Upgrade` and `Connection` on `GET /api/stream/{id}/send`) and the
+  bytes of the socket as they come, both ways. Where the reference proxy strips the two headers the hub answers `426`
+  and the client uses segments at once; where it accepts the upgrade and relays nothing, the client gives up on the
+  proof after 5 s.
+- With segments, a request body is bounded by the proxy's limit: nginx's `client_max_body_size` is 1 MB by default,
+  which a 512 KB segment fits and a 2 MB one does not (413), so `StreamBufferSize` stays under it behind such a proxy.
+- A GET must carry a byte, and a segment must be answered, before the proxy's idle limit: 60 s for a default nginx,
   240 s for App Service. A sender with nothing to write sends a `Ping` every presence interval (15 s): a byte on the
-  receiver's data GET, and its `Pong` one on the sender's control GET.
-- Validated: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`) with a transfer of 200
-  items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no 408 or 499 on
-  `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a stock nginx
-  (the `nginx-default` scenario, a `proxy_pass` and nothing else) and the reference proxy in
-  `tests/TransportR.TestProxy` (YARP). No other front end has been tried.
+  receiver's data GET, and its `Pong` one on the sender's control GET. A WebSocket's keepalive frames go at the same
+  interval; whether a front end counts them as traffic has not been measured.
+- Validated with segments: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`) with a
+  transfer of 200 items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no
+  408 or 499 on `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a
+  stock nginx (the `nginx-default` scenario) and the reference proxy in `tests/TransportR.TestProxy` (YARP). A WebSocket
+  has been carried on loopback only: directly, through the reference proxy, which relays the upgrade and the affinity
+  cookie, and through Toxiproxy for the cuts. The `nginx-default` scenario, a `proxy_pass` that sets neither header, has
+  not been run with one, and what a stock nginx, App Service or a corporate proxy answers has not been measured.
 
 ### Resilience & Reliability
 
