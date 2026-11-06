@@ -97,7 +97,7 @@ internal class TransportRServer : ITransportRServer
                 
                 if (endReason == StreamEndReason.CleanEOF)
                 {
-                    _logger.LogInformation("BRIDGE: Sender POST ended with clean EOF {BridgeKey}", bridgeKey);
+                    _logger.LogInformation("BRIDGE: Sender stream ended with clean EOF {BridgeKey}", bridgeKey);
                     
                     // If this was the Data channel, advance to domino step 5
                     if (type == ConnectionType.Data)
@@ -118,11 +118,11 @@ internal class TransportRServer : ITransportRServer
 
                     if (await HoldsAsync(transferId).ConfigureAwait(false))
                     {
-                        _logger.LogWarning("BRIDGE: Sender POST ended with RUPTURE {BridgeKey}. Client should reconnect.", bridgeKey);
+                        _logger.LogWarning("BRIDGE: Sender stream ended with RUPTURE {BridgeKey}. Client should reconnect.", bridgeKey);
                     }
                     else
                     {
-                        _logger.LogInformation("BRIDGE: Sender POST ended with RUPTURE {BridgeKey}: the hub no longer holds the transfer.", bridgeKey);
+                        _logger.LogInformation("BRIDGE: Sender stream ended with RUPTURE {BridgeKey}: the hub no longer holds the transfer.", bridgeKey);
                     }
 
                     return;
@@ -133,7 +133,7 @@ internal class TransportRServer : ITransportRServer
                     // cancellation of its own before the destination's token has been cancelled.
                     if (cancellationToken.IsCancellationRequested || senderToken.IsCancellationRequested)
                     {
-                        _logger.LogInformation("BRIDGE: Sender POST was cancelled {BridgeKey}", bridgeKey);
+                        _logger.LogInformation("BRIDGE: Sender stream was cancelled {BridgeKey}", bridgeKey);
 
                         // Ends quietly, but the registration must not outlive the request: kept, the
                         // bridge stays Active on a source nobody is on and is never judged idle. A

@@ -164,7 +164,7 @@ public class TransportRServerTests
         await EndsAsync(send);
 
         Assert.False(hub.Logs.Has(LogLevel.Warning, "RUPTURE"), "A rupture of a transfer the hub had forgotten was logged as a warning.");
-        Assert.True(hub.Logs.Has(LogLevel.Information, "Sender POST ended with RUPTURE"), "The end of the stream was not logged at all.");
+        Assert.True(hub.Logs.Has(LogLevel.Information, "Sender stream ended with RUPTURE"), "The end of the stream was not logged at all.");
     }
 
     [Fact]

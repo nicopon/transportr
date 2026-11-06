@@ -159,7 +159,7 @@ public class HubEndedTransferLogTests
     private static bool SourceEnded(LogRecorder hubLogs, string bridgeKey) =>
         hubLogs.MessagesFrom(LogLevel.Information).Any(m =>
             m.Contains(bridgeKey, StringComparison.Ordinal)
-            && (m.Contains("Sender POST", StringComparison.Ordinal)
+            && (m.Contains("Sender stream", StringComparison.Ordinal)
                 || m.Contains("Source Disconnected", StringComparison.Ordinal)
                 || m.Contains("Source cancelled", StringComparison.Ordinal)));
 
