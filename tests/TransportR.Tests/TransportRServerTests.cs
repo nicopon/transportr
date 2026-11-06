@@ -510,6 +510,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            TimeProvider.System,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -536,6 +537,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            TimeProvider.System,
             NullLogger<StreamController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = http }

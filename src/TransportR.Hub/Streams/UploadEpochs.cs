@@ -37,6 +37,18 @@ internal sealed class UploadEpochs
     }
 
     /// <summary>
+    /// Ends the current epoch of a stream, if any: its next opening is a WebSocket, which replaces it
+    /// without going through here, and a late segment of the epoch has to find it over.
+    /// </summary>
+    public void Abandon(string bridgeKey)
+    {
+        if (_current.TryRemove(bridgeKey, out var epoch))
+        {
+            epoch.Abandon();
+        }
+    }
+
+    /// <summary>
     /// Opens an epoch and hands its stream to <paramref name="handle"/>, which copies from it until it
     /// ends; the epoch's token cancels it. The epoch it replaces, if any, is ended.
     /// </summary>

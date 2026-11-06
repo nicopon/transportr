@@ -25,6 +25,7 @@ internal class StreamController : ControllerBase
     private readonly AccessPolicy _policy;
     private readonly ITransferTerminator _terminator;
     private readonly UploadEpochs _epochs;
+    private readonly TimeProvider _time;
     private readonly ILogger<StreamController> _logger;
 
     public StreamController(
@@ -36,6 +37,7 @@ internal class StreamController : ControllerBase
         AccessPolicy policy,
         ITransferTerminator terminator,
         UploadEpochs epochs,
+        TimeProvider time,
         ILogger<StreamController> logger)
     {
         _brokerServer = brokerServer;
@@ -46,6 +48,7 @@ internal class StreamController : ControllerBase
         _policy = policy;
         _terminator = terminator;
         _epochs = epochs;
+        _time = time;
         _logger = logger;
     }
 
@@ -198,6 +201,85 @@ internal class StreamController : ControllerBase
             SegmentStatus.Held => StatusCodes.Status202Accepted,
             _ => StatusCodes.Status409Conflict,
         };
+    }
+
+    /// <summary>
+    /// Takes one opening of a write stream carried by a WebSocket (see <see cref="DataPlane"/>). The
+    /// caller is admitted once, here; what becomes of its rights afterwards is the access sweep's, as for
+    /// a read stream. A request that is not an upgrade is a front end that did not relay one: answered
+    /// 426, it never opens anything, and the client goes on with segments.
+    /// </summary>
+    [HttpGet("{transferId}/send")]
+    [MiddlewareFilter(typeof(WebSocketPipeline))]
+    public async Task SendOverWebSocket(
+        string transferId,
+        [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs)
+    {
+        if (!HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            _logger.LogWarning("Write stream of transfer {TransferId} not opened over a WebSocket: the request reached the hub without an upgrade", transferId);
+            Response.Headers.Upgrade = "websocket";
+            Response.StatusCode = StatusCodes.Status426UpgradeRequired;
+            return;
+        }
+
+        if (!TryParseConnectionType(Request, transferId, out var type))
+        {
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        if (!await ValidateTransfer(transferId, type, isWrite: true))
+        {
+            this.Refuse();
+            return;
+        }
+
+        var bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        if (heartbeatMs is not > 0)
+        {
+            _logger.LogWarning("WebSocket of {BridgeKey} refused: its opening announces no heartbeat interval", bridgeKey);
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        var heartbeat = TimeSpan.FromMilliseconds(heartbeatMs.Value);
+        using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext { KeepAliveInterval = heartbeat });
+
+        // Only the sender's silence is judged, for the reason given when an epoch opens.
+        using var input = new WebSocketInput(socket, bridgeKey, type == ConnectionType.Data ? heartbeat : null, _time, _logger);
+        if (!await input.AnswerProbeAsync(HttpContext.RequestAborted))
+        {
+            return;
+        }
+
+        input.JudgeSilence();
+        if (!await input.WaitForFirstByteAsync(HttpContext.RequestAborted))
+        {
+            return;
+        }
+
+        _epochs.Abandon(bridgeKey);
+        _logger.LogInformation("BRIDGE: The write stream of {BridgeKey} is carried by a WebSocket", bridgeKey);
+
+        try
+        {
+            await _brokerServer.HandleSendAsync(transferId, type, input, HttpContext.RequestAborted);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            // An IOException is a peer's connection failing, which the server has already reported as a
+            // warning; anything else is a fault of the hub and keeps its trace.
+            if (ex is not IOException)
+            {
+                _logger.LogError(ex, "Error in the write stream of {BridgeKey}", bridgeKey);
+            }
+        }
+
+        await input.EndAsync(HttpContext.RequestAborted);
     }
 
     /// <summary>
