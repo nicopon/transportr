@@ -75,17 +75,19 @@ LOG_LINE_WAIT_SECONDS=10
 # scenario's output can sit on one. So an absent line is waited for before it is called absent.
 # Prints the lines of "$OUTPUT_DIR"/*.log matching the grep pattern $1 as soon as they hold $2
 # distinct keys (default 1), a line's key being what the sed expression $3 makes of it (default: the
-# line itself). Returns non-zero, still printing what it found, when the window closes first.
+# line itself). $4 narrows the files read, a glob relative to $OUTPUT_DIR (default: all the logs).
+# Returns non-zero, still printing what it found, when the window closes first.
 wait_for_log_lines() {
     local pattern=$1
     local wanted=${2:-1}
     local key=${3:-}
+    local glob=${4:-*.log}
     local polls=$(( LOG_LINE_WAIT_SECONDS * 2 ))
     local lines=""
     local i
 
     for ((i=0; i<=polls; i++)); do
-        lines=$(grep -h "$pattern" "$OUTPUT_DIR"/*.log 2>/dev/null || true)
+        lines=$(grep -h "$pattern" "$OUTPUT_DIR"/$glob 2>/dev/null || true)
         if [ -n "$lines" ] && [ "$(echo "$lines" | sed -E "$key" | sort -u | wc -l | tr -d ' ')" -ge "$wanted" ]; then
             echo "$lines"
             return 0

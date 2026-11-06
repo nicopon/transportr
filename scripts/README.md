@@ -75,9 +75,37 @@ Unified benchmark runner with scenario support.
 | `ha-no-shared-state` | HA mode (2 hubs behind the TestProxy, sticky sessions); the hubs share state through the TestProxy's own store rather than Redis |
 | `ha-redis` | HA mode (2 hubs behind the TestProxy, sticky sessions) with the Redis state store |
 | `ha-transfer-affinity` | One sender opens two staggered transfers to two receivers placed on different hubs, then both links are cut while the first transfer is still flowing; each transfer's streams must reopen on the hub that holds its bridge, which a client that kept one affinity for all its transfers fails |
+| `segments-default` | The `default` transfer with both clients told to use segments only (`WRITE_TRANSPORT=SegmentsOnly`); every write stream must have opened over segments |
+| `segments-chaos-cut-sender` | `chaos-cut-sender` with segments only |
+| `ws-upgrade-refused` | HA mode with the TestProxy stripping the WebSocket upgrade (`PROXY_UPGRADE=strip`): each client must say why it has no WebSocket and carry the transfer over segments |
+| `ws-required-refused` | The same path with both clients requiring a WebSocket (`RequireWebSocket`): the transfer must fail, with the client's generic message and the hub's refusal in its log |
+| `ws-held` | HA mode with the TestProxy accepting the upgrade and relaying nothing (`PROXY_UPGRADE=hold`): each client must give up within its bound and carry the transfer over segments |
+| `ws-cut` | `chaos-cut-sender` over a WebSocket: the sender's data stream must be opened over a WebSocket again after the cut |
+| `parked-receiver` | A consumer at 12 items a second against a one-batch receive buffer, 6000 items: the write streams stay idle for tens of seconds, over a WebSocket. About eight minutes |
+| `parked-receiver-segments` | The same run with segments only |
 | `nginx-default` | The `default` transfer through an nginx container configured with nothing but a `proxy_pass` (needs a container runtime) |
 | `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
+
+### Asserting what carried the write streams
+
+A client journals what each of its write streams was opened over, and why it gave up on a WebSocket. A
+scenario turns that into a result with these variables, read by `lib/transport.sh` from the sender's and
+the receiver's own logs:
+
+| Variable | Meaning |
+|----------|---------|
+| `WRITE_TRANSPORT` | `PreferWebSocket`, `RequireWebSocket` or `SegmentsOnly` for both clients. Unset: the client default (`PreferWebSocket`) |
+| `ASSERT_WRITE_TRANSPORT` | `WebSocket` or `Segments`: every opening of both sides says so. With `WebSocket` and no `EXPECT_WRITE_FALLBACK`, no client may have given up on a WebSocket |
+| `EXPECT_WRITE_FALLBACK` | `true`: each side gave up on a WebSocket and said why |
+| `EXPECT_WEBSOCKET_REOPENED` | `true`: a transfer's data stream was opened over a WebSocket at least twice |
+| `EXPECT_TRANSFER_FAILURE` | `true`: the run is meant to fail. It is green only when the sender reports the failed transfer with the client's generic message, the hub says it received a write stream with no upgrade, and no CSV holds every line. The receivers are watched until `TRANSFER_TIMEOUT_SECONDS` and what became of them is printed, not judged |
+| `SOURCE_MAX_ITEMS` | The sender stops after that many items, which sends a prefix of the source file |
+| `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET) or `hold` (accept the upgrade and relay nothing) |
+
+The chaos scenarios assert no transport: a client that has had three connections in a row cut within
+30 seconds of opening falls back to segments by design, so what they check is the line count.
+`nginx-default` asserts none either.
 
 ### `test-all.sh`, `verify-loop.sh`
 

@@ -148,6 +148,15 @@ export Sender__BatchFlushIntervalMs="$BATCH_FLUSH_INTERVAL_MS"
 if [ -n "$MAX_IN_FLIGHT_BATCHES" ]; then
     export Sender__MaxInFlightBatches="$MAX_IN_FLIGHT_BATCHES"
 fi
+# Unset leaves each client on its default policy, which prefers a WebSocket and falls back to segments.
+if [ -n "$WRITE_TRANSPORT" ]; then
+    export Sender__WriteTransport="$WRITE_TRANSPORT"
+fi
+# Unset sends the whole source file; set, the sender stops after that many items, which lets a run
+# transfer a prefix of data/orders.bin.
+if [ -n "$SOURCE_MAX_ITEMS" ]; then
+    export Sender__MaxItems="$SOURCE_MAX_ITEMS"
+fi
 export Sender__SourceFilePath="$PROJECT_ROOT/data/orders.bin"
 export Sender__Group="senders"
 export Sender__OutputDirectory="$OUTPUT_DIR"
@@ -174,6 +183,10 @@ export Receiver__EnableAuth="${ENABLE_AUTH:-false}"
 export Receiver__BatchSize="$BATCH_SIZE"
 export Receiver__OutputDirectory="$OUTPUT_DIR"
 export Receiver__Group="receivers"
+
+if [ -n "$WRITE_TRANSPORT" ]; then
+    export Receiver__WriteTransport="$WRITE_TRANSPORT"
+fi
 
 # Receive buffer capacity and consumer pacing - only exported when a scenario asked for them, so
 # every other run keeps the client defaults.
@@ -212,11 +225,16 @@ if [ "$ENABLE_HA" == "true" ]; then
     
     # 1. Start Test Proxy
     log_step "Starting TestProxy (5000)..."
-    PROXY_LOAD_BALANCING="$PROXY_LOAD_BALANCING" \
+    PROXY_LOAD_BALANCING="$PROXY_LOAD_BALANCING" PROXY_UPGRADE="$PROXY_UPGRADE" \
     dotnet tests/TransportR.TestProxy/bin/Release/net10.0/TransportR.TestProxy.dll > "$OUTPUT_DIR/proxy.log" 2>&1 &
     PROXY_PID=$!
     register_pid $PROXY_PID
     sleep 2
+    if ! kill -0 $PROXY_PID 2>/dev/null; then
+        log_error "❌ Error: the TestProxy did not stay up. proxy.log:"
+        cat "$OUTPUT_DIR/proxy.log" >&2
+        exit 1
+    fi
 
     # 2. Start Hub A
     log_step "Starting Hub A (5001)..."
@@ -301,6 +319,14 @@ fi
 if [ "$PROBE_DATA_PLANE" == "true" ]; then
     source "$SCRIPT_DIR/lib/probe.sh"
     probe_data_plane || exit 1
+fi
+
+# A run that is meant to fail is judged on how it failed, and ends here.
+if [ "$EXPECT_TRANSFER_FAILURE" == "true" ]; then
+    source "$SCRIPT_DIR/lib/transport.sh"
+    expect_transfer_failure || exit 1
+    log_info "✅ $SCENARIO_NAME PASSED! The transfer failed as expected."
+    exit 0
 fi
 
 # Memory sampling: on when the scenario asks to be measured, and implied by declaring a ceiling
@@ -419,5 +445,12 @@ if [ "$completed_senders" -ne "$NUM_SENDERS" ]; then
     exit 1
 fi
 log_info "Senders acknowledged: $completed_senders of $NUM_SENDERS reported a completed transfer."
+
+# What carried the write streams is as much a result as the line count: a run that fell back to
+# segments delivers every line too.
+if [ -n "$ASSERT_WRITE_TRANSPORT" ] || [ "$EXPECT_WRITE_FALLBACK" == "true" ] || [ "$EXPECT_WEBSOCKET_REOPENED" == "true" ]; then
+    source "$SCRIPT_DIR/lib/transport.sh"
+    check_write_transport || exit 1
+fi
 
 log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."
