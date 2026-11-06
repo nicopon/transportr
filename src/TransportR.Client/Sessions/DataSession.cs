@@ -34,10 +34,6 @@ internal class DataSession<T> : IDataSession<T>
     // Bounds the request that tells the hub when the Abort could not be written.
     private static readonly TimeSpan AbortRequestTimeout = TimeSpan.FromSeconds(2);
 
-    // Bounds how long a completed receiver's release waits for the hub to end its data GET. A sender
-    // that died after reading its acknowledgement never lets the hub end it, and must not hang the release.
-    private static readonly TimeSpan ReadSideEndTimeout = TimeSpan.FromSeconds(2);
-
     // Bounds a heartbeat, so that one sent to a hub out of reach gives way to the next.
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(5);
 
@@ -535,7 +531,7 @@ internal class DataSession<T> : IDataSession<T>
         {
             try
             {
-                await readTask.WaitAsync(ReadSideEndTimeout);
+                await readTask.WaitAsync(HttpStreamManager.ReadSideEndTimeout);
             }
             catch (TimeoutException)
             {

@@ -122,7 +122,9 @@ and the offset from the query, never a byte of the body.
   bytes of the epoch have reached the peer. `409`: the hub holds no epoch this segment follows on from (it was
   replaced or is over, or the segment reached an instance other than the one holding it, which is not a `421`: bridges
   are local to an instance); the client opens a new epoch and the session reconnects as after any cut. `401` took
-  nothing: the client renews its token and sends the segment again. `404` and `410` are the transfer gone.
+  nothing: the client renews its token and sends the segment again. `404` and `410` are the transfer gone. On any
+  refusal the attempt ends only once its read stream has, 2 s at most: what the hub relayed before refusing, a
+  sender's `Abort` for one, is read first.
 - **The end.** The last segment carries `final=true` and goes after the `CompleteAck`. The hub answers it once the
   bridge has closed the stream (*Transfer Completion* in `ResilienceArchitecture.md`).
 

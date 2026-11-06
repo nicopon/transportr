@@ -41,10 +41,18 @@ internal class HttpStreamManager : IAsyncDisposable
     private readonly string _dataUrl;
     private readonly string? _affinity;
     
-    public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null)
+    /// <param name="Refused">The hub answered the stream with a refusal, rather than the connection failing under it.</param>
+    public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null, bool Refused = false)
     {
         public bool IsSuccess => Outcome is StreamOutcome.Ended or StreamOutcome.Cancelled;
     }
+
+    /// <summary>
+    /// Bounds a wait for the hub to end a read stream whose transfer may be over: after the write side
+    /// is refused, and when a completed receiver is released. The hub ends the stream once the transfer
+    /// is over, but one whose peer died, or that is not over after all, leaves it open.
+    /// </summary>
+    internal static readonly TimeSpan ReadSideEndTimeout = TimeSpan.FromSeconds(2);
 
     private CancellationTokenSource _streamCts;
     private Task<StreamResult>? _senderTask;
@@ -116,23 +124,25 @@ internal class HttpStreamManager : IAsyncDisposable
          
          Task<StreamResult> tData;
          Task<StreamResult> tControl;
-         
+         Task<StreamResult> written;
+         Task<StreamResult> read;
+
          if (isSender)
          {
              // Sender writes Data, reads Control
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, writeAction, readAction, token);
-             WriteTask = tData;
-             ReadTask = tControl;
+             (written, read) = (tData, tControl);
          }
          else
          {
              // Receiver reads Data, writes Control
              tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, writeAction, readAction, token);
              tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, writeAction, readAction, token);
-             WriteTask = tControl;
-             ReadTask = tData;
+             (written, read) = (tControl, tData);
          }
+         WriteTask = written;
+         ReadTask = read;
 
          var tasks = new List<Task<StreamResult>> { tData, tControl };
 
@@ -140,10 +150,27 @@ internal class HttpStreamManager : IAsyncDisposable
          {
              var completedTask = await Task.WhenAny(tasks);
              tasks.Remove(completedTask);
-             
+
              var result = await completedTask;
              if (!result.IsSuccess)
              {
+                 // What the hub relayed to the read side before refusing the write side may still be on
+                 // its way: a receiver's acknowledgement, refused because the sender's Abort ended the
+                 // transfer, comes back ahead of that Abort. Cancelling the read side now loses it, and
+                 // the session fails on the refusal instead of the Abort's reason. A cut is not waited
+                 // on: nothing says the hub is done with the read side, and the reconnection has to be quick.
+                 if (result.Refused && completedTask == written)
+                 {
+                     try
+                     {
+                         await read.WaitAsync(ReadSideEndTimeout);
+                     }
+                     catch (TimeoutException)
+                     {
+                         _config.Logger.LogDebug("The hub had not ended the read stream of Transfer={TransferId} after refusing its write stream", _transferId);
+                     }
+                 }
+
                  // Cancels this attempt's other stream, never whatever attempt the manager is on
                  // now: an attempt that has already been replaced is still unwinding, and reaching
                  // for the shared field made it cancel the streams that succeeded it — every
@@ -203,7 +230,7 @@ internal class HttpStreamManager : IAsyncDisposable
         }
         catch (StreamRefusedException ex)
         {
-            return new StreamResult(ex.Outcome, ex.Message);
+            return new StreamResult(ex.Outcome, ex.Message, Refused: true);
         }
         catch (WireProtocolViolationException ex)
         {

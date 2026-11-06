@@ -32,10 +32,13 @@ internal class StubSessionContext: ISessionContext<string>
     
     public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
 
-    // No hub behind this context: a heartbeat goes nowhere, and the probe finds nobody answering.
+    /// <summary>Whether the probe of a reconnecting session finds the hub answering; nobody answers by default.</summary>
+    public bool ProbeAnswers { get; init; }
+
+    // No hub behind this context: a heartbeat goes nowhere.
     public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
+    public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(ProbeAnswers);
 }
 
 public class StubLogger : ILogger, IDisposable

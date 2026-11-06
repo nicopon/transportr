@@ -60,7 +60,7 @@ public class WriteStreamCutTests
     }
 
     [Fact]
-    public async Task WriteStream_RefusedBeforeItsBodyIsRead_IsFatalAtOnce()
+    public async Task WriteStream_RefusedBeforeItsBodyIsRead_EndsTheAttemptAsGoneWithinTheBound()
     {
         // What ValidateTransfer does for a transfer that is gone: a 404 before anything is read.
         await using var hub = await LoopbackHub.StartAsync(app =>
