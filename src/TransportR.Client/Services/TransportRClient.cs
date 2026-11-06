@@ -422,7 +422,9 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
                     s.StartedAt,
                     DateTime.UtcNow - s.StartedAt,
                     s.AcksReceived,
-                    s.AcksSent
+                    s.AcksSent,
+                    s.WriteTransport,
+                    s.WriteTransportFallback
                 ))
         ];
     }

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions; // Restore
 using TransportR.Client.Internal;
 using TransportR.Client.Configuration;
+using TransportR.Models;
 
 namespace TransportR.Client;
 
@@ -32,6 +33,7 @@ public class TransportRClientBuilder<T>
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
     private TimeSpan? _tokenRefreshThreshold;
+    private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
@@ -167,6 +169,25 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Chooses what may carry this client's write streams. By default a WebSocket where the path to the
+    /// hub carries one, segments otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The transport a transfer ended up on, and why it fell back, are on
+    /// <see cref="TransferInfo"/> and in the client's log at each opening of the stream.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithWriteTransport(WriteTransportPolicy policy)
+    {
+        if (!Enum.IsDefined(policy))
+        {
+            throw new ArgumentOutOfRangeException(nameof(policy), policy, "Not a write transport policy.");
+        }
+
+        _writeTransportPolicy = policy;
+        return this;
+    }
+
+    /// <summary>
     /// Builds the <see cref="TransportRClient{T}"/>.
     /// </summary>
     public TransportRClient<T> Build()
@@ -189,7 +210,8 @@ public class TransportRClientBuilder<T>
         var options = new ClientOptions
         {
             BatchFlushIntervalMs = _batchFlushIntervalMs,
-            MaxInFlightBatches = _maxInFlightBatches
+            MaxInFlightBatches = _maxInFlightBatches,
+            WriteTransportPolicy = _writeTransportPolicy
         };
 
         options.ReceiveBufferCapacity = _receiveCapacity;

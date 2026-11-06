@@ -41,6 +41,8 @@ public enum TransferStatus
 /// <param name="BytesTransferred">Total bytes transferred (compressed).</param>
 /// <param name="StartedAt">When the transfer started.</param>
 /// <param name="Duration">How long the transfer has been running (or ran).</param>
+/// <param name="WriteTransport">What carries this client's write stream of the transfer; null before it first opens.</param>
+/// <param name="WriteTransportFallback">Why this transfer does not use a WebSocket, once it has given up on one; null otherwise.</param>
 public record TransferInfo(
     string TransferId,
     string DataUrl,
@@ -51,5 +53,7 @@ public record TransferInfo(
     DateTime StartedAt,
     TimeSpan? Duration,
     long AcksReceived = 0,
-    long AcksSent = 0
+    long AcksSent = 0,
+    WriteTransport? WriteTransport = null,
+    string? WriteTransportFallback = null
 );
