@@ -1,3 +1,5 @@
+using TransportR.Models;
+
 namespace Receiver.Configuration;
 
 public class ReceiverOptions
@@ -18,6 +20,11 @@ public class ReceiverOptions
     /// Overrides the receive buffer's wire-byte bound. Null keeps the client default.
     /// </summary>
     public long? ReceiveMaxBytes { get; set; }
+
+    /// <summary>
+    /// What may carry the write stream (the acknowledgements). Null keeps the client default.
+    /// </summary>
+    public WriteTransportPolicy? WriteTransport { get; set; }
 
     /// <summary>
     /// Caps how fast items are consumed, standing in for a consumer that cannot keep up. Zero

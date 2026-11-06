@@ -99,6 +99,12 @@ if (receiverOptions.ReceiveMaxItems is not null || receiverOptions.ReceiveMaxByt
     clientBuilder.WithReceiveCapacity(receiverOptions.ReceiveMaxItems, receiverOptions.ReceiveMaxBytes);
 }
 
+if (receiverOptions.WriteTransport is { } writeTransport)
+{
+    clientBuilder.WithWriteTransport(writeTransport);
+    logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+}
+
 if (receiverOptions.ConsumeItemsPerSecond > 0)
 {
     logger.LogInformation("Consumer throttled to {Rate} items/s", receiverOptions.ConsumeItemsPerSecond);

@@ -1,3 +1,5 @@
+using TransportR.Models;
+
 namespace Sender.Configuration;
 
 public class SenderOptions
@@ -12,6 +14,16 @@ public class SenderOptions
     /// Null (the default) keeps the historical unbounded behaviour.
     /// </summary>
     public int? MaxInFlightBatches { get; set; }
+
+    /// <summary>
+    /// What may carry the write stream. Null keeps the client default.
+    /// </summary>
+    public WriteTransportPolicy? WriteTransport { get; set; }
+
+    /// <summary>
+    /// Stops the transfer after this many items read from the source. Null sends the whole file.
+    /// </summary>
+    public int? MaxItems { get; set; }
 
     /// <summary>
     /// Seconds between the opening of one transfer and the next, when several run in parallel. Zero

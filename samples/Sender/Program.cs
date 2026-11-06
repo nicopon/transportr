@@ -106,6 +106,12 @@ else
     logger.LogInformation("Send window: unbounded");
 }
 
+if (senderOptions.WriteTransport is { } writeTransport)
+{
+    clientBuilder.WithWriteTransport(writeTransport);
+    logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+}
+
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 
@@ -194,7 +200,7 @@ try
                     transfer = await broker.InitTransferAsync(target.ClientId, batchSize);
                     logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
                     
-                    var (count, startTime) = await SendOrdersAsync(transfer, service, broker, showProgress, logger, CancellationToken.None);
+                    var (count, startTime) = await SendOrdersAsync(transfer, service, broker, showProgress, senderOptions.MaxItems, logger, CancellationToken.None);
 
                     // CompleteAsync returning is the receiver's word that it has everything; the
                     // counters below are stats, not the verdict. It throws when it is not.
@@ -259,6 +265,7 @@ static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
     OrderFileReader dataService,
     TransportRClient<Order> broker,
     bool showProgress,
+    int? maxItems,
     Microsoft.Extensions.Logging.ILogger logger,
     CancellationToken cancellationToken)
 {
@@ -277,6 +284,12 @@ static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
         {
             await transfer.SendAsync(order, cancellationToken);
             count++;
+
+            if (maxItems is { } limit && count >= limit)
+            {
+                logger.LogInformation("[Transfer {TransferId}] Stopping after {Count} items (MaxItems)", transfer.TransferId, count);
+                break;
+            }
             
             // Periodic stats every 5 seconds
             if (showProgress && (DateTime.UtcNow - lastStatsTime).TotalSeconds >= 5)
