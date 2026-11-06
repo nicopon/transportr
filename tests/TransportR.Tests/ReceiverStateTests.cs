@@ -17,7 +17,7 @@ public class ReceiverStateTests
     {
         // Wide enough that nothing here parks on capacity - these tests are about ordering.
         _buffer = new ReceiveBuffer<int>(BufferCapacity.ItemsAndBytes(1000, 1024 * 1024));
-        _receiverState = new ReceiverState<int>(_buffer, new MockBatchSerializer());
+        _receiverState = new ReceiverState<int>(new ItemChunkSink<int>(_buffer, new MockBatchSerializer()));
     }
 
     [Fact]
@@ -171,7 +171,7 @@ public class ReceiverStateTests
         // the shape a reconnection takes in the field - the token that the read loop carries is
         // cancelled somewhere in the middle of handing a batch over.
         var buffer = new ReceiveBuffer<int>(BufferCapacity.Items(3));
-        var state = new ReceiverState<int>(buffer, new MockBatchSerializer());
+        var state = new ReceiverState<int>(new ItemChunkSink<int>(buffer, new MockBatchSerializer()));
 
         var first = CreateMockPayload(new[] { 1, 2 });
         await state.ProcessBatchAsync(0, new ArrayMemoryOwner(first), first);

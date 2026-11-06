@@ -20,9 +20,8 @@ internal class ReceiverState<T>
         public int? BatchIdToAck { get; init; }
     }
 
-    private readonly ReceiveBuffer<T> _buffer;
+    private readonly IChunkSink _sink;
     private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body)> _reorderBuffer;
-    private readonly IBatchSerializer<T> _serializer;
 
     public int NextExpectedBatchId { get; private set; } = 0;
 
@@ -34,11 +33,10 @@ internal class ReceiverState<T>
     /// </summary>
     public int ReorderedChunks => _reorderBuffer.Count;
 
-    public ReceiverState(ReceiveBuffer<T> buffer, IBatchSerializer<T> serializer, int startBatchId = 0)
+    public ReceiverState(IChunkSink sink, int startBatchId = 0)
     {
-        _buffer = buffer;
+        _sink = sink;
         _reorderBuffer = [];
-        _serializer = serializer;
         NextExpectedBatchId = startBatchId;
     }
     
@@ -59,29 +57,15 @@ internal class ReceiverState<T>
 
         if (batchId == NextExpectedBatchId)
         {
-            try
-            {
-                await DeserializeAndWrite(compressedBody, ct);
-            }
-            finally
-            {
-                owner.Dispose();
-            }
-            
+            await WriteAsync(owner, compressedBody, ct);
+
             NextExpectedBatchId++;
 
             while (_reorderBuffer.ContainsKey(NextExpectedBatchId))
             {
                 var (bufOwner, bufBody) = _reorderBuffer[NextExpectedBatchId];
                 _reorderBuffer.Remove(NextExpectedBatchId);
-                try
-                {
-                    await DeserializeAndWrite(bufBody, ct);
-                }
-                finally
-                {
-                    bufOwner.Dispose();
-                }
+                await WriteAsync(bufOwner, bufBody, ct);
                 NextExpectedBatchId++;
             }
             
@@ -96,24 +80,19 @@ internal class ReceiverState<T>
     }
 
     /// <summary>
-    /// Hands a chunk to the receive buffer, which charges it against the configured capacity
-    /// before it is decoded and parks here for as long as the consumer is behind.
+    /// Writes a chunk to the sink, and returns its memory unless the sink took it.
     /// </summary>
-    /// <remarks>
-    /// The chunk's payload length is what gets charged — the wire size, which is the only size
-    /// available without knowing what <typeparamref name="T"/> costs on the heap. The sender
-    /// strips the item-count prefix before writing, so this is already the serialized body alone.
-    /// </remarks>
-    /// <remarks>
-    /// The token cancels the wait for capacity and the hand-off, not the decoding between them:
-    /// nothing under the serializer interface takes one.
-    /// </remarks>
-    private Task DeserializeAndWrite(ReadOnlyMemory<byte> compressedBody, CancellationToken ct)
+    private async Task WriteAsync(IMemoryOwner<byte> owner, ReadOnlyMemory<byte> body, CancellationToken ct)
     {
-        return _buffer.WriteChunkAsync(
-            compressedBody.Length,
-            () => ReadBatchBodyFromMemoryAsync(_serializer, compressedBody),
-            ct);
+        var taken = false;
+        try
+        {
+            taken = await _sink.WriteAsync(owner, body, ct);
+        }
+        finally
+        {
+            if (!taken) owner.Dispose();
+        }
     }
 
     /// <summary>
@@ -177,6 +156,6 @@ internal class ReceiverState<T>
     /// </summary>
     public void Complete()
     {
-        _buffer.Complete();
+        _sink.Complete();
     }
 }

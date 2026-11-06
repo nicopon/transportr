@@ -302,6 +302,26 @@ public class BatchProcessorTests
         await Assert.ThrowsAsync<ChannelClosedException>(() => blocked.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
+    [Fact]
+    public async Task StartReceiverAsync_AgainAfterAReconnection_KeepsFeedingTheConsumersEnumeration()
+    {
+        // Arrange: the consumer enumerates once, for the whole transfer, and is parked before any chunk.
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+        await using var enumerator = processor.ReceiveAsync(CancellationToken.None).GetAsyncEnumerator();
+        var first = enumerator.MoveNextAsync().AsTask();
+        await processor.ProcessChunkAsync(CreateBatchChunk(batchId: 0, itemCount: 1));
+        Assert.True(await first.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Act: a reconnection replaces the receiver state; the next chunk arrives through the new one.
+        await processor.StartReceiverAsync();
+        await processor.ProcessChunkAsync(CreateBatchChunk(batchId: 1, itemCount: 1));
+
+        // Assert: the same enumeration receives it.
+        Assert.True(await enumerator.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(2, processor.NextExpectedBatchId);
+    }
+
     private sealed class ArrayMemoryOwner(byte[] data) : IMemoryOwner<byte>
     {
         public Memory<byte> Memory => data;

@@ -22,6 +22,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
     private ReceiveBuffer<T>? _receiveBuffer;
+    private IChunkSink? _sink;
     
     // Sender State
     private BatchAccumulator<T>? _batchAccumulator;
@@ -100,14 +101,17 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     public Task StartReceiverAsync()
     {
+        // Buffer and sink are kept across reconnections: the consumer's enumeration is over this
+        // buffer, and a new one would leave it waiting on a buffer nothing writes to.
         _receiveBuffer ??= new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
+        _sink ??= new ItemChunkSink<T>(_receiveBuffer, _context.Serializer);
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
 
         // A reconnection replaces the state; the chunks it held out of order go back to the pool
         // rather than away with the instance. The sender resends them from startBatchId.
         _receiverState?.DiscardReordered();
 
-        _receiverState = new ReceiverState<T>(_receiveBuffer, _context.Serializer, startBatchId);
+        _receiverState = new ReceiverState<T>(_sink, startBatchId);
         return Task.CompletedTask;
     }
 
