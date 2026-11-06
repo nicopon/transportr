@@ -31,11 +31,13 @@ var loadBalancingPolicy = Environment.GetEnvironmentVariable("PROXY_LOAD_BALANCI
 //         sees a plain GET
 //   hold  accept the upgrade here and relay nothing, the connection left open: a front end that takes
 //         the handshake and then carries no bytes
+//   hold-late accept the upgrade, answer the client's first message and read nothing after it: a
+//         front end that lets the opening proof through and then retains what is written
 var upgradeMode = Environment.GetEnvironmentVariable("PROXY_UPGRADE");
 if (string.IsNullOrEmpty(upgradeMode)) upgradeMode = "pass";
-if (upgradeMode is not ("pass" or "strip" or "hold"))
+if (upgradeMode is not ("pass" or "strip" or "hold" or "hold-late"))
 {
-    throw new InvalidOperationException($"Unknown PROXY_UPGRADE: {upgradeMode} (pass, strip or hold)");
+    throw new InvalidOperationException($"Unknown PROXY_UPGRADE: {upgradeMode} (pass, strip, hold or hold-late)");
 }
 
 // YARP configuration with sticky sessions
@@ -157,7 +159,7 @@ if (upgradeMode == "strip")
         return next(context);
     });
 }
-else if (upgradeMode == "hold")
+else if (upgradeMode is "hold" or "hold-late")
 {
     app.UseWebSockets();
     app.Use(async (context, next) =>
@@ -169,12 +171,21 @@ else if (upgradeMode == "hold")
         }
 
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
-        Console.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} Holding the upgrade of {context.Request.Path}: accepted, nothing relayed");
+        Console.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} Holding the upgrade of {context.Request.Path} ({upgradeMode}): accepted, nothing relayed");
 
         // Read and discard until the client gives up, so that its closing is seen.
         var buffer = new byte[1024];
         try
         {
+            if (upgradeMode == "hold-late")
+            {
+                // Answering the first message is all this front end does; it never reads again, so
+                // what the client writes next fills the connection and stays there.
+                await socket.ReceiveAsync(buffer, context.RequestAborted);
+                await socket.SendAsync(ReadOnlyMemory<byte>.Empty, System.Net.WebSockets.WebSocketMessageType.Text, endOfMessage: true, context.RequestAborted);
+                await Task.Delay(Timeout.Infinite, context.RequestAborted);
+            }
+
             while ((await socket.ReceiveAsync(buffer, context.RequestAborted)).MessageType != System.Net.WebSockets.WebSocketMessageType.Close)
             {
             }

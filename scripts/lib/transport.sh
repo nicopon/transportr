@@ -16,6 +16,9 @@
 #                               ASSERT_WRITE_TRANSPORT=WebSocket, no side did
 #   EXPECT_WEBSOCKET_REOPENED   true: a transfer's Data stream was opened over a WebSocket at least twice
 #   EXPECT_TRANSFER_FAILURE     true: the run is meant to fail, and expect_transfer_failure judges how
+#   EXPECT_FAILURE_MESSAGE      what the sender's failure message must contain (default: requires a WebSocket)
+#   EXPECT_HUB_LOG              what the hub must have logged (default: not opened over a WebSocket); set
+#                               empty when the hub is not meant to have seen the request
 
 SENDER_LOGS="sender[0-9]*.log"
 RECEIVER_LOGS="receiver[0-9]*.log"
@@ -106,7 +109,7 @@ GENERIC_MESSAGE_FORBIDS='/api/|://|localhost|senders|receivers|transportr:group|
 
 # For a run that must end in a refusal the client reports as a failure of the transfer. Waits for the
 # sender to exit, within TRANSFER_TIMEOUT_SECONDS, then requires that it said the transfer failed, with
-# the generic message of a client that insists on a WebSocket, that the hub says why it refused, and
+# the generic message the scenario names, that the hub logged what the scenario expects of it, and
 # that no CSV holds every line. It then watches the receivers until the same deadline, to say what
 # became of them, and does not judge it.
 expect_transfer_failure() {
@@ -129,8 +132,9 @@ expect_transfer_failure() {
         return 1
     fi
     message=$(cat "$OUTPUT_DIR"/$SENDER_LOGS 2>/dev/null | sed -nE 's/.*TransferFailedException: (.*)/\1/p' | head -1)
-    if ! echo "$message" | grep -q "requires a WebSocket"; then
-        log_error "❌ Error: the sender's failure is not the one of a required WebSocket: ${message:-<no message>}"
+    local expected_message="${EXPECT_FAILURE_MESSAGE:-requires a WebSocket}"
+    if ! echo "$message" | grep -q "$expected_message"; then
+        log_error "❌ Error: the sender's failure is not the expected one ($expected_message): ${message:-<no message>}"
         return 1
     fi
     if echo "$message" | grep -qE "$GENERIC_MESSAGE_FORBIDS"; then
@@ -142,11 +146,14 @@ expect_transfer_failure() {
     # Each hub of an HA run logs in a directory of its own.
     local hub_logs="hub[0-9]*.log"
     [ "$ENABLE_HA" == "true" ] && hub_logs="hub_?/hub[0-9]*.log"
-    if ! wait_for_log_lines "not opened over a WebSocket" 1 "" "$hub_logs" > /dev/null; then
-        log_error "❌ Error: the hub never said that a write stream reached it without an upgrade"
-        return 1
+    local hub_expects="${EXPECT_HUB_LOG-not opened over a WebSocket}"
+    if [ -n "$hub_expects" ]; then
+        if ! wait_for_log_lines "$hub_expects" 1 "" "$hub_logs" > /dev/null; then
+            log_error "❌ Error: the hub never logged: $hub_expects"
+            return 1
+        fi
+        log_info "Hub: logged \"$hub_expects\"."
     fi
-    log_info "Hub: a write stream reached it without an upgrade."
 
     local f lines
     for f in "$OUTPUT_DIR"/orders_*.csv; do

@@ -80,6 +80,7 @@ Unified benchmark runner with scenario support.
 | `ws-upgrade-refused` | HA mode with the TestProxy stripping the WebSocket upgrade (`PROXY_UPGRADE=strip`): each client must say why it has no WebSocket and carry the transfer over segments |
 | `ws-required-refused` | The same path with both clients requiring a WebSocket (`RequireWebSocket`): the transfer must fail, with the client's generic message and the hub's refusal in its log |
 | `ws-held` | HA mode with the TestProxy accepting the upgrade and relaying nothing (`PROXY_UPGRADE=hold`): each client must give up within its bound and carry the transfer over segments |
+| `ws-held-late` | The same path, but it answers the opening proof first (`PROXY_UPGRADE=hold-late`) and retains what is written after it: no fallback can follow, so the transfer must fail with the client's stall message and not hang |
 | `ws-cut` | `chaos-cut-sender` over a WebSocket: the sender's data stream must be opened over a WebSocket again after the cut |
 | `parked-receiver` | A consumer at 12 items a second against a one-batch receive buffer, 6000 items: the write streams stay idle for tens of seconds, over a WebSocket. About eight minutes |
 | `parked-receiver-segments` | The same run with segments only |
@@ -100,8 +101,10 @@ the receiver's own logs:
 | `EXPECT_WRITE_FALLBACK` | `true`: each side gave up on a WebSocket and said why |
 | `EXPECT_WEBSOCKET_REOPENED` | `true`: a transfer's data stream was opened over a WebSocket at least twice |
 | `EXPECT_TRANSFER_FAILURE` | `true`: the run is meant to fail. It is green only when the sender reports the failed transfer with the client's generic message, the hub says it received a write stream with no upgrade, and no CSV holds every line. The receivers are watched until `TRANSFER_TIMEOUT_SECONDS` and what became of them is printed, not judged |
+| `EXPECT_FAILURE_MESSAGE` | With `EXPECT_TRANSFER_FAILURE`: what the sender's failure message must contain. Default: `requires a WebSocket` |
+| `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket`; set empty for a run where the hub is not meant to have seen the request |
 | `SOURCE_MAX_ITEMS` | The sender stops after that many items, which sends a prefix of the source file |
-| `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET) or `hold` (accept the upgrade and relay nothing) |
+| `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET), `hold` (accept the upgrade and relay nothing) or `hold-late` (answer the client's first message, then read nothing) |
 
 The chaos scenarios assert no transport: a client that has had three connections in a row cut within
 30 seconds of opening falls back to segments by design, so what they check is the line count.

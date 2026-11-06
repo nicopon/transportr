@@ -11,7 +11,7 @@
 #   3. Run all scenarios: default, embedded-idp, oidc, data-plane-probe, chaos, chaos-bounded,
 #      chaos-cut-sender, chaos-cut-receiver, slow-receiver, nginx-default, ha-redis, ha-no-shared-state,
 #      ha-transfer-affinity, then those of the write transports: segments-default,
-#      segments-chaos-cut-sender, ws-upgrade-refused, ws-required-refused, ws-held, ws-cut,
+#      segments-chaos-cut-sender, ws-upgrade-refused, ws-required-refused, ws-held, ws-held-late, ws-cut,
 #      parked-receiver-segments, parked-receiver (the last two take about eight minutes each)
 #
 
@@ -30,7 +30,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Scenarios to run (in order)
-SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded chaos-cut-sender chaos-cut-receiver slow-receiver nginx-default ha-redis ha-no-shared-state ha-transfer-affinity segments-default segments-chaos-cut-sender ws-upgrade-refused ws-required-refused ws-held ws-cut parked-receiver-segments parked-receiver"
+SCENARIOS="default embedded-idp oidc data-plane-probe chaos chaos-bounded chaos-cut-sender chaos-cut-receiver slow-receiver nginx-default ha-redis ha-no-shared-state ha-transfer-affinity segments-default segments-chaos-cut-sender ws-upgrade-refused ws-required-refused ws-held ws-held-late ws-cut parked-receiver-segments parked-receiver"
 
 # Track results
 FAILED=0
