@@ -246,10 +246,19 @@ public class BatchProcessorByteStreamTests
     public void ReceiveChunksAsync_OutsideTheByteStreamMode_Throws()
     {
         var context = new ItemSessionContext();
-        var (send, receive) = context.CreatePorts(10);
-        var processor = new TestBatchProcessor<string>(context, _transferId.ToString(), send, receive);
+        var (_, receive) = context.CreatePorts(10);
+        receive.OpenSink();
 
-        Assert.Throws<InvalidOperationException>(() => processor.ReceiveChunksAsync(CancellationToken.None));
+        Assert.Throws<InvalidOperationException>(() => receive.ReceiveChunksAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public void AnItemSink_RefusesToReadChunks()
+    {
+        var context = new ItemSessionContext();
+        var sink = new ItemChunkSink<string>(new ReceiveBuffer<string>(context.Options.ReceiveBufferCapacity), context.Serializer);
+
+        Assert.Throws<InvalidOperationException>(() => sink.ReadChunksAsync(CancellationToken.None));
     }
 
     [Fact]
