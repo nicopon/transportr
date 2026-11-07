@@ -592,9 +592,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public void Fail(string reason)
     {
-        var failure = new TransferFailedException(_transferId, reason);
-        _receiveBuffer?.Complete(failure);
-        _byteSink?.Fail(failure);
+        _sink?.Fail(new TransferFailedException(_transferId, reason));
         AbandonSender();
     }
 
@@ -703,7 +701,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         // session token reaches it too, but only one of the two is an explicit release, and the
         // parked loop cannot reach the finally that would otherwise complete the buffer.
         _sink?.Complete();
-        _byteSink?.DiscardUnread();
+        _sink?.DiscardUnread();
         _receiverState?.DiscardReordered();
         
         foreach(var kvp in _unackedBatches)

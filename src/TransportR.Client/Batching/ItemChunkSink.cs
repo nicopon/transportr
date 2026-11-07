@@ -34,4 +34,11 @@ internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer
     }
 
     public void Complete() => buffer.Complete();
+
+    public void Fail(Exception error) => buffer.Complete(error);
+
+    /// <remarks>
+    /// Nothing to return: decoded items hold no pooled memory, and they stay the consumer's to take.
+    /// </remarks>
+    public void DiscardUnread() { }
 }

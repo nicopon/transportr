@@ -29,4 +29,17 @@ internal interface IChunkSink
     /// Signals that no more batches will be written.
     /// </summary>
     void Complete();
+
+    /// <summary>
+    /// Ends delivery with <paramref name="error"/>, which the consumer is thrown once it has taken
+    /// what was admitted.
+    /// </summary>
+    void Fail(Exception error);
+
+    /// <summary>
+    /// Returns the pooled memory of what was admitted and not taken, for a session that is released.
+    /// After <see cref="Complete"/>, which cannot do it itself: a consumer still takes what was
+    /// admitted once the transfer is over. What a consumer holds is not touched.
+    /// </summary>
+    void DiscardUnread();
 }

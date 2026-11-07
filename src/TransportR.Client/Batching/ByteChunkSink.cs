@@ -24,10 +24,6 @@ internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSin
 
     public void Complete() => buffer.Complete();
 
-    /// <summary>
-    /// Ends the stream with <paramref name="error"/>, which the reader throws once it has taken what
-    /// was admitted.
-    /// </summary>
     public void Fail(Exception error) => buffer.Complete(error);
 
     /// <summary>
@@ -35,10 +31,5 @@ internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSin
     /// </summary>
     public IAsyncEnumerable<ByteChunk> ReadAllAsync(CancellationToken ct) => buffer.ReadAllAsync(ct);
 
-    /// <summary>
-    /// Disposes the chunks admitted and not taken, for a session that is released. After
-    /// <see cref="Complete"/>, which cannot do it itself: a reader still takes what was admitted once
-    /// the transfer is over. A chunk a reader holds is not touched.
-    /// </summary>
     public void DiscardUnread() => buffer.Drain(chunk => chunk.Dispose());
 }

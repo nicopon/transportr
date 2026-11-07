@@ -262,6 +262,10 @@ public class ReceiverStateOwnershipTests
         }
 
         public void Complete() { }
+
+        public void Fail(Exception error) { }
+
+        public void DiscardUnread() { }
     }
 }
 
