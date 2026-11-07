@@ -137,6 +137,23 @@ public class ByteStreamExtensionsTests
         Assert.Empty(session.AppendCalls);
     }
 
+    [Fact]
+    public void CopyFromAsync_ReturnsItsReadBufferToTheArrayPool_WhenTheCopyEnds()
+    {
+        // The pool hands this thread back the last array this thread returned. Seeded with one, a copy that
+        // rents it and returns it leaves it for the next renter, and one that keeps it does not.
+        var seeded = ArrayPool<byte>.Shared.Rent(ReadSize);
+        ArrayPool<byte>.Shared.Return(seeded);
+        var session = new FakeSession { IsByteStream = true };
+        var send = new HttpSend<byte[]>(session);
+
+        var copy = send.CopyFromAsync(new MemoryStream(Sequence(1000)));
+
+        // Nothing yielded the thread, so the return happened here.
+        Assert.True(copy.IsCompletedSuccessfully);
+        Assert.Same(seeded, ArrayPool<byte>.Shared.Rent(ReadSize));
+    }
+
     // --- CopyToAsync ---
 
     [Fact]

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -226,5 +227,135 @@ public class ByteStreamTransferTests
 
         await Assert.ThrowsAsync<TransferFailedException>(
             () => send.CopyFromAsync(new MemoryStream(Payload(50_000)))).WaitAsync(Bound);
+    }
+
+    [Fact]
+    public async Task AHostInitiatedTransfer_ToASenderInTheByteStreamMode_DeliversEveryByte_WhateverBatchSizeTheHostNames()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, byteStreamBytes: 1000);
+        await using var receiver = CreateClient(handler, byteStreamBytes: 1000);
+
+        var sendHandle = new TaskCompletionSource<Send<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        // The host does not know the sender's mode: the figure it passes is a count of items, and means nothing here.
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+
+        await using var send = await sendHandle.Task.WaitAsync(Bound);
+        await using var receive = await receiveHandle.Task.WaitAsync(Bound);
+
+        var source = Payload(7321);
+        var received = new MemoryStream();
+        var consumer = Task.Run(() => receive.CopyToAsync(received));
+
+        await send.CopyFromAsync(new TrickleStream(source, 700));
+        await send.CompleteAsync().WaitAsync(Bound);
+        await consumer.WaitAsync(Bound);
+
+        Assert.True(source.AsSpan().SequenceEqual(received.ToArray()));
+
+        // Eight batches of 1000 bytes at most: a batch cut at the host's 10 would have been several hundred.
+        var info = Assert.Single(sender.GetTransfers());
+        Assert.InRange(info.AcksReceived, 1, 20);
+    }
+
+    [Fact]
+    public async Task CopyToAsync_DoesNotReturn_WhileTheHubHasNotHeardTheReceiversAnswerToComplete()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var gate = new SendGate(host.GetTestServer().CreateHandler());
+        await using var sender = CreateClient(host.GetTestServer().CreateHandler(), byteStreamBytes: 1000);
+        await using var receiver = CreateClient(gate, byteStreamBytes: 1000);
+        var (send, receive) = await OpenAsync(sender, receiver);
+        await using var _ = send;
+        await using var __ = receive;
+
+        // Whole batches only: nothing waits in the sender for Complete to cut it.
+        var source = Payload(3000);
+        var written = new CountingStream();
+        var consumer = Task.Run(() => receive.CopyToAsync(written));
+
+        await send.CopyFromAsync(new MemoryStream(source));
+        await WaitUntil(() => written.Count == source.Length);
+
+        // The receiver now has every byte. Its answer to Complete is held on its way to the hub, so the
+        // transfer is not over for the hub, and the last chunk is not the last word.
+        gate.Close();
+        var completing = send.CompleteAsync();
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+
+        Assert.False(consumer.IsCompleted, "CopyToAsync returned before the hub ended the transfer");
+
+        gate.Open();
+        await completing.WaitAsync(Bound);
+        await consumer.WaitAsync(Bound);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + Bound;
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("The condition did not become true in time.");
+            await Task.Delay(10);
+        }
+    }
+
+    /// <summary>A destination that only counts, safe to read from the test while the copy writes.</summary>
+    private sealed class CountingStream : Stream
+    {
+        private long _count;
+        public long Count => Interlocked.Read(ref _count);
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Add(ref _count, buffer.Length);
+            return ValueTask.CompletedTask;
+        }
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>Holds the segments of a client's write stream while closed, and lets them through when opened.</summary>
+    private sealed class SendGate(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        private volatile TaskCompletionSource? _closed;
+
+        public void Close() => _closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Open()
+        {
+            var closed = _closed;
+            _closed = null;
+            closed?.TrySetResult();
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var closed = _closed;
+            if (closed is not null && request.Method == HttpMethod.Post
+                && request.RequestUri!.AbsolutePath.EndsWith("/send", StringComparison.Ordinal))
+            {
+                await closed.Task.WaitAsync(cancellationToken);
+            }
+
+            return await base.SendAsync(request, cancellationToken);
+        }
     }
 }

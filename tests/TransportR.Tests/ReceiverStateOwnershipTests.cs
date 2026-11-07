@@ -1,6 +1,8 @@
 using System.Buffers;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
+using System.Runtime.InteropServices;
 
 namespace TransportR.Tests;
 
@@ -13,6 +15,32 @@ public class ReceiverStateOwnershipTests
     private static byte[] Payload(byte fill) => [fill, fill, fill, fill];
 
     private static ReceiverState<byte[]> StateOver(IChunkSink sink) => new(sink);
+
+    [Fact]
+    public async Task ARealPooledChunk_ThatTheConsumerDisposes_IsBackInTheArrayPool()
+    {
+        // The counting owners of the other tests say how often a chunk is disposed; this one says that
+        // the dispose reaches the pool. The pool hands this thread back the last array it returned.
+        var owner = new PooledMemoryOwner(new byte[5000]);
+        Assert.True(MemoryMarshal.TryGetArray<byte>(owner.Memory, out var segment));
+        var rented = segment.Array!;
+
+        var buffer = new ReceiveBuffer<ByteChunk>(BufferCapacity.ItemsAndBytes(100, 1 << 20));
+        var sink = new ByteChunkSink(buffer);
+        var state = StateOver(sink);
+        await state.ProcessBatchAsync(0, owner, owner.Memory);
+        state.Complete();
+
+        ByteChunk? chunk = null;
+        await foreach (var read in sink.ReadAllAsync(CancellationToken.None))
+        {
+            chunk = read;
+        }
+
+        // No await between the return and the rent: the same thread.
+        chunk!.Dispose();
+        Assert.Same(rented, ArrayPool<byte>.Shared.Rent(5000));
+    }
 
     [Fact]
     public async Task InOrder_WhenTheSinkTakesIt_TheStateLeavesTheMemoryAlone()
