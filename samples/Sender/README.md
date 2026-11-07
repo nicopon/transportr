@@ -28,6 +28,7 @@ dotnet run
 | `Sender__SourceFilePath` | data/orders.bin | Data source file |
 | `Sender__Group` | senders | Group announced in dev mode |
 | `Sender__MaxInFlightBatches` | unbounded | Send window, in batches |
+| `Sender__ByteStreamBatchBytes` | unset (items) | Byte-stream mode: one transfer copies the source file as it is, batches cut at this many bytes, without authentication. `SERIALIZER_TYPE` and `Sender__BatchSize` are not read |
 | `SENDER__PARALLELISM` | 1 | Transfers opened in parallel, to the discovered receivers in turn |
 | `Sender__TransferStaggerSeconds` | 0 | Seconds between the opening of one transfer and the next |
 | `Sender__EnableAuth`, `Sender__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |

@@ -17,6 +17,13 @@ public class ReceiverOptions
     public int? ReceiveMaxItems { get; set; }
 
     /// <summary>
+    /// Selects the byte-stream mode: the transfer is written to a file as it arrives, with no serializer
+    /// and no item. The figure is the sender's batch budget, which a receiver only needs to enter the
+    /// mode. Null keeps the item mode.
+    /// </summary>
+    public int? ByteStreamBatchBytes { get; set; }
+
+    /// <summary>
     /// Overrides the receive buffer's wire-byte bound. Null keeps the client default.
     /// </summary>
     public long? ReceiveMaxBytes { get; set; }

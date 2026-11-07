@@ -26,6 +26,12 @@ public class SenderOptions
     public int? MaxItems { get; set; }
 
     /// <summary>
+    /// Selects the byte-stream mode and sets the size, in bytes, at which a batch is cut: the source file
+    /// is copied as it is, with no serializer and no item. Null keeps the item mode.
+    /// </summary>
+    public int? ByteStreamBatchBytes { get; set; }
+
+    /// <summary>
     /// Seconds between the opening of one transfer and the next, when several run in parallel. Zero
     /// (the default) opens them all at once.
     /// </summary>

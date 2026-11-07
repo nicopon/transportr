@@ -26,6 +26,7 @@ dotnet run
 | `Receiver__OutputDirectory` | output | Output directory |
 | `Receiver__ReceiveMaxItems` | unbounded | Receive buffer bound, in items |
 | `Receiver__ReceiveMaxBytes` | unbounded | Receive buffer bound, in wire bytes |
+| `Receiver__ByteStreamBatchBytes` | unset (items) | Byte-stream mode: each transfer is written as it arrives to `orders_<transferId>.bin`, without authentication. The figure is the sender's batch budget, which this end only needs to enter the mode. `SERIALIZER_TYPE` and `Receiver__BatchSize` are not read; `Receiver__ReceiveMaxItems` and `Receiver__ConsumeItemsPerSecond` are refused |
 | `Receiver__ConsumeItemsPerSecond` | 0 (no pacing) | Throttles the consumer |
 | `Receiver__Group` | receivers | Group announced in dev mode |
 | `Receiver__EnableAuth`, `Receiver__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |

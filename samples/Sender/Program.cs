@@ -60,6 +60,13 @@ if (!File.Exists(sourceFilePath))
     return;
 }
 
+// The byte-stream mode has no Order, no serializer and no batch size, so it runs apart from the item mode.
+if (senderOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
+{
+    await RunByteStreamAsync(senderOptions, byteStreamBatchBytes, loggerFactory, logger, showProgress);
+    return;
+}
+
 // Services
 // Serialization internally managed via builder
 
@@ -258,6 +265,116 @@ static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extens
     var msg = $"[{role}][SESSIONS] {live} live after completion";
     logger.LogInformation(msg);
     Console.WriteLine(msg);
+}
+
+static async Task RunByteStreamAsync(
+    SenderOptions options,
+    int batchBytes,
+    ILoggerFactory loggerFactory,
+    Microsoft.Extensions.Logging.ILogger logger,
+    bool showProgress)
+{
+    if (options.Auth?.IsConfigured == true || !string.IsNullOrEmpty(options.AccessToken))
+    {
+        logger.LogError("The byte-stream mode of this sample runs without authentication.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    var clientBuilder = new TransportRClientBuilder<byte[]>()
+        .WithUrl(options.HubUrl)
+        .WithBatchTimeout(options.BatchTimeoutMs)
+        .WithLoggerFactory(loggerFactory)
+        .WithByteStream(batchBytes);
+    logger.LogInformation("Byte-stream mode: batches cut at {BatchBytes} bytes", batchBytes);
+
+    if (options.MaxInFlightBatches is { } maxInFlight)
+    {
+        clientBuilder.WithMaxInFlightBatches(maxInFlight);
+        logger.LogInformation("Send window: {Max} batches in flight", maxInFlight);
+    }
+    else
+    {
+        logger.LogInformation("Send window: unbounded");
+    }
+
+    if (options.WriteTransport is { } writeTransport)
+    {
+        clientBuilder.WithWriteTransport(writeTransport);
+        logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+    }
+
+    var broker = clientBuilder.Build();
+
+    try
+    {
+        logger.LogInformation("Connecting client...");
+        await broker.ConnectAsync(new[] { options.Group });
+
+        List<ClientInfo> receivers = new();
+        logger.LogInformation("Searching for authorized receivers...");
+        for (var retry = 0; receivers.Count == 0 && retry < 10; retry++)
+        {
+            receivers = await broker.GetReceiversAsync();
+            if (receivers.Count == 0)
+            {
+                logger.LogWarning("No authorized receiver found. Waiting...");
+                await Task.Delay(2000);
+            }
+        }
+
+        if (receivers.Count == 0) throw new Exception("Timeout: No authorized receiver found.");
+        var target = receivers[0];
+
+        Send<byte[]>? transfer = null;
+        try
+        {
+            transfer = await broker.InitTransferAsync(target.ClientId);
+            logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
+
+            await using var source = new FileStream(
+                options.SourceFilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await transfer.CopyFromAsync(source);
+
+            // CompleteAsync returning is the receiver's word that it has everything; it throws when it is not.
+            await transfer.CompleteAsync();
+
+            var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
+            var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {source.Position:N0} bytes | {finalInfo?.AcksReceived ?? 0} ACKs received";
+            logger.LogInformation(statsMsg);
+            if (showProgress)
+                Console.WriteLine(statsMsg);
+        }
+        catch (TransferFailedException ex)
+        {
+            logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
+            Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error in send task");
+        }
+        finally
+        {
+            if (transfer != null) await transfer.DisposeAsync();
+        }
+
+        ReportLiveSessions("SENDER", broker, logger);
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "Fatal error");
+        Console.Error.WriteLine($"[SENDER] FATAL ERROR: {ex}");
+    }
+    finally
+    {
+        await broker.DisposeAsync();
+        logger.LogInformation("Sender shutdown.");
+        Console.WriteLine("[SENDER] !!! TERMINATED !!!");
+    }
+
+    logger.LogInformation("=== Sender - Completed ===");
 }
 
 static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(

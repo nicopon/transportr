@@ -81,6 +81,13 @@ else
     logger.LogInformation("Auth: Disabled");
 }
 
+// The byte-stream mode has no Order, no serializer and no batch size, so it runs apart from the item mode.
+if (receiverOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
+{
+    await RunByteStreamAsync(receiverOptions, byteStreamBatchBytes, expectedTransfers, loggerFactory, logger, showProgress);
+    return;
+}
+
 // Single Client Instance
 var clientBuilder = new TransportRClientBuilder<Order>()
     .WithUrl(hubBaseUrl)
@@ -229,6 +236,138 @@ static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extens
     var msg = $"[{role}][SESSIONS] {live} live after completion";
     logger.LogInformation(msg);
     Console.WriteLine(msg);
+}
+
+static async Task RunByteStreamAsync(
+    ReceiverOptions options,
+    int batchBytes,
+    int expectedTransfers,
+    ILoggerFactory loggerFactory,
+    Microsoft.Extensions.Logging.ILogger logger,
+    bool showProgress)
+{
+    if (options.Auth?.IsConfigured == true || !string.IsNullOrEmpty(options.AccessToken))
+    {
+        logger.LogError("The byte-stream mode of this sample runs without authentication.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    if (options.ConsumeItemsPerSecond > 0)
+    {
+        logger.LogError("A byte stream has no items to pace: ConsumeItemsPerSecond does not apply to the byte-stream mode.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    var clientBuilder = new TransportRClientBuilder<byte[]>()
+        .WithUrl(options.HubUrl)
+        .WithLoggerFactory(loggerFactory)
+        .WithByteStream(batchBytes);
+    logger.LogInformation("Byte-stream mode");
+
+    // Build() refuses a bound in items: a byte stream has none, so the setting fails instead of being ignored.
+    if (options.ReceiveMaxItems is not null || options.ReceiveMaxBytes is not null)
+    {
+        logger.LogInformation("Receive capacity: {Items} items / {Bytes} wire bytes",
+            options.ReceiveMaxItems?.ToString() ?? "unbounded",
+            options.ReceiveMaxBytes?.ToString() ?? "unbounded");
+        clientBuilder.WithReceiveCapacity(options.ReceiveMaxItems, options.ReceiveMaxBytes);
+    }
+
+    if (options.WriteTransport is { } writeTransport)
+    {
+        clientBuilder.WithWriteTransport(writeTransport);
+        logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+    }
+
+    var broker = clientBuilder.Build();
+
+    var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (sender, e) =>
+    {
+        e.Cancel = true;
+        cts.Cancel();
+        logger.LogInformation("Shutdown requested...");
+    };
+
+    var completionSignal = new CountdownEvent(expectedTransfers);
+
+    try
+    {
+        await broker.ConnectAsync(new[] { options.Group }, cts.Token);
+        logger.LogInformation("Client registered (ID={ClientId}, Group={Group}). Waiting for {Count} streams...", broker.ClientId, options.Group, expectedTransfers);
+
+        broker.OnTransferStarted += async (Receive<byte[]> transfer) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // The handler owns the handle, and its scope closes before the signal below, so the
+                    // session count the main flow reads does not race the release it is there to check.
+                    await using (transfer)
+                    {
+                        logger.LogInformation("[Transfer {TransferId}] Starting reception", transfer.TransferId);
+                        var written = await WriteByteStreamAsync(transfer, options.OutputDirectory, cts.Token, logger);
+
+                        var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
+                        var finalStatsMsg = $"[RECEIVER][STATS] Transfer {transfer.TransferId[..8]} complete: {written:N0} bytes | {finalInfo?.AcksSent ?? 0} ACKs sent";
+                        logger.LogInformation(finalStatsMsg);
+                        if (showProgress)
+                            Console.WriteLine(finalStatsMsg);
+
+                        logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogCritical(ex, "[Transfer {TransferId}] Critical error", transfer.TransferId);
+                }
+                try { completionSignal.Signal(); } catch (Exception ex) { logger.LogError(ex, "Error signalling"); }
+                logger.LogInformation("[Transfer {TransferId}] Signalled.", transfer.TransferId);
+            });
+            await Task.CompletedTask;
+        };
+
+        await Task.Run(() => completionSignal.Wait(cts.Token));
+        logger.LogInformation("All expected transfers completed.");
+
+        ReportLiveSessions("RECEIVER", broker, logger);
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "Fatal error");
+        Console.Error.WriteLine($"[RECEIVER] FATAL ERROR: {ex}");
+    }
+    finally
+    {
+        await broker.DisposeAsync();
+        Console.WriteLine("[RECEIVER] !!! TERMINATED !!!");
+    }
+}
+
+static async Task<long> WriteByteStreamAsync(Receive<byte[]> transfer, string outputDirectory, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
+{
+    var binFile = Path.Combine(outputDirectory, $"orders_{transfer.TransferId}.bin");
+    logger.LogInformation("[Transfer {TransferId}] Creating file: {Path}", transfer.TransferId, binFile);
+
+    await using var file = new FileStream(
+        binFile, FileMode.Create, FileAccess.Write, FileShare.None,
+        bufferSize: 1, FileOptions.Asynchronous);
+    try
+    {
+        await transfer.CopyToAsync(file, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        if (!cancellationToken.IsCancellationRequested)
+            logger.LogError(ex, "[Transfer {TransferId}] Error during stream", transfer.TransferId);
+    }
+
+    await file.FlushAsync(CancellationToken.None);
+    return file.Length;
 }
 
 static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient broker, string outputDirectory, bool showProgress, int consumeItemsPerSecond, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
