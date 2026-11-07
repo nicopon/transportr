@@ -38,7 +38,7 @@ says: a builder method on the client, an options class on the hub.
 | client | `ClientOptions.WebSocketOpenBound` | 5 s | **fixed** | Opening a WebSocket write stream, the upgrade and the proof together: past it the path is taken as not carrying one, and the session uses segments |
 | client | Short-lived cuts (`HttpStreamManager.cs:62-63`) | 3 in a row, each within 30 s of its opening | **fixed** | Cuts of a proven WebSocket that read as a path not carrying one: segments from then on. A connection that lives 30 s clears the count |
 | client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write, which is also the largest segment or WebSocket message it sends |
-| client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`BatchAccumulator.cs:166`) |
+| client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval (`Accumulator.cs`, `FlushIntervalLoop`) |
 | client | `ClientOptions.TokenRefreshThreshold` | 5 min | `WithTokenRefreshThreshold` | How long before its expiry a token is renewed, and no more than half of what is left of it |
 | client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
 | client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |

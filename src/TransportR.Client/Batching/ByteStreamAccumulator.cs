@@ -15,34 +15,26 @@ namespace TransportR.Client.Batching;
 /// in-flight slot is taken when an empty batch receives its first byte, <b>before</b> the stream is
 /// rented: a full window parks the producer before it holds any batch memory, which is what bounds
 /// that memory by budget × window. The slot leaves with the batch on the channel; the reader of the
-/// channel owns both from then on.
+/// channel owns both from then on, and disposes the stream.
 /// </para>
 /// <para>
-/// A slot taken here and never handed off - the batch released by <see cref="CompleteAsync"/>
-/// empty, by <see cref="Abandon"/> or <see cref="Dispose"/>, or refused by a closed channel - is given
-/// back through the callback passed to the constructor, exactly once, with its stream disposed.
+/// A slot taken here and never handed off - the batch released by <see cref="Accumulator{TBatch}.CompleteAsync"/>
+/// empty, by <see cref="Accumulator{TBatch}.Abandon"/> or <see cref="Accumulator{TBatch}.Dispose"/>, or
+/// refused by a closed channel - is given back through the callback passed to the constructor,
+/// exactly once, with its stream disposed.
 /// </para>
 /// </remarks>
-internal sealed class ByteStreamAccumulator : IDisposable
+internal sealed class ByteStreamAccumulator : Accumulator<RecyclableMemoryStream>
 {
     private const int LengthPrefixBytes = sizeof(int);
 
     private readonly int _batchBytes;
-    private readonly int _flushIntervalMs;
     private readonly RecyclableMemoryStreamManager _streams;
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly SemaphoreSlim? _inFlightSlots;
     private readonly Action _releaseSlot;
-    private readonly CancellationTokenSource _disposeCts = new();
-    private readonly Channel<(RecyclableMemoryStream Batch, int BatchId)> _batchChannel;
 
-    // Non-null exactly while a slot is held for it. Read and written under _lock only: a stream
+    // Non-null exactly while a slot is held for it. Read and written under the lock only: a stream
     // disposed under a producer still writing into it would write into a block another stream owns.
     private RecyclableMemoryStream? _current;
-    private DateTime _lastFlushTime;
-    private int _batchId;
-    private Task? _flushIntervalTask;
-    private int _disposed;
 
     /// <param name="releaseSlot">
     /// Gives back a slot of <paramref name="inFlightSlots"/> taken for a batch that is never handed
@@ -54,46 +46,27 @@ internal sealed class ByteStreamAccumulator : IDisposable
         RecyclableMemoryStreamManager streams,
         SemaphoreSlim? inFlightSlots,
         Action releaseSlot)
+        : base(flushIntervalMs, inFlightSlots)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchBytes, 0, nameof(batchBytes));
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(flushIntervalMs, 0, nameof(flushIntervalMs));
 
         _batchBytes = batchBytes;
-        _flushIntervalMs = flushIntervalMs;
         _streams = streams;
-        _inFlightSlots = inFlightSlots;
         _releaseSlot = releaseSlot;
-        _lastFlushTime = DateTime.UtcNow;
-
-        _batchChannel = Channel.CreateUnbounded<(RecyclableMemoryStream, int)>(new UnboundedChannelOptions
-        {
-            SingleReader = false, // The send worker, and DiscardHeldAsync for what it left
-            SingleWriter = true
-        });
     }
 
-    /// <summary>
-    /// The batches, in order. Each stream is the reader's to dispose, and each holds a slot the
-    /// reader gives back once the batch is acknowledged or fails.
-    /// </summary>
-    public ChannelReader<(RecyclableMemoryStream Batch, int BatchId)> BatchReader => _batchChannel.Reader;
-
-    public void StartFlushInterval()
-    {
-        if (_flushIntervalTask != null) return;
-        _flushIntervalTask = FlushIntervalLoop(_disposeCts.Token);
-    }
+    protected override bool HasPending => _current is not null && BodyLength > 0;
 
     /// <summary>
     /// Appends <paramref name="bytes"/> to the stream. They are copied before this returns, so the
     /// caller may reuse the memory at once. A call that fails - cancelled while parked on the window,
     /// or after the accumulator was abandoned - may have appended part of the bytes; the batch it
-    /// leaves open stays here, for <see cref="CompleteAsync"/>, <see cref="Abandon"/> or
-    /// <see cref="Dispose"/>.
+    /// leaves open stays here, for <see cref="Accumulator{TBatch}.CompleteAsync"/>,
+    /// <see cref="Accumulator{TBatch}.Abandon"/> or <see cref="Accumulator{TBatch}.Dispose"/>.
     /// </summary>
     public async ValueTask AddAsync(ReadOnlyMemory<byte> bytes, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await Lock.WaitAsync(ct);
         try
         {
             while (!bytes.IsEmpty)
@@ -104,36 +77,23 @@ internal sealed class ByteStreamAccumulator : IDisposable
                 _current!.Write(bytes.Span[..take]);
                 bytes = bytes[take..];
 
-                if (BodyLength == _batchBytes) Flush();
+                if (BodyLength == _batchBytes) await FlushAsync(ct);
             }
         }
         finally
         {
-            _lock.Release();
+            Lock.Release();
         }
     }
 
-    /// <summary>
-    /// Hands off the open batch, if it holds any byte, and completes the channel.
-    /// </summary>
-    public async ValueTask CompleteAsync(CancellationToken ct = default)
+    protected override async ValueTask FlushRemainderAsync(CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
-        try
-        {
-            // An open batch with no byte in it is not sent: a batch of the byte-stream mode is
-            // never empty.
-            if (_current is not null)
-            {
-                if (BodyLength > 0) Flush();
-                else DiscardCurrent();
-            }
-        }
-        finally
-        {
-            _lock.Release();
-        }
-        _batchChannel.Writer.TryComplete();
+        // An open batch with no byte in it is not sent: a batch of the byte-stream mode is never
+        // empty.
+        if (_current is null) return;
+
+        if (BodyLength > 0) await FlushAsync(ct);
+        else DiscardCurrent();
     }
 
     private int BodyLength => (int)_current!.Length - LengthPrefixBytes;
@@ -145,16 +105,10 @@ internal sealed class ByteStreamAccumulator : IDisposable
     {
         // Abandon and Dispose release what is held once; a batch opened after them would be held
         // by nobody.
-        if (_disposeCts.IsCancellationRequested)
+        if (IsReleased)
             throw new OperationCanceledException("The accumulator no longer accepts bytes.");
 
-        // Linked to _disposeCts so a producer parked here is released when the accumulator goes
-        // away rather than hanging on a window that will never reopen.
-        if (_inFlightSlots != null)
-        {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposeCts.Token);
-            await _inFlightSlots.WaitAsync(linked.Token);
-        }
+        await TakeSlotAsync(ct);
 
         RecyclableMemoryStream? batch = null;
         try
@@ -176,90 +130,38 @@ internal sealed class ByteStreamAccumulator : IDisposable
     /// <summary>
     /// Hands the open batch off with its slot. Must be called under lock, with a batch open.
     /// </summary>
-    private void Flush()
+    protected override async ValueTask FlushAsync(CancellationToken ct)
     {
         var batch = _current!;
         var bodyLength = BodyLength;
         _current = null;
-        _lastFlushTime = DateTime.UtcNow;
+        WriteLength(batch, bodyLength);
 
+        try
+        {
+            // Not ct: only a closed channel may refuse the batch, the one refusal caught below. A
+            // batch refused for a cancellation would be held by nobody.
+            await HandOffAsync(batch, CancellationToken.None);
+        }
+        catch (ChannelClosedException)
+        {
+            // Unbounded, so this fails only once the channel is complete: abandoned, disposed, or
+            // completed before this batch was opened. Nobody would read the batch.
+            batch.Dispose();
+            ReleaseSlot();
+            throw;
+        }
+    }
+
+    private static void WriteLength(RecyclableMemoryStream batch, int bodyLength)
+    {
         Span<byte> length = stackalloc byte[LengthPrefixBytes];
         BinaryPrimitives.WriteInt32LittleEndian(length, bodyLength);
         batch.Position = 0;
         batch.Write(length);
-
-        // Unbounded, so this fails only once the channel is complete: abandoned, disposed, or
-        // completed before this batch was opened. Nobody would read the batch.
-        if (!_batchChannel.Writer.TryWrite((batch, _batchId++)))
-        {
-            batch.Dispose();
-            ReleaseSlot();
-            throw new ChannelClosedException();
-        }
     }
 
-    private async Task FlushIntervalLoop(CancellationToken token)
-    {
-        while (!token.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(_flushIntervalMs / 2, token);
-
-                await _lock.WaitAsync(token);
-                try
-                {
-                    if (_current is not null && BodyLength > 0
-                        && (DateTime.UtcNow - _lastFlushTime).TotalMilliseconds >= _flushIntervalMs)
-                    {
-                        Flush();
-                    }
-                }
-                finally
-                {
-                    _lock.Release();
-                }
-            }
-            catch (Exception ex) when (ex is OperationCanceledException or ChannelClosedException)
-            {
-                break;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Releases a producer parked on the in-flight window, accepts no further byte, and gives back
-    /// the open batch and the batches nobody has read, slots included.
-    /// </summary>
-    public void Abandon()
-    {
-        try
-        {
-            _disposeCts.Cancel();
-            _batchChannel.Writer.TryComplete();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Already disposed, which released everything already.
-            return;
-        }
-        _ = DiscardHeldAsync();
-    }
-
-    public void Dispose()
-    {
-        // CompleteSenderAsync disposes it and a session released meanwhile does too; the second
-        // Cancel() on the disposed source would throw.
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-
-        // Cancel first: a producer parked on the in-flight window unwinds through the finally that
-        // releases _lock, so _lock must still be usable at that point. SemaphoreSlim only needs
-        // disposing when AvailableWaitHandle has been touched, which it never is here.
-        _disposeCts.Cancel();
-        _batchChannel.Writer.TryComplete();
-        _disposeCts.Dispose();
-        _ = DiscardHeldAsync();
-    }
+    protected override void OnReleased() => _ = DiscardHeldAsync();
 
     /// <summary>
     /// Disposes the open batch and the unread ones, and gives back their slots. Under the lock,
@@ -268,13 +170,13 @@ internal sealed class ByteStreamAccumulator : IDisposable
     /// </summary>
     private async Task DiscardHeldAsync()
     {
-        await _lock.WaitAsync();
+        await Lock.WaitAsync();
         try
         {
             DiscardCurrent();
 
             // The channel hands each batch out once, to the reader or here.
-            while (_batchChannel.Reader.TryRead(out var unread))
+            while (BatchReader.TryRead(out var unread))
             {
                 unread.Batch.Dispose();
                 ReleaseSlot();
@@ -282,7 +184,7 @@ internal sealed class ByteStreamAccumulator : IDisposable
         }
         finally
         {
-            _lock.Release();
+            Lock.Release();
         }
     }
 
@@ -300,6 +202,6 @@ internal sealed class ByteStreamAccumulator : IDisposable
 
     private void ReleaseSlot()
     {
-        if (_inFlightSlots != null) _releaseSlot();
+        if (HasWindow) _releaseSlot();
     }
 }
