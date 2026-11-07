@@ -167,6 +167,24 @@ public class BatchAccumulatorTests
     }
 
     [Fact]
+    public async Task StartFlushInterval_AtOneMillisecond_ReturnsToItsCaller()
+    {
+        // Half of one millisecond is no wait at all, and a free lock is none either.
+        var accumulator = new BatchAccumulator<int>(batchSize: 10, flushIntervalMs: 1);
+        try
+        {
+            var start = Task.Run(accumulator.StartFlushInterval);
+
+            Assert.Same(start, await Task.WhenAny(start, Task.Delay(TimeSpan.FromSeconds(5))));
+        }
+        finally
+        {
+            // Stops a loop that never yields, which would otherwise hold its thread for the rest of the run.
+            accumulator.Dispose();
+        }
+    }
+
+    [Fact]
     public void Dispose_DisposesResources()
     {
         // Arrange

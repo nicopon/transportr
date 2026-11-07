@@ -367,7 +367,7 @@ public class ByteStreamAccumulatorTests
             var streams = new CountedStreams(new RecyclableMemoryStreamManager());
             var slots = Window(4);
             var released = 0;
-            // 2 ms, the shortest interval whose half-interval wait yields.
+            // 2 ms, so that the flush interval cuts batches during the race.
             var accumulator = new ByteStreamAccumulator(Budget, 2, streams.Manager, slots, () =>
             {
                 Interlocked.Increment(ref released);

@@ -142,7 +142,9 @@ internal abstract class Accumulator<TBatch> : IDisposable
         {
             try
             {
-                await Task.Delay(_flushIntervalMs / 2, token);
+                // At least a millisecond: half of one is no wait at all, nor is a free lock, and the
+                // loop would then never give its thread back, the caller of StartFlushInterval first.
+                await Task.Delay(Math.Max(1, _flushIntervalMs / 2), token);
 
                 await Lock.WaitAsync(token);
                 try
