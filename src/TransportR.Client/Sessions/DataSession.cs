@@ -187,6 +187,8 @@ internal class DataSession<T> : IDataSession<T>
 
     public Task SendAsync(T item, CancellationToken cancellationToken)
     {
+        if (RefusedAsCompleted() is { } refused) return refused;
+
         var send = _batchProcessor.SendAsync(item, cancellationToken);
         // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
         // dispose can fault before this is even checked, and that path must still go through
@@ -198,14 +200,37 @@ internal class DataSession<T> : IDataSession<T>
 
     public Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
     {
+        if (RefusedAsCompleted() is { } refused) return refused;
+
         var send = _batchProcessor.SendBytesAsync(bytes, cancellationToken);
         return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
     public Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
     {
+        if (RefusedAsCompleted() is { } refused) return refused;
+
         var send = _batchProcessor.SendRangeAsync(items, cancellationToken);
         return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
+    }
+
+    private int _completeStarted;
+
+    /// <summary>
+    /// What a send made once <see cref="CompleteAsync"/> has begun is answered with, or null when the
+    /// send may go on. The accumulators are gone, or about to be, and a send they no longer see is
+    /// dropped without a word: the caller is told instead. A failed or released session keeps its own
+    /// answer, the <see cref="TransferFailedException"/> the send translates to.
+    /// </summary>
+    private Task? RefusedAsCompleted()
+    {
+        if (Volatile.Read(ref _completeStarted) == 0
+            || _fsm.CurrentState is SessionState.Failed or SessionState.Disposed)
+        {
+            return null;
+        }
+
+        return Task.FromException(new InvalidOperationException("The transfer was completed: nothing can be sent on it any more."));
     }
 
     /// <summary>
@@ -304,6 +329,8 @@ internal class DataSession<T> : IDataSession<T>
         {
             throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
         }
+
+        Volatile.Write(ref _completeStarted, 1);
 
         // The partial batch handed off here takes a slot like any other, so a full window parks this
         // call as it parks SendAsync, and under the same bound.

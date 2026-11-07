@@ -298,6 +298,38 @@ public class ByteStreamTransferTests
         await consumer.WaitAsync(Bound);
     }
 
+    [Fact]
+    public async Task SendingBytes_OnceCompleteAsyncHasBegun_IsRefused_RatherThanDroppedInSilence()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var gate = new SendGate(host.GetTestServer().CreateHandler());
+        await using var sender = CreateClient(host.GetTestServer().CreateHandler(), byteStreamBytes: 1000);
+        await using var receiver = CreateClient(gate, byteStreamBytes: 1000);
+        var (send, receive) = await OpenAsync(sender, receiver);
+        await using var _ = send;
+        await using var __ = receive;
+
+        var source = Payload(3000);
+        var written = new CountingStream();
+        var consumer = Task.Run(() => receive.CopyToAsync(written));
+        await send.CopyFromAsync(new MemoryStream(source));
+        await WaitUntil(() => written.Count == source.Length);
+
+        // Complete is under way and cannot end: the receiver's answer is held. A send made now is
+        // not part of the transfer, and its caller is told.
+        gate.Close();
+        var completing = send.CompleteAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.SendAsync(new byte[] { 1 }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.CopyFromAsync(new MemoryStream(new byte[10])));
+
+        gate.Open();
+        await completing.WaitAsync(Bound);
+        await consumer.WaitAsync(Bound);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.CopyFromAsync(new MemoryStream(new byte[10])));
+        Assert.Equal(source.Length, written.Count);
+    }
+
     private static async Task WaitUntil(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + Bound;

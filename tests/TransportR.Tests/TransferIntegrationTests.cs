@@ -185,6 +185,37 @@ public class TransferIntegrationTests
     }
 
     [Fact]
+    public async Task SendAsync_AfterCompleteAsync_IsRefused_RatherThanDroppedInSilence()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task;
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync())
+                items.Add(item);
+            return items;
+        });
+
+        await send.SendAsync(["a", "b", "c"]);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.SendAsync("late"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.SendAsync(["late"]));
+        Assert.Equal(["a", "b", "c"], await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
     public async Task SenderInitiatedTransfer_Opens_OnTheReceiversReply_WithoutCallingTheSenderBack()
     {
         // The wire alone: the sender asks, the receiver's stream carries the question, and its reply

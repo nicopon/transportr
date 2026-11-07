@@ -24,6 +24,10 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// released. That holds for a call made after the ending as for one parked when it came. The
     /// handle is dead; dispose it.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="CompleteAsync"/> has been called: a completed transfer carries nothing more, and
+    /// the item is not sent.
+    /// </exception>
     public abstract Task SendAsync(T item, CancellationToken cancellationToken = default);
     
     /// <summary>
