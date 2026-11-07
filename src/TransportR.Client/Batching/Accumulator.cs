@@ -18,6 +18,12 @@ internal abstract class Accumulator<TBatch> : IDisposable
 {
     private readonly int _flushIntervalMs;
     private readonly CancellationTokenSource _disposeCts = new();
+
+    // Read once, here: the source's Token throws once disposed, which Dispose does right after
+    // cancelling, under a producer that may be about to link to it. The token itself stays readable,
+    // and cancelled.
+    private readonly CancellationToken _releaseToken;
+
     private readonly Channel<(TBatch Batch, int BatchId)> _batchChannel;
     private DateTime _lastFlushTime;
     private int _batchId;
@@ -35,6 +41,7 @@ internal abstract class Accumulator<TBatch> : IDisposable
 
         _flushIntervalMs = flushIntervalMs;
         _inFlightSlots = inFlightSlots;
+        _releaseToken = _disposeCts.Token;
         _lastFlushTime = DateTime.UtcNow;
 
         _batchChannel = Channel.CreateUnbounded<(TBatch, int)>(new UnboundedChannelOptions
@@ -92,7 +99,7 @@ internal abstract class Accumulator<TBatch> : IDisposable
     public void StartFlushInterval()
     {
         if (_flushIntervalTask != null) return;
-        _flushIntervalTask = FlushIntervalLoop(_disposeCts.Token);
+        _flushIntervalTask = FlushIntervalLoop(_releaseToken);
     }
 
     /// <summary>
@@ -121,7 +128,7 @@ internal abstract class Accumulator<TBatch> : IDisposable
 
         // Linked to the release so a producer parked here is let go when the accumulator goes away
         // rather than hanging on a window that will never reopen.
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _disposeCts.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _releaseToken);
         await _inFlightSlots.WaitAsync(linked.Token);
     }
 

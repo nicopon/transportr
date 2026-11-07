@@ -264,6 +264,18 @@ public class BatchAccumulatorTests
     }
 
     [Fact]
+    public async Task AddAsync_AfterDispose_WithAWindow_IsCancelled()
+    {
+        // The release cancels before it disposes, so a call that comes after it is cancelled too,
+        // rather than failing on the disposal of what cancelled it.
+        using var slots = new SemaphoreSlim(1, 1);
+        var accumulator = new BatchAccumulator<int>(batchSize: 1, flushIntervalMs: 60000, inFlightSlots: slots);
+        accumulator.Dispose();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => accumulator.AddAsync(1).AsTask());
+    }
+
+    [Fact]
     public async Task AddAsync_WhenCancelledWhileParked_ObservesTheCallerToken()
     {
         // Arrange
