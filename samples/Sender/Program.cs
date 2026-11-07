@@ -60,13 +60,6 @@ if (!File.Exists(sourceFilePath))
     return;
 }
 
-// The byte-stream mode has no Order, no serializer and no batch size, so it runs apart from the item mode.
-if (senderOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
-{
-    await RunByteStreamAsync(senderOptions, byteStreamBatchBytes, loggerFactory, logger, showProgress);
-    return;
-}
-
 // Services
 // Serialization internally managed via builder
 
@@ -78,6 +71,13 @@ if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SENDER__PARALLELIS
 }
 logger.LogInformation("Parallelism configured: {Parallelism}", parallelism);
 logger.LogInformation("Transfer stagger: {Seconds}s", senderOptions.TransferStaggerSeconds);
+
+// The byte-stream mode has no Order, no serializer and no batch size, so it runs apart from the item mode.
+if (senderOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
+{
+    await RunByteStreamAsync(senderOptions, byteStreamBatchBytes, parallelism, loggerFactory, logger, showProgress);
+    return;
+}
 
 // URL from configuration
 var hubBaseUrl = hubUrl;
@@ -270,13 +270,15 @@ static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extens
 static async Task RunByteStreamAsync(
     SenderOptions options,
     int batchBytes,
+    int parallelism,
     ILoggerFactory loggerFactory,
     Microsoft.Extensions.Logging.ILogger logger,
     bool showProgress)
 {
-    if (options.Auth?.IsConfigured == true || !string.IsNullOrEmpty(options.AccessToken))
+    // The source is the file as it is: a cap in items would mean nothing to it.
+    if (options.MaxItems is not null)
     {
-        logger.LogError("The byte-stream mode of this sample runs without authentication.");
+        logger.LogError("A byte stream has no items to cap: MaxItems does not apply to the byte-stream mode.");
         Environment.ExitCode = 1;
         return;
     }
@@ -304,6 +306,26 @@ static async Task RunByteStreamAsync(
         logger.LogInformation("Write transport policy: {Policy}", writeTransport);
     }
 
+    if (options.Auth?.IsConfigured == true)
+    {
+        logger.LogInformation("Auth: Client Credentials enabled (ClientId={ClientId})", options.Auth.ClientId);
+        clientBuilder.WithClientCredentials(
+            options.Auth.TokenEndpoint,
+            options.Auth.ClientId,
+            options.Auth.ClientSecret,
+            options.Auth.Scope,
+            loggerFactory);
+    }
+    else if (!string.IsNullOrEmpty(options.AccessToken))
+    {
+        logger.LogInformation("Auth: Using static access token");
+        clientBuilder.WithAccessToken(options.AccessToken);
+    }
+    else
+    {
+        logger.LogInformation("Auth: Disabled");
+    }
+
     var broker = clientBuilder.Build();
 
     try
@@ -324,41 +346,17 @@ static async Task RunByteStreamAsync(
         }
 
         if (receivers.Count == 0) throw new Exception("Timeout: No authorized receiver found.");
-        var target = receivers[0];
+        logger.LogInformation("Found {Count} authorized receivers.", receivers.Count);
 
-        Send<byte[]>? transfer = null;
-        try
+        var tasks = new List<Task>();
+        for (var i = 0; i < parallelism; i++)
         {
-            transfer = await broker.InitTransferAsync(target.ClientId);
-            logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
+            var target = receivers[i % receivers.Count];
+            var openDelay = TimeSpan.FromSeconds(options.TransferStaggerSeconds) * i;
+            tasks.Add(SendFileAsync(broker, target, openDelay, options.SourceFilePath, showProgress, logger));
+        }
 
-            await using var source = new FileStream(
-                options.SourceFilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            await transfer.CopyFromAsync(source);
-
-            // CompleteAsync returning is the receiver's word that it has everything; it throws when it is not.
-            await transfer.CompleteAsync();
-
-            var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
-            var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {source.Position:N0} bytes | {finalInfo?.AcksReceived ?? 0} ACKs received";
-            logger.LogInformation(statsMsg);
-            if (showProgress)
-                Console.WriteLine(statsMsg);
-        }
-        catch (TransferFailedException ex)
-        {
-            logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
-            Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error in send task");
-        }
-        finally
-        {
-            if (transfer != null) await transfer.DisposeAsync();
-        }
+        await Task.WhenAll(tasks);
 
         ReportLiveSessions("SENDER", broker, logger);
     }
@@ -375,6 +373,51 @@ static async Task RunByteStreamAsync(
     }
 
     logger.LogInformation("=== Sender - Completed ===");
+}
+
+// One transfer of the source file. Each has its own reader of the file, as the item mode has.
+static async Task SendFileAsync(
+    TransportRClient<byte[]> broker,
+    ClientInfo target,
+    TimeSpan openDelay,
+    string sourceFilePath,
+    bool showProgress,
+    Microsoft.Extensions.Logging.ILogger logger)
+{
+    Send<byte[]>? transfer = null;
+    try
+    {
+        if (openDelay > TimeSpan.Zero) await Task.Delay(openDelay);
+        transfer = await broker.InitTransferAsync(target.ClientId);
+        logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
+
+        await using var source = new FileStream(
+            sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 1, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await transfer.CopyFromAsync(source);
+
+        // CompleteAsync returning is the receiver's word that it has everything; it throws when it is not.
+        await transfer.CompleteAsync();
+
+        var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
+        var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {source.Position:N0} bytes | {finalInfo?.AcksReceived ?? 0} ACKs received";
+        logger.LogInformation(statsMsg);
+        if (showProgress)
+            Console.WriteLine(statsMsg);
+    }
+    catch (TransferFailedException ex)
+    {
+        logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
+        Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error in send task");
+    }
+    finally
+    {
+        if (transfer != null) await transfer.DisposeAsync();
+    }
 }
 
 static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(

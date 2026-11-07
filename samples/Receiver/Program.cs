@@ -246,13 +246,6 @@ static async Task RunByteStreamAsync(
     Microsoft.Extensions.Logging.ILogger logger,
     bool showProgress)
 {
-    if (options.Auth?.IsConfigured == true || !string.IsNullOrEmpty(options.AccessToken))
-    {
-        logger.LogError("The byte-stream mode of this sample runs without authentication.");
-        Environment.ExitCode = 1;
-        return;
-    }
-
     if (options.ConsumeItemsPerSecond > 0)
     {
         logger.LogError("A byte stream has no items to pace: ConsumeItemsPerSecond does not apply to the byte-stream mode.");
@@ -279,6 +272,20 @@ static async Task RunByteStreamAsync(
     {
         clientBuilder.WithWriteTransport(writeTransport);
         logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+    }
+
+    if (options.Auth?.IsConfigured == true)
+    {
+        clientBuilder.WithClientCredentials(
+            options.Auth.TokenEndpoint,
+            options.Auth.ClientId,
+            options.Auth.ClientSecret,
+            options.Auth.Scope,
+            loggerFactory);
+    }
+    else if (!string.IsNullOrEmpty(options.AccessToken))
+    {
+        clientBuilder.WithAccessToken(options.AccessToken);
     }
 
     var broker = clientBuilder.Build();
