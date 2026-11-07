@@ -30,11 +30,14 @@ public static class ByteStreamExtensions
     /// The size, in bytes, at which a batch is cut. It sets what an acknowledgement, a send window slot
     /// and a resend cover, so the sender holds at most this much times <c>WithMaxInFlightBatches</c>. There
     /// is no default: the right figure depends on the use.
+    /// At most <c>int.MaxValue - 4</c>, a batch and its 4-byte length being held in one <c>int</c>.
     /// </param>
     public static TransportRClientBuilder<byte[]> WithByteStream(this TransportRClientBuilder<byte[]> builder, int batchBytes)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchBytes, 0, nameof(batchBytes));
+        // A batch is its body and the 4 bytes of its length, held in one int.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(batchBytes, int.MaxValue - sizeof(int), nameof(batchBytes));
         builder.ByteStreamBatchBytes = batchBytes;
         return builder;
     }

@@ -22,6 +22,22 @@ public class ByteStreamBuilderTests
         Assert.Throws<ArgumentOutOfRangeException>(() => Builder().WithByteStream(batchBytes));
     }
 
+    [Theory]
+    [InlineData(int.MaxValue - 3)]
+    [InlineData(int.MaxValue)]
+    public void WithByteStream_RefusesABudgetThatCannotHoldItsLengthPrefix(int batchBytes)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Builder().WithByteStream(batchBytes));
+    }
+
+    [Fact]
+    public void WithByteStream_AcceptsTheLargestBudgetAnIntCanHold()
+    {
+        var builder = Builder().WithByteStream(int.MaxValue - 4);
+
+        Assert.Equal(int.MaxValue - 4, builder.ByteStreamBatchBytes);
+    }
+
     [Fact]
     public async Task Build_InByteStreamMode_NeedsNoSerializer_AndCarriesTheBudget()
     {
