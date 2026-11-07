@@ -26,7 +26,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     // Dependencies
     private readonly ControlChannel _channel;
     private readonly SessionRegistry<T> _sessionRegistry;
-    private readonly IBatchSerializer<T> _serializer;
+    private readonly IBatchSerializer<T>? _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
     
@@ -52,7 +52,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     internal TransportRClient(
         ControlChannel channel,
         SessionRegistry<T> sessionRegistry,
-        IBatchSerializer<T> serializer,
+        IBatchSerializer<T>? serializer,
         ILogger logger,
         int defaultBatchSize,
         ClientOptions options,
@@ -353,6 +353,11 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null)
     {
+        if (batchSize is not null && _options.ByteStreamBatchBytes is not null)
+        {
+            throw new ArgumentException("A batch size cannot be given in the byte-stream mode.", nameof(batchSize));
+        }
+
         int size = batchSize ?? _defaultBatchSize;
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (Size={Size})...", targetClientId, size);
 
@@ -451,7 +456,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     #region ISessionContext Implementation
 
     ILogger ISessionConfig.Logger => _logger;
-    IBatchSerializer<T> ISessionConfig<T>.Serializer => _serializer;
+    IBatchSerializer<T>? ISessionConfig<T>.Serializer => _serializer;
     HttpClient IStreamTransport.HttpClient => _httpClient;
     int ISessionConfig.BatchFlushIntervalMs => _options.BatchFlushIntervalMs;
     RecyclableMemoryStreamManager ISessionConfig.StreamManager => _streamManager;

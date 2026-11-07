@@ -18,7 +18,10 @@ public interface ITransferInitiator
     /// </summary>
     /// <param name="senderClientId">The registered client that will send.</param>
     /// <param name="receiverClientId">The registered client that will receive.</param>
-    /// <param name="batchSize">Items per batch.</param>
+    /// <param name="batchSize">
+    /// Items per batch. Without effect on a sender in the byte-stream mode, which cuts its batches by size
+    /// in bytes: the host does not know the mode a sender was built in, and passing a value is not an error.
+    /// </param>
     /// <param name="timeoutMs">Timeout for the handshake in milliseconds.</param>
     /// <param name="cancellationToken">Abandons the handshake; the receiver is told to cancel.</param>
     /// <returns>

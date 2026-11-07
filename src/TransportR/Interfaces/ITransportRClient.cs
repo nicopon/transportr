@@ -66,8 +66,14 @@ public interface IDataSender<T> : IDataClient
     /// Initiates a new transfer to the specified target client.
     /// </summary>
     /// <param name="targetClientId">The ID of the receiver client.</param>
-    /// <param name="batchSize">Optional batch size override. Uses default if not specified.</param>
+    /// <param name="batchSize">
+    /// Optional batch size override. Uses default if not specified. A client in the byte-stream mode,
+    /// which cuts its batches by size in bytes, refuses a value.
+    /// </param>
     /// <returns>A Send handle to transmit items through.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="batchSize"/> was given to a client in the byte-stream mode.
+    /// </exception>
     /// <exception cref="HubRequestFailedException">
     /// The hub refused the transfer, or the handshake failed: the receiver is unknown, unreachable or
     /// refused it, or it timed out.

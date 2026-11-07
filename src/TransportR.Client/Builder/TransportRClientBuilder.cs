@@ -25,6 +25,7 @@ public class TransportRClientBuilder<T>
 {
     private string? _url;
     private int _batchSize = 1000;
+    private bool _batchSizeSet;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
     private BufferCapacity? _receiveCapacity;
@@ -34,6 +35,13 @@ public class TransportRClientBuilder<T>
     private Func<Task<string>>? _tokenProvider;
     private TimeSpan? _tokenRefreshThreshold;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
+
+    /// <summary>
+    /// The size at which a batch of the byte-stream mode is cut; <c>null</c> outside that mode. Set by
+    /// <c>WithByteStream</c>, and checked against the other settings by <see cref="Build"/> so that the
+    /// order of the calls does not matter.
+    /// </summary>
+    internal int? ByteStreamBatchBytes { get; set; }
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
@@ -50,6 +58,7 @@ public class TransportRClientBuilder<T>
     public TransportRClientBuilder<T> WithBatchSize(int batchSize)
     {
         _batchSize = batchSize;
+        _batchSizeSet = true;
         return this;
     }
 
@@ -200,9 +209,27 @@ public class TransportRClientBuilder<T>
         // Defaults
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
         var logger = loggerFactory.CreateLogger<TransportRClient<T>>();
-        // The serializer is mandatory and there is no default: picking one for the caller would
-        // pick their wire format, and the serialization packages are separate on purpose.
-        if (_serializer == null)
+        if (ByteStreamBatchBytes is not null)
+        {
+            // Each of these means something only for items, and silently ignoring one would hide a
+            // setting that does not do what its caller expects.
+            if (_serializer != null)
+            {
+                throw new InvalidOperationException("A serializer cannot be combined with the byte-stream mode.");
+            }
+            if (_batchSizeSet)
+            {
+                throw new InvalidOperationException("The batch size cannot be set in the byte-stream mode.");
+            }
+            if (_receiveCapacity?.MaxItems is not null)
+            {
+                throw new InvalidOperationException("The receive capacity cannot be bounded by items in the byte-stream mode.");
+            }
+        }
+        // The serializer is mandatory outside the byte-stream mode and there is no default: picking
+        // one for the caller would pick their wire format, and the serialization packages are
+        // separate on purpose.
+        else if (_serializer == null)
         {
             throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
         }
@@ -211,7 +238,8 @@ public class TransportRClientBuilder<T>
         {
             BatchFlushIntervalMs = _batchFlushIntervalMs,
             MaxInFlightBatches = _maxInFlightBatches,
-            WriteTransportPolicy = _writeTransportPolicy
+            WriteTransportPolicy = _writeTransportPolicy,
+            ByteStreamBatchBytes = ByteStreamBatchBytes
         };
 
         options.ReceiveBufferCapacity = _receiveCapacity;
