@@ -424,11 +424,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     private async Task HandleBatchChunkAsync(ChunkData chunk, CancellationToken ct)
     {
-        if (_receiverState == null) return;
+        if (_receiverState == null || _sink == null) return;
 
         // Checked before any memory is rented. An UndecodableBatchException, because it is the one
         // that makes the session tell the sender; a plain protocol violation would only end this side.
-        if ((chunk.Header.Type == ChunkType.StreamBatch) != _byteStream)
+        if (chunk.Header.Type != _sink.BatchType)
             throw new UndecodableBatchException("A batch of a kind this transfer does not carry was received.");
 
         // The copy is what is handed on: the byte-stream mode gives this owner away, never the

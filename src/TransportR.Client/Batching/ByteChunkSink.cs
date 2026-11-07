@@ -1,4 +1,5 @@
 using System.Buffers;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
@@ -7,6 +8,8 @@ namespace TransportR.Client.Batching;
 /// </summary>
 internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSink
 {
+    public ChunkType BatchType => ChunkType.StreamBatch;
+
     /// <remarks>
     /// One entry per chunk, charged its wire size. Taken only once the entry is in the buffer: a wait
     /// for room that is cancelled, or a buffer completed under the write, leaves the memory with the

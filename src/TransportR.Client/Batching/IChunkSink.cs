@@ -1,4 +1,5 @@
 using System.Buffers;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
@@ -12,6 +13,12 @@ namespace TransportR.Client.Batching;
 /// </remarks>
 internal interface IChunkSink
 {
+    /// <summary>
+    /// The chunk type of the batches this sink can take: <see cref="ChunkType.Batch"/> for items it
+    /// decodes, <see cref="ChunkType.StreamBatch"/> for bytes it hands on as they are.
+    /// </summary>
+    ChunkType BatchType { get; }
+
     /// <summary>
     /// Hands one batch body to the consumer's side, waiting for room if the buffer is bounded.
     /// </summary>

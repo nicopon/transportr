@@ -1,5 +1,6 @@
 using System.Buffers;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
@@ -8,6 +9,8 @@ namespace TransportR.Client.Batching;
 /// </summary>
 internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer<T> serializer) : IChunkSink
 {
+    public ChunkType BatchType => ChunkType.Batch;
+
     /// <summary>
     /// Hands a chunk to the receive buffer, which charges it against the configured capacity
     /// before it is decoded and parks here for as long as the consumer is behind.

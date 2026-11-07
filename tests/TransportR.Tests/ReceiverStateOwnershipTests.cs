@@ -2,6 +2,7 @@ using System.Buffers;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
+using TransportR.Protocol;
 using System.Runtime.InteropServices;
 
 namespace TransportR.Tests;
@@ -253,6 +254,8 @@ public class ReceiverStateOwnershipTests
     private sealed class ScriptedSink(Func<int, IMemoryOwner<byte>, bool> onWrite) : IChunkSink
     {
         public int Calls { get; private set; }
+
+        public ChunkType BatchType => ChunkType.StreamBatch;
 
         public async Task<bool> WriteAsync(IMemoryOwner<byte> owner, ReadOnlyMemory<byte> body, CancellationToken ct)
         {
