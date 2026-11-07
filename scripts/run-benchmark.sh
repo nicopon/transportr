@@ -477,6 +477,11 @@ if [ -n "$ASSERT_WRITE_TRANSPORT" ] || [ "$EXPECT_WRITE_FALLBACK" == "true" ] ||
     check_write_transport || exit 1
 fi
 
+if [ "$EXPECT_RESUME" == "true" ]; then
+    source "$SCRIPT_DIR/lib/transport.sh"
+    check_resume || exit 1
+fi
+
 if [ -n "$BYTE_STREAM_BATCH_BYTES" ]; then
     log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_BYTES bytes, identical to the source."
 else

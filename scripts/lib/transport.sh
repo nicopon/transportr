@@ -15,6 +15,8 @@
 #   EXPECT_WRITE_FALLBACK       true: each side gave up on a WebSocket and said why. Left unset with
 #                               ASSERT_WRITE_TRANSPORT=WebSocket, no side did
 #   EXPECT_WEBSOCKET_REOPENED   true: a transfer's Data stream was opened over a WebSocket at least twice
+#   EXPECT_RESUME               true: each side behind the proxy (CHAOS_CLIENTS) went from Streaming to
+#                               Reconnecting and back to Streaming, so the transfer was cut and resumed
 #   EXPECT_TRANSFER_FAILURE     true: the run is meant to fail, and expect_transfer_failure judges how
 #   EXPECT_FAILURE_MESSAGE      what the sender's failure message must contain (default: requires a WebSocket)
 #   EXPECT_HUB_LOG              what the hub must have logged (default: not opened over a WebSocket); set
@@ -181,5 +183,27 @@ expect_transfer_failure() {
             return 0
         fi
         sleep 1
+    done
+}
+
+# A hold that falls mid-transfer says the fault landed, not that the transfer lived through it: a transfer
+# that survived without its streams ever failing would pass too. The session journals each state change.
+check_resume() {
+    local side lines
+    for side in sender receiver; do
+        case "$CHAOS_CLIENTS" in
+            both|"$side") ;;
+            *) continue ;;
+        esac
+
+        if ! side_lines "$side" 1 "State Transition: .\{0,1\}Streaming.\{0,1\} -> .\{0,1\}Reconnecting" > /dev/null; then
+            log_error "❌ Error: the $side was cut and its transfer never went from Streaming to Reconnecting"
+            return 1
+        fi
+        if ! lines=$(side_lines "$side" 1 "State Transition: .\{0,1\}Reconnecting.\{0,1\} -> .\{0,1\}Streaming"); then
+            log_error "❌ Error: the $side's transfer went to Reconnecting and never back to Streaming"
+            return 1
+        fi
+        log_info "The $side's transfer resumed: $(echo "$lines" | wc -l | tr -d ' ') return(s) to Streaming."
     done
 }

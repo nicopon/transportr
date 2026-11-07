@@ -102,6 +102,7 @@ the receiver's own logs:
 | `ASSERT_WRITE_TRANSPORT` | `WebSocket` or `Segments`: every opening of both sides says so. With `WebSocket` and no `EXPECT_WRITE_FALLBACK`, no client may have given up on a WebSocket |
 | `EXPECT_WRITE_FALLBACK` | `true`: each side gave up on a WebSocket and said why |
 | `EXPECT_WEBSOCKET_REOPENED` | `true`: a transfer's data stream was opened over a WebSocket at least twice |
+| `EXPECT_RESUME` | `true`: each side behind the proxy (`CHAOS_CLIENTS`) went from Streaming to Reconnecting and back |
 | `EXPECT_TRANSFER_FAILURE` | `true`: the run is meant to fail. It is green only when the sender reports the failed transfer with the client's generic message, the hub says it received a write stream with no upgrade, and no CSV holds every line. The receivers are watched until `TRANSFER_TIMEOUT_SECONDS` and what became of them is printed, not judged |
 | `EXPECT_FAILURE_MESSAGE` | With `EXPECT_TRANSFER_FAILURE`: what the sender's failure message must contain. Default: `requires a WebSocket` |
 | `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket`; set empty for a run where the hub is not meant to have seen the request |
