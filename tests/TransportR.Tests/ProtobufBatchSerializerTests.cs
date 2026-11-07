@@ -22,7 +22,7 @@ public class ProtobufBatchSerializerTests
     {
         var serializer = new ProtobufBatchSerializer<string>();
 
-        var back = await ReceiverState<string>.ReadBatchBodyFromMemoryAsync(serializer, await WriteAsync(serializer));
+        var back = await ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(serializer, await WriteAsync(serializer));
 
         Assert.Equal(Items, back);
     }
@@ -36,6 +36,6 @@ public class ProtobufBatchSerializerTests
         var bytes = await WriteAsync(serializer);
 
         await Assert.ThrowsAsync<UndecodableBatchException>(
-            () => ReceiverState<string>.ReadBatchBodyFromMemoryAsync(serializer, bytes.AsMemory(0, bytes.Length / 2)));
+            () => ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(serializer, bytes.AsMemory(0, bytes.Length / 2)));
     }
 }

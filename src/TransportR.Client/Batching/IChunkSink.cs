@@ -4,7 +4,7 @@ using TransportR.Protocol;
 namespace TransportR.Client.Batching;
 
 /// <summary>
-/// Where a received batch body goes once <see cref="ReceiverState{T}"/> has put it in order.
+/// Where a received batch body goes once <see cref="ReceiverState"/> has put it in order.
 /// </summary>
 /// <remarks>
 /// A sink lives as long as the receive buffer behind it, across reconnections: the consumer's

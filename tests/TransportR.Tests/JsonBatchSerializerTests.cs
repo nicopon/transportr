@@ -25,7 +25,7 @@ public class JsonBatchSerializerTests
     {
         var serializer = new JsonBatchSerializer<string>(compress: compress);
 
-        var back = await ReceiverState<string>.ReadBatchBodyFromMemoryAsync(serializer, await WriteAsync(serializer));
+        var back = await ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(serializer, await WriteAsync(serializer));
 
         Assert.Equal(Items, back);
     }
@@ -48,6 +48,6 @@ public class JsonBatchSerializerTests
         var bytes = await WriteAsync(new JsonBatchSerializer<string>(compress: written));
 
         await Assert.ThrowsAsync<UndecodableBatchException>(
-            () => ReceiverState<string>.ReadBatchBodyFromMemoryAsync(new JsonBatchSerializer<string>(compress: read), bytes));
+            () => ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(new JsonBatchSerializer<string>(compress: read), bytes));
     }
 }

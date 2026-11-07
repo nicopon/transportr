@@ -8,14 +8,14 @@ using System.Runtime.InteropServices;
 namespace TransportR.Tests;
 
 /// <summary>
-/// Every way a chunk can leave <see cref="ReceiverState{T}"/> returns its pooled memory exactly once:
+/// Every way a chunk can leave <see cref="ReceiverState"/> returns its pooled memory exactly once:
 /// a buffer returned twice is handed to two renters, and nothing throws when it happens.
 /// </summary>
 public class ReceiverStateOwnershipTests
 {
     private static byte[] Payload(byte fill) => [fill, fill, fill, fill];
 
-    private static ReceiverState<byte[]> StateOver(IChunkSink sink) => new(sink);
+    private static ReceiverState StateOver(IChunkSink sink) => new(sink);
 
     [Fact]
     public async Task ARealPooledChunk_ThatTheConsumerDisposes_IsBackInTheArrayPool()

@@ -47,7 +47,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private int _pendingBatches = 0;
     
     // Receiver State
-    private ReceiverState<T>? _receiverState;
+    private ReceiverState? _receiverState;
     
     // Synchronization
     private TaskCompletionSource? _completeAckReceived;
@@ -145,7 +145,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         // rather than away with the instance. The sender resends them from startBatchId.
         _receiverState?.DiscardReordered();
 
-        _receiverState = new ReceiverState<T>(_sink, startBatchId);
+        _receiverState = new ReceiverState(_sink, startBatchId);
         return Task.CompletedTask;
     }
 

@@ -1,15 +1,12 @@
 using System.Buffers;
-using System.Runtime.InteropServices;
-using TransportR.Interfaces;
-using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
 /// <summary>
-/// Manages receiver-side batch reordering and deserialization.
+/// Manages receiver-side batch reordering.
 /// Handles out-of-order batch arrival and ensures in-order delivery to the consumer channel.
 /// </summary>
-internal class ReceiverState<T>
+internal class ReceiverState
 {
     /// <summary>
     /// Result of processing a batch, indicating what ACK to send.
@@ -41,7 +38,7 @@ internal class ReceiverState<T>
     }
     
     /// <summary>
-    /// Processes an incoming batch, handling reordering and deserialization.
+    /// Processes an incoming batch, handling reordering.
     /// </summary>
     /// <param name="batchId">The batch identifier.</param>
     /// <param name="owner">Memory owner for the batch payload (will be disposed after processing).</param>
@@ -92,47 +89,6 @@ internal class ReceiverState<T>
         finally
         {
             if (!taken) owner.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Decodes a batch body straight out of the memory it was read into.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Internal rather than private because the serializer tests enter through here: how the body
-    /// reaches the serializer is part of what they check — the stream wraps the received memory
-    /// instead of copying it, which is what lets a reader allocate through a pool.
-    /// </para>
-    /// <para>
-    /// Takes no cancellation token, because there is nowhere to honour one:
-    /// <see cref="IBatchSerializer{T}.DeserializeBatchAsync"/> does not accept one, and the source
-    /// is memory already read off the wire. A token accepted here and passed nowhere would tell a
-    /// caller that decoding is interruptible when it is not.
-    /// </para>
-    /// </remarks>
-    internal static async Task<List<T>?> ReadBatchBodyFromMemoryAsync(
-        IBatchSerializer<T> serializer, ReadOnlyMemory<byte> bodyBytes)
-    {
-        // An array-backed body is wrapped rather than copied; only a body that is not can force
-        // the copy in the other branch, which does not happen on the read path.
-        Stream source = MemoryMarshal.TryGetArray(bodyBytes, out var segment)
-            ? new MemoryStream(segment.Array!, segment.Offset, segment.Count, writable: false)
-            : new MemoryStream(bodyBytes.ToArray());
-
-        using (source)
-        {
-            try
-            {
-                return await serializer.DeserializeBatchAsync(source);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // The body arrived whole, framed by its header, so a resend after a reconnection
-                // decodes no better: left retryable, this reconnects forever on the same batch.
-                throw new UndecodableBatchException(
-                    $"A batch body could not be decoded by {serializer.GetType().Name}: {ex.Message}", ex);
-            }
         }
     }
 

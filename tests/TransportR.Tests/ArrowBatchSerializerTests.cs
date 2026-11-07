@@ -12,7 +12,7 @@ namespace TransportR.Tests;
 /// The Arrow serializer, through the protocol's own read path.
 /// </summary>
 /// <remarks>
-/// The read path goes through <see cref="ReceiverState{T}.ReadBatchBodyFromMemoryAsync"/> rather
+/// The read path goes through <see cref="ItemChunkSink{T}.ReadBatchBodyFromMemoryAsync"/> rather
 /// than calling the serializer directly, because how the body reaches it is part of what is under
 /// test: it wraps the received memory in a stream, and it is that stream — not a copy of it — that
 /// lets the reader allocate through a pool.
@@ -46,7 +46,7 @@ public class ArrowBatchSerializerTests
     }
 
     private static Task<List<RecordBatch>?> ReadAsync(ArrowBatchSerializer serializer, byte[] bytes)
-        => ReceiverState<RecordBatch>.ReadBatchBodyFromMemoryAsync(serializer, bytes);
+        => ItemChunkSink<RecordBatch>.ReadBatchBodyFromMemoryAsync(serializer, bytes);
 
     [Theory]
     [InlineData(true)]
