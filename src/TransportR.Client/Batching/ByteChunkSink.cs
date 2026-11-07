@@ -25,6 +25,12 @@ internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSin
     public void Complete() => buffer.Complete();
 
     /// <summary>
+    /// Ends the stream with <paramref name="error"/>, which the reader throws once it has taken what
+    /// was admitted.
+    /// </summary>
+    public void Fail(Exception error) => buffer.Complete(error);
+
+    /// <summary>
     /// The chunks in the order they were admitted. Each is the reader's to dispose.
     /// </summary>
     public IAsyncEnumerable<ByteChunk> ReadAllAsync(CancellationToken ct) => buffer.ReadAllAsync(ct);

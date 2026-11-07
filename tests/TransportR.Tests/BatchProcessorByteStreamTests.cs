@@ -1,6 +1,7 @@
 using System.Buffers;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
+using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
@@ -487,6 +488,78 @@ public class BatchProcessorByteStreamTests
         // The ack gave the slot back once; a second release would have been logged as an over-release.
         Assert.False(logs.Has(LogLevel.Error, "over-released"));
         await processor.SendAsync(Sequence(1), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    public enum FailedBy { Fail, ReceivedAbort }
+
+    private async Task EndTheTransferAsync(BatchProcessor<byte[]> processor, FailedBy how)
+    {
+        if (how == FailedBy.Fail)
+        {
+            processor.Fail("The transfer was ended.");
+            return;
+        }
+
+        var abort = ChunkHeader.CreateControl(_transferId, (int)AbortReason.ReleasedBeforeCompletion, ChunkType.Abort);
+        await processor.ProcessChunkAsync(new ChunkData(abort, new ArrayOwner([]), 0));
+    }
+
+    [Theory]
+    [InlineData(FailedBy.Fail)]
+    [InlineData(FailedBy.ReceivedAbort)]
+    public async Task AFailedTransfer_ReleasesAConsumerOfReceiveChunksAsync_WithTheFailure_WithoutWaitingForDisposal(FailedBy how)
+    {
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var chunk in processor.ReceiveChunksAsync(CancellationToken.None)) chunk.Dispose();
+        });
+
+        await EndTheTransferAsync(processor, how);
+
+        await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Theory]
+    [InlineData(FailedBy.Fail)]
+    [InlineData(FailedBy.ReceivedAbort)]
+    public async Task AFailedTransfer_ReleasesAConsumerOfReceiveAsync_WithTheFailure_WithoutWaitingForDisposal(FailedBy how)
+    {
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var _ in processor.ReceiveAsync(CancellationToken.None)) { }
+        });
+
+        await EndTheTransferAsync(processor, how);
+
+        await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task AFailedTransfer_StillHandsTheConsumerWhatWasAdmittedBeforeTheFailure()
+    {
+        await using var processor = CreateProcessor();
+        await processor.StartReceiverAsync();
+        await processor.ProcessChunkAsync(CreateChunk(0, Bytes(7, 5)));
+
+        processor.Fail("The transfer was ended.");
+
+        var received = new List<byte[]>();
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            await foreach (var chunk in processor.ReceiveChunksAsync(CancellationToken.None))
+            {
+                using (chunk) received.Add(chunk.Memory.ToArray());
+            }
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal([Bytes(7, 5)], received);
+        Assert.Contains("The transfer was ended.", failure.Message);
     }
 
     private sealed class StreamCounts

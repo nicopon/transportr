@@ -625,7 +625,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public void Fail(string reason)
     {
-        _receiveBuffer?.Complete(new TransferFailedException(_transferId, reason));
+        var failure = new TransferFailedException(_transferId, reason);
+        _receiveBuffer?.Complete(failure);
+        _byteSink?.Fail(failure);
         AbandonSender();
     }
 
