@@ -131,6 +131,20 @@ failed loop, for flakes and leaks.
 Runs the `default` scenario three times with MessagePack, then three times with JSON (`SERIALIZER_TYPE`), and
 prints the sender's throughput for each. The runs are sequential, not interleaved.
 
+### `client-bench.sh`
+
+Compares builds of the client by the CPU time of the client process per MiB of batch body carried
+(`tests/TransportR.ClientBench`, items or byte-stream mode, source and sink in memory). It builds the hub once, runs it
+apart, and interleaves the arms (each a Release build of the harness in its own directory) round after round, with the
+first arm run again as an A/A witness. It prints the median, mean, extremes and interquartile range of each arm, then
+the A/A gap, which is the size of a difference worth reading. It does not run a scenario, and its figures are only
+comparable within one sitting. Exits 1 when a run fails, an integrity failure of the received data included.
+
+```bash
+dotnet build tests/TransportR.ClientBench -c Release -o /tmp/arm-before
+./scripts/client-bench.sh --mode bytes before=/tmp/arm-before
+```
+
 ### `lint-comments.sh`
 
 Refuses deliberation and history left in comments, and doc comments with no member under them. CI runs it ahead of
