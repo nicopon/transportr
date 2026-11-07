@@ -361,6 +361,7 @@ public class BatchProcessorTests
     {
         public ILogger Logger { get; } = new StubLogger();
         public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
+        public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
         // Both null: BatchProcessor reaches neither. The transport lives behind
         // HttpStreamManager, which these tests do not start.
         public HttpClient HttpClient => null!;

@@ -590,6 +590,7 @@ public class BatchProcessorByteStreamTests
     {
         public ILogger Logger { get; set; } = new StubLogger();
         public IBatchSerializer<byte[]>? Serializer => null;
+        public IReceiveSink<byte[]> CreateReceiveSink() => new ByteChunkSink(new ReceiveBuffer<ByteChunk>(Options.ReceiveBufferCapacity));
         public HttpClient HttpClient => null!;
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new();

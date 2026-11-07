@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
+using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 
@@ -22,13 +23,19 @@ internal interface ISessionConfig
 }
 
 /// <summary>
-/// Adds the serializer, which is where the item type enters a session.
+/// Adds the serializer and the receiving sink, which is where the item type enters a session.
 /// </summary>
-/// <remarks>
-/// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where the
-/// payload crosses the wire as it is.
-/// </remarks>
 internal interface ISessionConfig<T> : ISessionConfig
 {
+    /// <summary>
+    /// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where
+    /// the payload crosses the wire as it is.
+    /// </summary>
     IBatchSerializer<T>? Serializer { get; }
+
+    /// <summary>
+    /// A new sink for a session that starts receiving, of the mode the client was built for. The
+    /// session keeps it across reconnections.
+    /// </summary>
+    IReceiveSink<T> CreateReceiveSink();
 }

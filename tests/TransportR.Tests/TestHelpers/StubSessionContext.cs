@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Interfaces;
+using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
 using TransportR.Models;
@@ -13,6 +14,7 @@ internal class StubSessionContext: ISessionContext<string>
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; }
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
+    public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
     public HttpClient HttpClient { get; }
     
     public int BatchFlushIntervalMs => 50;

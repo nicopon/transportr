@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
@@ -6,7 +7,7 @@ namespace TransportR.Client.Batching;
 /// <summary>
 /// Hands each batch body to the consumer as it is, as one <see cref="ByteChunk"/>, without decoding it.
 /// </summary>
-internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSink
+internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IReceiveSink<byte[]>
 {
     public ChunkType BatchType => ChunkType.StreamBatch;
 
@@ -33,6 +34,29 @@ internal sealed class ByteChunkSink(ReceiveBuffer<ByteChunk> buffer) : IChunkSin
     /// The chunks in the order they were admitted. Each is the reader's to dispose.
     /// </summary>
     public IAsyncEnumerable<ByteChunk> ReadAllAsync(CancellationToken ct) => buffer.ReadAllAsync(ct);
+
+    IAsyncEnumerable<ByteChunk> IReceiveSink<byte[]>.ReadChunksAsync(CancellationToken ct) => ReadAllAsync(ct);
+
+    /// <summary>
+    /// A copy of each chunk, which is disposed once the reader comes back for the next.
+    /// </summary>
+    public IAsyncEnumerable<byte[]> ReadItemsAsync(CancellationToken ct) => CopyChunksAsync(ReadAllAsync(ct), ct);
+
+    private static async IAsyncEnumerable<byte[]> CopyChunksAsync(
+        IAsyncEnumerable<ByteChunk> chunks, [EnumeratorCancellation] CancellationToken token)
+    {
+        await foreach (var chunk in chunks.WithCancellation(token).ConfigureAwait(false))
+        {
+            try
+            {
+                yield return chunk.Memory.ToArray();
+            }
+            finally
+            {
+                chunk.Dispose();
+            }
+        }
+    }
 
     public void DiscardUnread() => buffer.Drain(chunk => chunk.Dispose());
 }

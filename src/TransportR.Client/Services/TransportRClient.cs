@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Abstractions;
+using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
@@ -457,6 +458,12 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     ILogger ISessionConfig.Logger => _logger;
     IBatchSerializer<T>? ISessionConfig<T>.Serializer => _serializer;
+
+    // The builder gives a byte-stream client byte[] as its item type, and an item client its
+    // serializer; BatchProcessor, built before it asks for a sink, refuses either one missing.
+    IReceiveSink<T> ISessionConfig<T>.CreateReceiveSink() => _options.ByteStreamBatchBytes is null
+        ? new ItemChunkSink<T>(new ReceiveBuffer<T>(_options.ReceiveBufferCapacity), _serializer!)
+        : (IReceiveSink<T>)(object)new ByteChunkSink(new ReceiveBuffer<ByteChunk>(_options.ReceiveBufferCapacity));
     HttpClient IStreamTransport.HttpClient => _httpClient;
     int ISessionConfig.BatchFlushIntervalMs => _options.BatchFlushIntervalMs;
     RecyclableMemoryStreamManager ISessionConfig.StreamManager => _streamManager;

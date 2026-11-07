@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
@@ -24,9 +23,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
-    private ReceiveBuffer<T>? _receiveBuffer;
-    private ByteChunkSink? _byteSink;
-    private IChunkSink? _sink;
+    private IReceiveSink<T>? _sink;
 
     // Null in the byte-stream mode, the only one without a serializer.
     private readonly IBatchSerializer<T>? _serializer;
@@ -138,21 +135,9 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     public Task StartReceiverAsync()
     {
-        // Buffer and sink are kept across reconnections: the consumer's enumeration is over this
-        // buffer, and a new one would leave it waiting on a buffer nothing writes to.
-        if (_sink is null)
-        {
-            if (_byteStream)
-            {
-                _byteSink = new ByteChunkSink(new ReceiveBuffer<ByteChunk>(_context.Options.ReceiveBufferCapacity));
-                _sink = _byteSink;
-            }
-            else
-            {
-                _receiveBuffer = new ReceiveBuffer<T>(_context.Options.ReceiveBufferCapacity);
-                _sink = new ItemChunkSink<T>(_receiveBuffer, _serializer!);
-            }
-        }
+        // The sink is kept across reconnections: the consumer's enumeration is over it, and a new
+        // one would leave it waiting on a sink nothing writes to.
+        _sink ??= _context.CreateReceiveSink();
 
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
 
@@ -203,11 +188,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken token)
     {
-        if (_byteStream)
-            return (IAsyncEnumerable<T>)(object)CopyChunksAsync(ReceiveChunksAsync(token), token);
-
-        if (_receiveBuffer == null) throw new InvalidOperationException("Receiver not started");
-        return _receiveBuffer.ReadAllAsync(token);
+        if (_sink == null) throw new InvalidOperationException("Receiver not started");
+        return _sink.ReadItemsAsync(token);
     }
 
     /// <summary>
@@ -216,25 +198,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken token)
     {
-        if (!_byteStream) throw new InvalidOperationException("Not a byte-stream transfer");
-        if (_byteSink == null) throw new InvalidOperationException("Receiver not started");
-        return _byteSink.ReadAllAsync(token);
-    }
-
-    private static async IAsyncEnumerable<byte[]> CopyChunksAsync(
-        IAsyncEnumerable<ByteChunk> chunks, [EnumeratorCancellation] CancellationToken token)
-    {
-        await foreach (var chunk in chunks.WithCancellation(token).ConfigureAwait(false))
-        {
-            try
-            {
-                yield return chunk.Memory.ToArray();
-            }
-            finally
-            {
-                chunk.Dispose();
-            }
-        }
+        if (_sink == null) throw new InvalidOperationException("Receiver not started");
+        return _sink.ReadChunksAsync(token);
     }
 
     public async Task CompleteSenderAsync(CancellationToken token)

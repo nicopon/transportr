@@ -7,7 +7,7 @@ namespace TransportR.Client.Batching;
 /// <summary>
 /// Decodes each batch body into items and hands them to a <see cref="ReceiveBuffer{T}"/>.
 /// </summary>
-internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer<T> serializer) : IChunkSink
+internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer<T> serializer) : IReceiveSink<T>
 {
     public ChunkType BatchType => ChunkType.Batch;
 
@@ -44,4 +44,9 @@ internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer
     /// Nothing to return: decoded items hold no pooled memory, and they stay the consumer's to take.
     /// </remarks>
     public void DiscardUnread() { }
+
+    public IAsyncEnumerable<T> ReadItemsAsync(CancellationToken ct) => buffer.ReadAllAsync(ct);
+
+    public IAsyncEnumerable<ByteChunk> ReadChunksAsync(CancellationToken ct) =>
+        throw new InvalidOperationException("Not a byte-stream transfer");
 }
