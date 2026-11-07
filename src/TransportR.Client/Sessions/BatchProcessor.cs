@@ -32,13 +32,15 @@ internal class BatchProcessor<T> : IAsyncDisposable
     private readonly IBatchSerializer<T>? _serializer;
     private readonly bool _byteStream;
     
-    // Sender State: one accumulator, the one of the mode.
+    // Sender State: the accumulator of the mode, which the producer fills, and the source the send
+    // worker reads it through.
     private BatchAccumulator<T>? _batchAccumulator;
     private ByteStreamAccumulator? _byteAccumulator;
+    private IBatchSource? _source;
 
     private readonly ConcurrentDictionary<int, BatchEntry> _unackedBatches = new();
 
-    private Task? _serializationWorker;
+    private Task? _sendWorker;
 
     // In-flight window (ClientOptions.MaxInFlightBatches). Slots are taken by the accumulator - when
     // a batch is handed off, or in the byte-stream mode when it is opened - and released here when
@@ -113,22 +115,24 @@ internal class BatchProcessor<T> : IAsyncDisposable
             ? new SemaphoreSlim(max, max)
             : null;
 
+        IBatchSource source;
         if (_byteStream)
         {
             _byteAccumulator = new ByteStreamAccumulator(
                 _context.Options.ByteStreamBatchBytes!.Value, _context.BatchFlushIntervalMs,
                 _context.StreamManager, _inFlightSlots, ReleaseInFlightSlot);
-            _byteAccumulator.StartFlushInterval();
-
-            _serializationWorker = Task.Run(() => StreamBatchWorkerAsync(token));
-            return Task.CompletedTask;
+            source = new ByteBatchSource(_byteAccumulator);
+        }
+        else
+        {
+            _batchAccumulator = new BatchAccumulator<T>(_batchSize, _context.BatchFlushIntervalMs, _inFlightSlots);
+            source = new ItemBatchSource<T>(_batchAccumulator, _serializer!, _context.StreamManager, ReleaseInFlightSlot);
         }
 
-        _batchAccumulator = new BatchAccumulator<T>(_batchSize, _context.BatchFlushIntervalMs, _inFlightSlots);
-        _batchAccumulator.StartFlushInterval();
-        
-        _serializationWorker = Task.Run(() => SerializationWorkerAsync(token));
-        
+        _source = source;
+        source.StartFlushInterval();
+
+        _sendWorker = Task.Run(() => SendWorkerAsync(source, token));
         return Task.CompletedTask;
     }
 
@@ -235,21 +239,18 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
     public async Task CompleteSenderAsync(CancellationToken token)
     {
-        if (_batchAccumulator != null)
-            await _batchAccumulator.CompleteAsync(token);
-        else if (_byteAccumulator != null)
-            await _byteAccumulator.CompleteAsync(token);
-        else
-            return;
+        if (_source is not { } source) return;
 
-        if (_serializationWorker != null)
+        await source.CompleteAsync(token);
+
+        if (_sendWorker != null)
         {
-            await _serializationWorker;
-            _serializationWorker = null;
+            await _sendWorker;
+            _sendWorker = null;
         }
-        _batchAccumulator?.Dispose();
+        source.Dispose();
+        _source = null;
         _batchAccumulator = null;
-        _byteAccumulator?.Dispose();
         _byteAccumulator = null;
     }
     
@@ -274,8 +275,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// </summary>
     public void AbandonSender()
     {
-        _batchAccumulator?.Abandon();
-        _byteAccumulator?.Abandon();
+        _source?.Abandon();
     }
     
     public Task WaitForCompleteAckAsync(CancellationToken token)
@@ -315,60 +315,53 @@ internal class BatchProcessor<T> : IAsyncDisposable
                 throw new WireProtocolViolationException($"Unknown chunk type: {(byte)chunk.Header.Type}");
         }
     }
-    private async Task SerializationWorkerAsync(CancellationToken ct)
-    {
-        await foreach (var (items, batchId) in _batchAccumulator!.BatchReader.ReadAllAsync(ct))
-        {
-            try
-            {
-                await SerializeAndSendBatch(items, batchId, ct);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                // A batch that is never sent is a gap the receiver's Complete check cannot see when it
-                // is the last one: carrying on reported such a transfer as completed, short of that
-                // batch. The worker stops and the session fails.
-                _context.Logger.LogError(ex, "Batch {BatchId} could not be serialized (Transfer={TransferId})", batchId, _transferId);
-                OnSerializationFailed?.Invoke(ex);
-                return;
-            }
-        }
-    }
-    
     /// <summary>
-    /// The send worker of the byte-stream mode. Batches it leaves in the channel when it stops are
-    /// the accumulator's to dispose.
+    /// The one send worker: reads each batch off the source, which serializes it in the item mode,
+    /// and registers it. What it leaves in the source when it stops is the source's to give back.
     /// </summary>
-    private async Task StreamBatchWorkerAsync(CancellationToken ct)
+    private async Task SendWorkerAsync(IBatchSource source, CancellationToken ct)
     {
-        await foreach (var (batch, batchId) in _byteAccumulator!.BatchReader.ReadAllAsync(ct))
+        // Read as ChannelReader.ReadAllAsync reads: a cancellation while waiting for a batch ends
+        // the worker cancelled, one while a batch is read or registered ends it quietly.
+        while (await source.WaitToReadAsync(ct))
         {
-            try
+            while (true)
             {
-                await SendStreamBatch(batch, batchId, ct);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex)
-            {
-                // Same gap as a batch that cannot be serialized: the worker stops and the session fails.
-                _context.Logger.LogError(ex, "Batch {BatchId} could not be registered (Transfer={TransferId})", batchId, _transferId);
-                OnSerializationFailed?.Invoke(ex);
-                return;
+                OutgoingBatch? read = null;
+                try
+                {
+                    read = await source.TryReadAsync(ct);
+                    if (read is not { } batch) break;
+
+                    await SendBatchAsync(batch, ct);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex)
+                {
+                    // A batch that is never sent is a gap the receiver's Complete check cannot see when
+                    // it is the last one: carrying on reported such a transfer as completed, short of
+                    // that batch. The worker stops and the session fails.
+                    if (read is { } failed)
+                        _context.Logger.LogError(ex, "Batch {BatchId} could not be registered (Transfer={TransferId})", failed.BatchId, _transferId);
+                    else
+                        _context.Logger.LogError(ex, "A batch could not be serialized (Transfer={TransferId})", _transferId);
+                    OnSerializationFailed?.Invoke(ex);
+                    return;
+                }
             }
         }
     }
 
-    private async Task SendStreamBatch(RecyclableMemoryStream batch, int batchId, CancellationToken ct)
+    private async Task SendBatchAsync(OutgoingBatch batch, CancellationToken ct)
     {
         // The batch came with its slot. From the moment it lands in _unackedBatches, the ack path
         // owns giving it back; before that, this method does.
         var registered = false;
         try
         {
-            using (batch)
+            using (batch.Body)
             {
-                await RegisterBatchAsync(batch, batchId, (int)batch.Length - sizeof(int), () => registered = true, ct);
+                await RegisterBatchAsync(batch.Body, batch.BatchId, batch.Count, () => registered = true, ct);
             }
         }
         catch
@@ -395,33 +388,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
             current = _maxBatchIdSent;
             if (batchId <= current) return;
         } while (Interlocked.CompareExchange(ref _maxBatchIdSent, batchId, current) != current);
-    }
-
-    private async Task SerializeAndSendBatch(List<T> items, int batchId, CancellationToken ct)
-    {
-        // The accumulator took a slot for this batch. From the moment it lands in _unackedBatches,
-        // the ack path owns giving it back; before that, this method does.
-        var registered = false;
-        try
-        {
-            await SerializeAndSendBatchCore(items, batchId, () => registered = true, ct);
-        }
-        catch
-        {
-            if (!registered) ReleaseInFlightSlot();
-            throw;
-        }
-    }
-
-    private async Task SerializeAndSendBatchCore(List<T> items, int batchId, Action onRegistered, CancellationToken ct)
-    {
-        using var memoryStream = _context.StreamManager.GetStream();
-        var countBytes = BitConverter.GetBytes(items.Count);
-        await memoryStream.WriteAsync(countBytes.AsMemory(), ct);
-        // Not null: this is the item mode, which is not built without a serializer.
-        await _serializer!.SerializeBatchAsync(memoryStream, items);
-
-        await RegisterBatchAsync(memoryStream, batchId, items.Count, onRegistered, ct);
     }
 
     /// <summary>
@@ -510,12 +476,13 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// <summary>
     /// Gives an in-flight slot back to the producer. Called from every path that removes a batch
     /// from <see cref="_unackedBatches"/>, from the send worker when a batch fails before it ever
-    /// gets there, and from <see cref="ByteStreamAccumulator"/> for a batch it never hands off.
-    /// Missing one of those closes the window permanently.
+    /// gets there, from <see cref="ItemBatchSource{T}"/> for a batch it cannot serialize, and from
+    /// <see cref="ByteStreamAccumulator"/> for a batch it never hands off. Missing one of those
+    /// closes the window permanently.
     /// </summary>
     /// <remarks>
     /// This runs on the ACK-reading loop (the Control stream read task), which is distinct from
-    /// both the serialization worker and the data write loop. It only ever releases, never waits,
+    /// both the send worker and the data write loop. It only ever releases, never waits,
     /// which is what keeps the window free of deadlock.
     /// </remarks>
     private void ReleaseInFlightSlot()
@@ -554,8 +521,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public event Action<AbortReason>? OnAbortReceived;
 
     /// <summary>
-    /// Raised once, on the send worker, when a batch cannot be serialized - in the byte-stream mode,
-    /// registered. The worker has stopped: nothing after that batch will be sent.
+    /// Raised once, on the send worker, when a batch cannot be serialized or registered. The worker
+    /// has stopped: nothing after that batch will be sent.
     /// </summary>
     public event Action<Exception>? OnSerializationFailed;
 
@@ -722,12 +689,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         _sendChannel.Writer.TryComplete();
-        _serializationWorker = null;
+        _sendWorker = null;
 
-        // Dispose the accumulator first: it cancels its own token, which releases a producer
-        // parked on the in-flight window before that window is disposed underneath it.
-        _batchAccumulator?.Dispose();
-        _byteAccumulator?.Dispose();
+        // Dispose the source first: its accumulator cancels its own token, which releases a
+        // producer parked on the in-flight window before that window is disposed underneath it.
+        _source?.Dispose();
 
         // Not disposed on purpose: a producer may still be unwinding out of a cancelled wait on
         // it, and SemaphoreSlim only needs disposing once AvailableWaitHandle has been used.
