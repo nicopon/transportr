@@ -70,14 +70,14 @@ public class FatalStreamFailureTests
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"CompleteAsync took {clock.Elapsed} to report a stream the hub refused for good.");
     }
 
-    private static DataSession<string> NewSession(ForgetfulHub hub, Action<TransportR.Client.Configuration.ClientOptions>? configure = null)
+    private static TestSession NewSession(ForgetfulHub hub, Action<TransportR.Client.Configuration.ClientOptions>? configure = null)
     {
         var context = new StubSessionContext(new HttpClient(hub));
         // Long enough that reaching the stall bound would be a hang, not a verdict.
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
         configure?.Invoke(context.Options);
 
-        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
+        return new TestSession(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
     }
 
     private static async Task AssertParkedAsync(Task task)

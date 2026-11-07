@@ -17,7 +17,7 @@ namespace TransportR.Client.Services;
 /// Client for sending and receiving data transfers.
 /// Acts as a coordinator between ControlChannel, SessionRegistry, and DataSessions.
 /// </summary>
-public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISessionContext<T>, IAsyncDisposable
+public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISessionContext, IAsyncDisposable
 {
     public Guid ClientId => _channel.ClientId;
 
@@ -77,6 +77,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
             channel,
             sessionRegistry,
             this, // ISessionContext
+            batchSize => SessionPorts.Create(options, serializer, streamManager, batchSize),
             logger,
             defaultBatchSize,
             dataUrl,
@@ -410,7 +411,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
             response?.Dispose();
         }
 
-        return new HttpSend<T>(await _signaling.StartRequestedSendAsync(opened.TransferId, size, targetClientId, affinity));
+        return await _signaling.StartRequestedSendAsync(opened.TransferId, size, targetClientId, affinity);
     }
 
     public IReadOnlyList<TransferInfo> GetTransfers()
@@ -451,25 +452,17 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     }
     
     // --- Internal Logic ---
-    
 
+    /// <summary>
+    /// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where
+    /// the payload crosses the wire as it is.
+    /// </summary>
+    internal IBatchSerializer<T>? Serializer => _serializer;
 
     #region ISessionContext Implementation
 
     ILogger ISessionConfig.Logger => _logger;
-    IBatchSerializer<T>? ISessionConfig<T>.Serializer => _serializer;
-
-    ISendPort<T> ISessionConfig<T>.CreateSendPort(int batchSize) =>
-        SessionPorts.CreateSend(_options, _serializer, _streamManager, batchSize);
-
-    // The sink is only asked for after the send port, which has refused a client without the
-    // serializer its mode needs.
-    IReceiveSink<T> ISessionConfig<T>.CreateReceiveSink() => _options.ByteStreamBatchBytes is null
-        ? new ItemChunkSink<T>(new ReceiveBuffer<T>(_options.ReceiveBufferCapacity), _serializer!)
-        : (IReceiveSink<T>)(object)new ByteChunkSink(new ReceiveBuffer<ByteChunk>(_options.ReceiveBufferCapacity));
     HttpClient IStreamTransport.HttpClient => _httpClient;
-    int ISessionConfig.BatchFlushIntervalMs => _options.BatchFlushIntervalMs;
-    RecyclableMemoryStreamManager ISessionConfig.StreamManager => _streamManager;
     ClientOptions ISessionConfig.Options => _options;
 
     void IControlPlane.RemoveSession(string transferId)

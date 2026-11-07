@@ -143,7 +143,7 @@ public class HubEndedSessionTests
         Assert.False(logs.Has(LogLevel.Warning, "Reconnecting"), "A transfer the hub ended was logged as a session reconnecting.");
     }
 
-    private static DataSession<string> NewSession(
+    private static TestSession NewSession(
         HttpMessageHandler hub, out LogRecorder logs, Action<TransportR.Client.Configuration.ClientOptions>? configure = null)
     {
         logs = new LogRecorder();
@@ -151,7 +151,7 @@ public class HubEndedSessionTests
         // Long enough that reaching the stall bound would be a hang, not a verdict.
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
         configure?.Invoke(context.Options);
-        return new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
+        return new TestSession(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
     }
 
     /// <summary>Relays the segments of the sender's data stream and keeps what they carried; answers nothing else.</summary>

@@ -116,19 +116,19 @@ public class OutOfBandAbortTests
         Assert.Empty(hub.AbortRequests);
     }
 
-    private static async Task<DataSession<string>> StartedSenderAsync(Hub hub, Action<ClientOptions>? configure = null)
+    private static async Task<TestSession> StartedSenderAsync(Hub hub, Action<ClientOptions>? configure = null)
     {
         var context = new StubSessionContext(new HttpClient(hub));
         context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
         context.Options.MaxInFlightBatches = 1;
         configure?.Invoke(context.Options);
 
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
+        var session = new TestSession(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;
     }
 
-    private static async Task FailOnTheWindowAsync(DataSession<string> session)
+    private static async Task FailOnTheWindowAsync(TestSession session)
     {
         await session.SendAsync("a", CancellationToken.None);
         await Assert.ThrowsAsync<TransferFailedException>(

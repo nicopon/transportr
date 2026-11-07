@@ -1,8 +1,6 @@
 using System.Net;
-using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using TransportR.Abstractions;
-using TransportR.Interfaces;
 using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
 
@@ -17,7 +15,7 @@ namespace TransportR.Client.Sessions;
 /// Encapsulates the state and logic for a single data transfer session.
 /// Handles bidirectional HTTP streams, acknowledgements, and reconnection.
 /// </summary>
-internal class DataSession<T> : IDataSession<T>
+internal class DataSession : IDataSession
 {
     // Interval between two Complete signals. Short enough that a lost one costs little, long
     // enough that a draining receiver is not asked again while it is still catching up.
@@ -52,8 +50,7 @@ internal class DataSession<T> : IDataSession<T>
     
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
-    private readonly BatchProcessor<T> _batchProcessor;
-    private readonly ISendPort<T> _send;
+    private readonly BatchProcessor _batchProcessor;
     private readonly ReconnectionHandler _reconnectionHandler;
     private readonly DataSessionStateMachine _fsm;
     private bool _isSender;
@@ -108,7 +105,16 @@ internal class DataSession<T> : IDataSession<T>
     /// The cookies that reach the hub instance holding the transfer's bridge, which every request of
     /// the session carries: its streams, its heartbeats, its probe and its abort.
     /// </param>
-    public DataSession(ISessionContext<T> context, string transferId, int batchSize, string dataUrl, string? affinity)
+    /// <param name="batches">
+    /// Where the batches of a sending session come from; the session opens it when it starts sending.
+    /// </param>
+    /// <param name="openSink">
+    /// Makes the sink the batches of a receiving session go to; the session asks for it when it
+    /// starts receiving.
+    /// </param>
+    public DataSession(
+        ISessionContext context, string transferId, int batchSize, string dataUrl, string? affinity,
+        IBatchSource batches, Func<IChunkSink> openSink)
     {
         _control = context;
         _affinity = affinity;
@@ -119,8 +125,7 @@ internal class DataSession<T> : IDataSession<T>
         DataUrl = dataUrl.TrimEnd('/');
         
         _cts = new CancellationTokenSource();
-        _send = context.CreateSendPort(batchSize);
-        _batchProcessor = new BatchProcessor<T>(context, transferId, _send.Source);
+        _batchProcessor = new BatchProcessor(context, transferId, batches, openSink);
         _fsm = new DataSessionStateMachine(transferId, context.Logger);
         
         // Pass segregated interfaces to HttpStreamManager
@@ -187,34 +192,11 @@ internal class DataSession<T> : IDataSession<T>
         _ = RunSessionLoop(_cts.Token);
     }
 
-    public Task SendAsync(T item, CancellationToken cancellationToken)
-    {
-        if (RefusedAsCompleted() is { } refused) return refused;
-
-        var send = _send.SendAsync(item, cancellationToken);
-        // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
-        // dispose can fault before this is even checked, and that path must still go through
-        // WhileAcknowledgingAsync to be translated into TransferFailedException.
-        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
-    }
-
-    public bool IsByteStream => _config.Options.ByteStreamBatchBytes is not null;
-
-    public Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
-    {
-        if (RefusedAsCompleted() is { } refused) return refused;
-
-        var send = _send.SendBytesAsync(bytes, cancellationToken);
-        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
-    }
-
-    public Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
-    {
-        if (RefusedAsCompleted() is { } refused) return refused;
-
-        var send = _send.SendRangeAsync(items, cancellationToken);
-        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
-    }
+    // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
+    // dispose can fault before this is even checked, and that path must still go through
+    // WhileAcknowledgingAsync to be translated into TransferFailedException.
+    public Task WhileSending(Task send, CancellationToken cancellationToken) =>
+        send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
 
     private int _completeStarted;
 
@@ -224,7 +206,7 @@ internal class DataSession<T> : IDataSession<T>
     /// dropped without a word: the caller is told instead. A failed or released session keeps its own
     /// answer, the <see cref="TransferFailedException"/> the send translates to.
     /// </summary>
-    private Task? RefusedAsCompleted()
+    public Task? RefusedAsCompleted()
     {
         if (Volatile.Read(ref _completeStarted) == 0
             || _fsm.CurrentState is SessionState.Failed or SessionState.Disposed)
@@ -418,30 +400,6 @@ internal class DataSession<T> : IDataSession<T>
         throw new TransferFailedException(TransferId, FailureMessage);
     }
     
-    public async IAsyncEnumerable<T> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var item in _batchProcessor.ReceiveAsync(cancellationToken))
-        {
-            yield return item;
-        }
-
-        // The last item is not the last word: the acknowledgement is still queued behind it, and a
-        // caller that stops here as soon as items stop arriving can abandon a transfer it in fact
-        // received in full.
-        await WaitForCompletionAsync(cancellationToken);
-    }
-
-    public async IAsyncEnumerable<ByteChunk> ReceiveChunksAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        await foreach (var chunk in _batchProcessor.ReceiveChunksAsync(cancellationToken))
-        {
-            yield return chunk;
-        }
-
-        // As for ReceiveAsync: the last chunk is not the last word.
-        await WaitForCompletionAsync(cancellationToken);
-    }
-
     public void TriggerReconnect()
     {
         _config.Logger.LogInformation("TriggerReconnect called externally.");

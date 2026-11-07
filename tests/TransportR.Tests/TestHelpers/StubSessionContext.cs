@@ -3,23 +3,28 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Interfaces;
 using TransportR.Client.Batching;
+using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
 using TransportR.Client.Configuration;
 using TransportR.Models;
 
 namespace TransportR.Tests.TestHelpers;
 
-internal class StubSessionContext: ISessionContext<string>
+internal class StubSessionContext: ISessionContext
 {
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; }
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
-    public ISendPort<string> CreateSendPort(int batchSize) =>
-        SessionPorts.CreateSend(Options, Serializer, StreamManager, batchSize);
-    public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
+    public (ISendPort<string> Send, IReceivePort<string> Receive) CreatePorts(int batchSize) =>
+        SessionPorts.Create(Options, Serializer, StreamManager, batchSize);
+    public TransferSession<string> NewTransferSession(string transferId, int batchSize, string dataUrl, string? affinity)
+    {
+        var (send, receive) = CreatePorts(batchSize);
+        return new TransferSession<string>(
+            new DataSession(this, transferId, batchSize, dataUrl, affinity, send.Source, receive.OpenSink), send, receive);
+    }
     public HttpClient HttpClient { get; }
-    
-    public int BatchFlushIntervalMs => Options.BatchFlushIntervalMs;
+
     public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
     public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly, BatchFlushIntervalMs = 50 };
 

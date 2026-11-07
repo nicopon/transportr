@@ -18,6 +18,8 @@ internal sealed class ByteBatchSource(
 
     public IBatchSource Source => this;
 
+    public bool IsByteStream => true;
+
     public ChunkType BatchType => ChunkType.StreamBatch;
 
     private ByteStreamAccumulator Accumulator =>

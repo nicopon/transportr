@@ -58,14 +58,14 @@ public class SenderFailureAbortTests
         await AssertEndsWithAbortAsync(wire);
     }
 
-    private static async Task<DataSession<string>> StartedSenderAsync(
+    private static async Task<TestSession> StartedSenderAsync(
         CapturedDataStream wire, int batchSize, Action<ClientOptions>? configure = null)
     {
         var context = new StubSessionContext(new HttpClient(wire));
         context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
         configure?.Invoke(context.Options);
 
-        var session = new DataSession<string>(
+        var session = new TestSession(
             context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;

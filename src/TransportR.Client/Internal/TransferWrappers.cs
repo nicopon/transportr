@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
@@ -7,23 +8,29 @@ namespace TransportR.Client.Internal;
 /// <summary>
 /// Handle for sending data to a receiver. Wraps an IDataSession.
 /// </summary>
-internal class HttpSend<T>(IDataSession<T> session) : Send<T>(session.TransferId)
+internal class HttpSend<T>(IDataSession session, ISendPort<T> port) : Send<T>(session.TransferId)
 {
     public override Task SendAsync(T item, CancellationToken cancellationToken = default)
     {
-            return session.SendAsync(item, cancellationToken);
+        if (session.RefusedAsCompleted() is { } refused) return refused;
+
+        return session.WhileSending(port.SendAsync(item, cancellationToken), cancellationToken);
     }
 
-    internal bool IsByteStream => session.IsByteStream;
+    internal bool IsByteStream => port.IsByteStream;
 
     internal Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
     {
-        return session.SendBytesAsync(bytes, cancellationToken);
+        if (session.RefusedAsCompleted() is { } refused) return refused;
+
+        return session.WhileSending(port.SendBytesAsync(bytes, cancellationToken), cancellationToken);
     }
 
     public override Task SendAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
     {
-            return session.SendRangeAsync(items, cancellationToken);
+        if (session.RefusedAsCompleted() is { } refused) return refused;
+
+        return session.WhileSending(port.SendRangeAsync(items, cancellationToken), cancellationToken);
     }
 
     public override Task CompleteAsync(CancellationToken cancellationToken = default)
@@ -40,18 +47,37 @@ internal class HttpSend<T>(IDataSession<T> session) : Send<T>(session.TransferId
 /// <summary>
 /// Handle for receiving data from a sender. Wraps an IDataSession.
 /// </summary>
-internal class HttpReceive<T>(IDataSession<T> session) : Receive<T>(session.TransferId, session.BatchSize)
+internal class HttpReceive<T>(IDataSession session, IReceivePort<T> port) : Receive<T>(session.TransferId, session.BatchSize)
 {
-    public override IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Ends only once the transfer has reached its outcome, not at the last item: the acknowledgement
+    /// is still queued behind it, and a caller that stops as soon as items stop arriving can abandon a
+    /// transfer it in fact received in full.
+    /// </summary>
+    public override async IAsyncEnumerable<T> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        return session.ReceiveAsync(cancellationToken);
+        await foreach (var item in port.ReceiveAsync(cancellationToken))
+        {
+            yield return item;
+        }
+
+        await session.WaitForCompletionAsync(cancellationToken);
     }
 
-    internal bool IsByteStream => session.IsByteStream;
+    internal bool IsByteStream => port.IsByteStream;
 
-    internal IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The batches of a byte-stream transfer as they were received, ending as
+    /// <see cref="ReceiveAsync"/> does. Each chunk is the reader's to dispose.
+    /// </summary>
+    internal async IAsyncEnumerable<ByteChunk> ReceiveChunksAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        return session.ReceiveChunksAsync(cancellationToken);
+        await foreach (var chunk in port.ReceiveChunksAsync(cancellationToken))
+        {
+            yield return chunk;
+        }
+
+        await session.WaitForCompletionAsync(cancellationToken);
     }
 
     public override Task WaitForCompletionAsync(CancellationToken cancellationToken = default)

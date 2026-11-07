@@ -72,7 +72,7 @@ public class SendAfterTerminationTests
     // The state turns Failed before the queue closes, so a call landing between the two is accepted,
     // exactly as one made just before the failure would be. What a producer can rely on is that the
     // failure reaches it on a later call, and that once it has it keeps reaching it.
-    private static async Task AssertFailureReachesTheProducerAsync(DataSession<string> session)
+    private static async Task AssertFailureReachesTheProducerAsync(TestSession session)
     {
         var deadline = DateTime.UtcNow + Bound;
         while (true)
@@ -94,14 +94,14 @@ public class SendAfterTerminationTests
             () => session.SendAsync("b", CancellationToken.None).WaitAsync(Bound));
     }
 
-    private static async Task<DataSession<string>> StartedSenderAsync(StubHub hub, int? window, int batchSize = 1)
+    private static async Task<TestSession> StartedSenderAsync(StubHub hub, int? window, int batchSize = 1)
     {
         var context = new StubSessionContext(new HttpClient(hub));
         context.Options.MaxInFlightBatches = window;
         // Long enough that reaching the stall bound would be a hang, not a verdict.
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
 
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data", affinity: null);
+        var session = new TestSession(context, Guid.NewGuid().ToString(), batchSize, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
         return session;
     }

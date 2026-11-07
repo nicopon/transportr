@@ -13,7 +13,7 @@ namespace TransportR.Tests;
 /// </summary>
 public class SessionDisposalTests
 {
-    private static DataSession<string> NewSession(StubSessionContext context) =>
+    private static TestSession NewSession(StubSessionContext context) =>
         new(context, Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
 
     [Fact]

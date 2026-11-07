@@ -17,6 +17,12 @@ internal interface ISendPort<T>
     IBatchSource Source { get; }
 
     /// <summary>
+    /// <c>true</c> when the transfer carries a stream of bytes, with no serializer
+    /// (<see cref="Configuration.ClientOptions.ByteStreamBatchBytes"/>).
+    /// </summary>
+    bool IsByteStream { get; }
+
+    /// <summary>
     /// Adds an item; for a stream of bytes, appends its bytes, where no boundary between two calls
     /// survives.
     /// </summary>

@@ -44,7 +44,7 @@ public class ByteStreamBuilderTests
         await using var client = Builder().WithByteStream(4096).Build();
 
         Assert.Equal(4096, ((ISessionConfig)client).Options.ByteStreamBatchBytes);
-        Assert.Null(((ISessionConfig<byte[]>)client).Serializer);
+        Assert.Null(client.Serializer);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class ByteStreamBuilderTests
         await using var client = Builder().WithSerializer(new MessagePackBatchSerializer<byte[]>()).Build();
 
         Assert.Null(((ISessionConfig)client).Options.ByteStreamBatchBytes);
-        Assert.NotNull(((ISessionConfig<byte[]>)client).Serializer);
+        Assert.NotNull(client.Serializer);
     }
 
     [Fact]

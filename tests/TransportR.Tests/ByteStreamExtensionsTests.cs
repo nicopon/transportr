@@ -27,7 +27,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_OnAByteStreamHandle_AppendsBytesAndSendsNoItem()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
         var source = Sequence(200_000);
 
         await send.CopyFromAsync(new MemoryStream(source));
@@ -41,7 +41,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_NeitherCompletesNorDisposesTheHandle()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
 
         await send.CopyFromAsync(new MemoryStream(Sequence(1000)));
 
@@ -53,7 +53,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_OnAnEmptySource_SendsNothing()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
 
         await send.CopyFromAsync(new MemoryStream());
 
@@ -65,7 +65,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_OnAHandleThatIsNotInTheByteStreamMode_SendsEachReadAsAnItem_NeverAppending()
     {
         var session = new FakeSession { IsByteStream = false };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
         var source = Sequence(2 * ReadSize + 5000);
 
         await send.CopyFromAsync(new MemoryStream(source));
@@ -93,7 +93,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_WhenTheSourceThrows_ReportsItUnwrapped_AndTheHandleCanStillBeReleased()
     {
         var session = new FakeSession { IsByteStream = true };
-        var send = new HttpSend<byte[]>(session);
+        var send = new HttpSend<byte[]>(session, session);
 
         var thrown = await Assert.ThrowsAsync<IOException>(() => send.CopyFromAsync(new ThrowingStream(Sequence(100))));
 
@@ -108,7 +108,7 @@ public class ByteStreamExtensionsTests
     {
         // A cancelled caller is let go before the producer it was waiting on: the buffer may still be read.
         var session = new FakeSession { IsByteStream = true, AppendFailure = new IOException("The append failed.") };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
 
         await Assert.ThrowsAsync<IOException>(() => send.CopyFromAsync(new MemoryStream(Sequence(10))));
 
@@ -127,7 +127,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_WhenCancelled_Throws_AndAppendsNothingMore()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session);
+        await using var send = new HttpSend<byte[]>(session, session);
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 
@@ -145,7 +145,7 @@ public class ByteStreamExtensionsTests
         var seeded = ArrayPool<byte>.Shared.Rent(ReadSize);
         ArrayPool<byte>.Shared.Return(seeded);
         var session = new FakeSession { IsByteStream = true };
-        var send = new HttpSend<byte[]>(session);
+        var send = new HttpSend<byte[]>(session, session);
 
         var copy = send.CopyFromAsync(new MemoryStream(Sequence(1000)));
 
@@ -161,7 +161,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]), new CountingOwner([6]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session);
+        await using var receive = new HttpReceive<byte[]>(session, session);
         var destination = new MemoryStream();
 
         await receive.CopyToAsync(destination);
@@ -177,7 +177,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session);
+        await using var receive = new HttpReceive<byte[]>(session, session);
 
         var thrown = await Assert.ThrowsAsync<IOException>(() => receive.CopyToAsync(new ThrowingDestination()));
 
@@ -192,7 +192,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session);
+        await using var receive = new HttpReceive<byte[]>(session, session);
         using var cts = new CancellationTokenSource();
         var destination = new WaitingDestination();
 
@@ -209,7 +209,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyToAsync_OnAHandleThatIsNotInTheByteStreamMode_WritesEachItemInOrder_NeverReadingChunks()
     {
         var session = new FakeSession { IsByteStream = false, ItemsToReceive = [[1, 2], [3], [4, 5, 6]] };
-        await using var receive = new HttpReceive<byte[]>(session);
+        await using var receive = new HttpReceive<byte[]>(session, session);
         var destination = new MemoryStream();
 
         await receive.CopyToAsync(destination);
@@ -273,9 +273,13 @@ public class ByteStreamExtensionsTests
         }
     }
 
-    private sealed class FakeSession : IDataSession<byte[]>
+    private sealed class FakeSession : IDataSession, ISendPort<byte[]>, IReceivePort<byte[]>
     {
         public bool IsByteStream { get; init; }
+        public IBatchSource Source => throw new NotSupportedException();
+        public IChunkSink OpenSink() => throw new NotSupportedException();
+        public Task? RefusedAsCompleted() => null;
+        public Task WhileSending(Task send, CancellationToken cancellationToken) => send;
         public IReadOnlyList<CountingOwner> Chunks { get; init; } = [];
         public IReadOnlyList<byte[]> ItemsToReceive { get; init; } = [];
 

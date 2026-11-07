@@ -6,7 +6,7 @@ namespace TransportR.Client.Batching;
 /// </summary>
 /// <remarks>
 /// Built by the client, which knows the item type and the mode
-/// (<see cref="Sessions.ISessionConfig{T}.CreateReceiveSink"/>): the session takes whichever sink
+/// (<see cref="IReceivePort{T}.OpenSink"/>): the session takes whichever sink
 /// it is given without choosing between them.
 /// </remarks>
 internal interface IReceiveSink<T> : IChunkSink

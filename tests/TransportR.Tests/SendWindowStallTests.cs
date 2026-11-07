@@ -19,7 +19,7 @@ public class SendWindowStallTests
         context.Options.MaxInFlightBatches = 1;
         context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
 
-        await using var session = new DataSession<string>(
+        await using var session = new TestSession(
             context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
 
@@ -42,7 +42,7 @@ public class SendWindowStallTests
         context.Options.MaxInFlightBatches = 1;
         context.Options.CompleteStallTimeout = TimeSpan.FromMilliseconds(200);
 
-        await using var session = new DataSession<string>(
+        await using var session = new TestSession(
             context, Guid.NewGuid().ToString(), batchSize: 2, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
 
@@ -64,7 +64,7 @@ public class SendWindowStallTests
         context.Options.MaxInFlightBatches = 1;
         context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
 
-        await using var session = new DataSession<string>(
+        await using var session = new TestSession(
             context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
 

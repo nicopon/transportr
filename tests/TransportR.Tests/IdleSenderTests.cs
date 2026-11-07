@@ -16,7 +16,7 @@ public class IdleSenderTests
         var hub = new RecordingHub();
         var context = new StubSessionContext(new HttpClient(hub));
         context.Options.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(100);
-        var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
+        var session = new TestSession(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         try
         {
             await session.StartSenderAsync();

@@ -389,17 +389,17 @@ stateDiagram-v2
 
 ### Client Internals
 
-One `DataSession<T>` per transfer. What runs, and who owns it:
+One `DataSession` per transfer. What runs, and who owns it:
 
 | Part | Owns | Runs on |
 |------|------|---------|
-| `DataSession<T>` | The session loop (open the streams, reconnect, close), the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
+| `DataSession` | The session loop (open the streams, reconnect, close), the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
 | `HttpStreamManager` | One attempt at a time: two streams (data, control) under one cancellation source, the write one over a WebSocket or segments by `WriteTransportPolicy`. It reports how each attempt ended as a `StreamOutcome` (`Ended`, `Cancelled`, `Gone`, `Retryable`, `Fatal`), and sends the `abort` request | Two stream tasks per attempt |
-| `BatchProcessor<T>` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, the dispatch of incoming chunks, the receiver's `ReceiverState` and `ReceiveBuffer` | The serialization worker (sender); the read loop (both) |
+| `BatchProcessor` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, the dispatch of incoming chunks, the receiver's `ReceiverState` and the sink the client supplies | The serialization worker (sender); the read loop (both) |
 | `BatchAccumulator<T>` | Items not yet in a batch; flushes by size or `BatchFlushIntervalMs`, and takes an in-flight slot per batch | The caller's thread, and a flush timer |
 | `ReconnectionHandler` | The probe request while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
 
-Each side writes one stream and reads the other. The write loop drains the outgoing channel and flushes once per drain; the read loop hands each chunk to `BatchProcessor<T>`.
+Each side writes one stream and reads the other. The write loop drains the outgoing channel and flushes once per drain; the read loop hands each chunk to `BatchProcessor`.
 
 | Role | Writes | Reads (GET) |
 |------|---------------|-------------|

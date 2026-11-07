@@ -20,7 +20,7 @@ public class CompletedSessionReleaseTests
     public async Task DisposeAsync_AfterCompleteAsync_WaitsForTheDataStreamToEnd()
     {
         var hub = new AcknowledgingHub();
-        var session = new DataSession<string>(
+        var session = new TestSession(
             new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
         await session.StartSenderAsync();
 
@@ -42,7 +42,7 @@ public class CompletedSessionReleaseTests
     public async Task DisposeAsync_OfACompletedReceiver_WaitsForTheHubToEndTheDataGet()
     {
         var hub = new CompletingHub();
-        var session = new DataSession<string>(
+        var session = new TestSession(
             new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
         await session.StartReceiverAsync();
 
@@ -67,7 +67,7 @@ public class CompletedSessionReleaseTests
         // The sender died after reading its acknowledgement: its data stream never ends cleanly, and the
         // hub never ends the receiver's GET.
         var hub = new CompletingHub();
-        var session = new DataSession<string>(
+        var session = new TestSession(
             new StubSessionContext(new HttpClient(hub)), Guid.NewGuid().ToString(), batchSize: 10, dataUrl: "http://test/data", affinity: null);
         await session.StartReceiverAsync();
         await DrainAsync(session).WaitAsync(TimeSpan.FromSeconds(10));
@@ -76,7 +76,7 @@ public class CompletedSessionReleaseTests
         Assert.Equal(SessionState.Completed, session.State);
     }
 
-    private static async Task DrainAsync(DataSession<string> session)
+    private static async Task DrainAsync(TestSession session)
     {
         await foreach (var _ in session.ReceiveAsync(CancellationToken.None)) { }
     }

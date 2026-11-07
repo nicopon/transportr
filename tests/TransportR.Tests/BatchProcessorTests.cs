@@ -24,7 +24,8 @@ public class BatchProcessorTests
 
     private TestBatchProcessor<string> CreateProcessor(int batchSize = 100)
     {
-        return new TestBatchProcessor<string>(_stubContext, _transferId.ToString(), _stubContext.CreateSendPort(batchSize));
+        var (send, receive) = SessionPorts.Create(_stubContext.Options, _stubContext.Serializer, _stubContext.StreamManager, batchSize);
+        return new TestBatchProcessor<string>(_stubContext, _transferId.ToString(), send, receive);
     }
 
     [Fact]
@@ -357,17 +358,13 @@ public class BatchProcessorTests
 
     // ========== STUBS ==========
 
-    private class StubSessionContext : ISessionContext<string>
+    private class StubSessionContext : ISessionContext
     {
         public ILogger Logger { get; } = new StubLogger();
         public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
-        public ISendPort<string> CreateSendPort(int batchSize) =>
-            SessionPorts.CreateSend(Options, Serializer, StreamManager, batchSize);
-        public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
         // Both null: BatchProcessor reaches neither. The transport lives behind
         // HttpStreamManager, which these tests do not start.
         public HttpClient HttpClient => null!;
-        public int BatchFlushIntervalMs => Options.BatchFlushIntervalMs;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
         public ClientOptions Options { get; } = new ClientOptions { BatchFlushIntervalMs = 50 };
         public void RemoveSession(string transferId) { }

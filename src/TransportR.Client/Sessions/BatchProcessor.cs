@@ -6,7 +6,6 @@ using Microsoft.IO;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
-using TransportR.Interfaces;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Sessions;
@@ -15,14 +14,15 @@ namespace TransportR.Client.Sessions;
 /// Handles the protocol messages of a transfer, over the batches its source gives and the sink that
 /// takes the ones it receives. Manages sender/receiver state, unacked batches, and flow control.
 /// </summary>
-internal class BatchProcessor<T> : IAsyncDisposable
+internal class BatchProcessor : IAsyncDisposable
 {
-    private readonly ISessionContext<T> _context;
+    private readonly ISessionContext _context;
     private readonly string _transferId;
-    
+
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
-    private IReceiveSink<T>? _sink;
+    private readonly Func<IChunkSink> _openSink;
+    private IChunkSink? _sink;
 
     // Sender State: the source the producer fills and the send worker reads. Held once the sender
     // starts, and dropped when it completes.
@@ -78,11 +78,16 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public int NextExpectedBatchId => _receiverState?.NextExpectedBatchId ?? 0;
 
     /// <param name="batches">Where the batches to send come from; opened when the sender starts.</param>
-    public BatchProcessor(ISessionContext<T> context, string transferId, IBatchSource batches)
+    /// <param name="openSink">
+    /// Makes the sink the received batches go to, when the receiver first starts. The sink is kept for
+    /// the life of the processor.
+    /// </param>
+    public BatchProcessor(ISessionContext context, string transferId, IBatchSource batches, Func<IChunkSink> openSink)
     {
         _context = context;
         _transferId = transferId;
         _batches = batches;
+        _openSink = openSink;
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
     }
 
@@ -112,7 +117,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     {
         // The sink is kept across reconnections: the consumer's enumeration is over it, and a new
         // one would leave it waiting on a sink nothing writes to.
-        _sink ??= _context.CreateReceiveSink();
+        _sink ??= _openSink();
 
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
 
@@ -122,25 +127,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
         _receiverState = new ReceiverState(_sink, startBatchId);
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// The items of the transfer; in the byte-stream mode, one <c>byte[]</c> per batch received.
-    /// </summary>
-    public IAsyncEnumerable<T> ReceiveAsync(CancellationToken token)
-    {
-        if (_sink == null) throw new InvalidOperationException("Receiver not started");
-        return _sink.ReadItemsAsync(token);
-    }
-
-    /// <summary>
-    /// The batches of a byte-stream transfer as they were received. Each <see cref="ByteChunk"/> is
-    /// the consumer's to dispose; one it leaves unread when the session is released is disposed there.
-    /// </summary>
-    public IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken token)
-    {
-        if (_sink == null) throw new InvalidOperationException("Receiver not started");
-        return _sink.ReadChunksAsync(token);
     }
 
     public async Task CompleteSenderAsync(CancellationToken token)
@@ -479,7 +465,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// <summary>
     /// The peer gave up before the transfer completed. Releases whatever this side has parked -
     /// a producer on the in-flight window, a consumer on the receive buffer - with the reason
-    /// carried on the wire, then tells <see cref="DataSession{T}"/> so it can fail the state
+    /// carried on the wire, then tells <see cref="DataSession"/> so it can fail the state
     /// machine and pass the same reason to callers waiting elsewhere (CompleteAsync,
     /// WaitForCompletionAsync).
     /// </summary>

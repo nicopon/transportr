@@ -23,6 +23,8 @@ internal sealed class ItemBatchSource<T>(
 
     public IBatchSource Source => this;
 
+    public bool IsByteStream => false;
+
     public ChunkType BatchType => ChunkType.Batch;
 
     private BatchAccumulator<T> Accumulator =>

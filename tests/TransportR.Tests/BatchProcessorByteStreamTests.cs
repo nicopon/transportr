@@ -24,7 +24,7 @@ public class BatchProcessorByteStreamTests
     private TestBatchProcessor<byte[]> CreateProcessor()
     {
         _context.Options.ByteStreamBatchBytes = 1024;
-        return new TestBatchProcessor<byte[]>(_context, _transferId.ToString(), _context.CreateSendPort(1024));
+        return _context.NewProcessor(_transferId.ToString(), batchSize: 1024);
     }
 
     private ChunkData CreateChunk(int batchId, byte[] payload, ChunkType type = ChunkType.StreamBatch)
@@ -246,7 +246,8 @@ public class BatchProcessorByteStreamTests
     public void ReceiveChunksAsync_OutsideTheByteStreamMode_Throws()
     {
         var context = new ItemSessionContext();
-        var processor = new TestBatchProcessor<string>(context, _transferId.ToString(), context.CreateSendPort(10));
+        var (send, receive) = context.CreatePorts(10);
+        var processor = new TestBatchProcessor<string>(context, _transferId.ToString(), send, receive);
 
         Assert.Throws<InvalidOperationException>(() => processor.ReceiveChunksAsync(CancellationToken.None));
     }
@@ -257,7 +258,7 @@ public class BatchProcessorByteStreamTests
         // The options carry no byte-stream size, so this is the item mode with nothing to encode it.
         var context = new ByteStreamSessionContext();
 
-        Assert.Throws<InvalidOperationException>(() => new TestBatchProcessor<byte[]>(context, _transferId.ToString(), context.CreateSendPort(10)));
+        Assert.Throws<InvalidOperationException>(() => context.NewProcessor(_transferId.ToString(), 10));
     }
 
     // ---- Sending ----
@@ -266,7 +267,7 @@ public class BatchProcessorByteStreamTests
     {
         _context.Options.ByteStreamBatchBytes = budget;
         _context.Options.MaxInFlightBatches = window;
-        var processor = new TestBatchProcessor<byte[]>(_context, _transferId.ToString(), _context.CreateSendPort(1024));
+        var processor = _context.NewProcessor(_transferId.ToString(), batchSize: 1024);
         await processor.StartSenderAsync(CancellationToken.None);
         return processor;
     }
@@ -586,17 +587,18 @@ public class BatchProcessorByteStreamTests
         public void Dispose() { }
     }
 
-    private class ByteStreamSessionContext : ISessionContext<byte[]>
+    private class ByteStreamSessionContext : ISessionContext
     {
         public ILogger Logger { get; set; } = new StubLogger();
-        public IBatchSerializer<byte[]>? Serializer => null;
-        public ISendPort<byte[]> CreateSendPort(int batchSize) =>
-            SessionPorts.CreateSend(Options, Serializer, StreamManager, batchSize);
-        public IReceiveSink<byte[]> CreateReceiveSink() => new ByteChunkSink(new ReceiveBuffer<ByteChunk>(Options.ReceiveBufferCapacity));
         public HttpClient HttpClient => null!;
-        public int BatchFlushIntervalMs => Options.BatchFlushIntervalMs;
         public RecyclableMemoryStreamManager StreamManager { get; } = new();
         public ClientOptions Options { get; } = new() { BatchFlushIntervalMs = 50 };
+
+        public TestBatchProcessor<byte[]> NewProcessor(string transferId, int batchSize)
+        {
+            var (send, receive) = SessionPorts.Create<byte[]>(Options, serializer: null, StreamManager, batchSize);
+            return new TestBatchProcessor<byte[]>(this, transferId, send, receive);
+        }
         public void RemoveSession(string transferId) { }
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
         public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;

@@ -1,8 +1,3 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.IO;
-using TransportR.Client.Configuration;
-using TransportR.Interfaces;
-
 namespace TransportR.Client.Sessions;
 
 /// <summary>
@@ -13,11 +8,4 @@ internal interface ISessionContext : ISessionConfig, IStreamTransport, IControlP
 {
     // No additional members needed, functions as an aggregator for the Client implementation
     // The specific logic (DataSession, HttpStreamManager) uses the narrow interfaces.
-}
-
-/// <summary>
-/// The same aggregate for the parts of a session that carry the item type.
-/// </summary>
-internal interface ISessionContext<T> : ISessionContext, ISessionConfig<T>
-{
 }

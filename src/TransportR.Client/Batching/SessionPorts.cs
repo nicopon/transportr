@@ -17,7 +17,7 @@ internal static class SessionPorts
     /// <exception cref="InvalidOperationException">
     /// A byte-stream client of another item type, or an item client without a serializer.
     /// </exception>
-    public static ISendPort<T> CreateSend<T>(
+    public static (ISendPort<T> Send, IReceivePort<T> Receive) Create<T>(
         ClientOptions options,
         IBatchSerializer<T>? serializer,
         RecyclableMemoryStreamManager streams,
@@ -28,12 +28,20 @@ internal static class SessionPorts
             if (typeof(T) != typeof(byte[]))
                 throw new InvalidOperationException("The byte-stream mode carries byte[] only.");
 
-            return (ISendPort<T>)(object)new ByteBatchSource(batchBytes, options.BatchFlushIntervalMs, streams);
+            return (
+                (ISendPort<T>)(object)new ByteBatchSource(batchBytes, options.BatchFlushIntervalMs, streams),
+                (IReceivePort<T>)(object)new ReceivePort<byte[]>(
+                    isByteStream: true,
+                    () => new ByteChunkSink(new ReceiveBuffer<ByteChunk>(options.ReceiveBufferCapacity))));
         }
 
         if (serializer is null)
             throw new InvalidOperationException("A serializer is required outside the byte-stream mode.");
 
-        return new ItemBatchSource<T>(serializer, streams, batchSize, options.BatchFlushIntervalMs);
+        return (
+            new ItemBatchSource<T>(serializer, streams, batchSize, options.BatchFlushIntervalMs),
+            new ReceivePort<T>(
+                isByteStream: false,
+                () => new ItemChunkSink<T>(new ReceiveBuffer<T>(options.ReceiveBufferCapacity), serializer)));
     }
 }

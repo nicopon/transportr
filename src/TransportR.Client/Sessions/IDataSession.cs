@@ -1,14 +1,13 @@
-using TransportR.Client.Batching;
+using TransportR.Abstractions;
 using TransportR.Models;
 
 namespace TransportR.Client.Sessions;
 
 /// <summary>
 /// Interface for a data transfer session.
-/// Encapsulates the state and logic for a single bidirectional data transfer.
+/// Encapsulates the state and logic for a single bidirectional data transfer, whatever it carries.
 /// </summary>
-/// <typeparam name="T">The type of items being transferred.</typeparam>
-internal interface IDataSession<T> : IAsyncDisposable
+internal interface IDataSession : IAsyncDisposable
 {
     /// <summary>
     /// The unique transfer identifier.
@@ -80,43 +79,23 @@ internal interface IDataSession<T> : IAsyncDisposable
     Task StartReceiverAsync();
     
     /// <summary>
-    /// Send a single item.
+    /// What a send made once <see cref="CompleteAsync"/> has begun is answered with, or null when the
+    /// send may go on. Asked before the send reaches the source, which would drop it without a word.
     /// </summary>
-    Task SendAsync(T item, CancellationToken cancellationToken);
-    
-    /// <summary>
-    /// True when the session transfers a stream of bytes, with no serializer
-    /// (<see cref="Configuration.ClientOptions.ByteStreamBatchBytes"/>).
-    /// </summary>
-    bool IsByteStream { get; }
+    Task? RefusedAsCompleted();
 
     /// <summary>
-    /// Appends bytes to the stream of a byte-stream session. They are copied before this returns.
+    /// Stands for a send already made while the transfer is under way: a send that cannot finish
+    /// because the transfer failed ends in the <see cref="TransferFailedException"/>, not in what
+    /// the source met.
     /// </summary>
-    Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
+    Task WhileSending(Task send, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Send multiple items.
-    /// </summary>
-    Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken);
-    
     /// <summary>
     /// Complete the send operation and wait for all ACKs.
     /// </summary>
     Task CompleteAsync(CancellationToken cancellationToken = default);
-    
-    /// <summary>
-    /// Receive items as an async enumerable, ending only once the transfer has reached its outcome -
-    /// not at the last item.
-    /// </summary>
-    IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken);
 
-    /// <summary>
-    /// The batches of a byte-stream session as they were received, ending as
-    /// <see cref="ReceiveAsync"/> does. Each chunk is the reader's to dispose.
-    /// </summary>
-    IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken cancellationToken);
-    
     /// <summary>
     /// Trigger a reconnection attempt.
     /// </summary>

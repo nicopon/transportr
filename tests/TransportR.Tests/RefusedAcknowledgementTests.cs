@@ -20,7 +20,7 @@ public class RefusedAcknowledgementTests
     public async Task Receiver_WhoseAcknowledgementIsRefused_FailsOnTheAbortItsDataStreamStillCarries()
     {
         var context = new StubSessionContext(new HttpClient(new AbortedTransferHub())) { ProbeAnswers = true };
-        await using var session = new DataSession<string>(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
+        await using var session = new TestSession(context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null);
         await session.StartReceiverAsync();
 
         var consumer = Task.Run(async () =>
