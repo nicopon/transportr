@@ -14,12 +14,14 @@ internal class StubSessionContext: ISessionContext<string>
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; }
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
+    public ISendPort<string> CreateSendPort(int batchSize) =>
+        SessionPorts.CreateSend(Options, Serializer, StreamManager, batchSize);
     public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
     public HttpClient HttpClient { get; }
     
-    public int BatchFlushIntervalMs => 50;
+    public int BatchFlushIntervalMs => Options.BatchFlushIntervalMs;
     public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
-    public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly };
+    public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly, BatchFlushIntervalMs = 50 };
 
     public StubSessionContext(HttpClient? httpClient = null, ILogger? logger = null)
     {

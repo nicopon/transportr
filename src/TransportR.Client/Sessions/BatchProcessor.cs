@@ -12,36 +12,31 @@ using TransportR.Protocol;
 namespace TransportR.Client.Sessions;
 
 /// <summary>
-/// Handles the business logic of batching, serialization, and protocol messages.
-/// Manages sender/receiver state, unacked batches, and flow control.
+/// Handles the protocol messages of a transfer, over the batches its source gives and the sink that
+/// takes the ones it receives. Manages sender/receiver state, unacked batches, and flow control.
 /// </summary>
 internal class BatchProcessor<T> : IAsyncDisposable
 {
     private readonly ISessionContext<T> _context;
     private readonly string _transferId;
-    private readonly int _batchSize;
     
     // Channels
     private readonly Channel<IControlMessage> _sendChannel;
     private IReceiveSink<T>? _sink;
 
-    // Null in the byte-stream mode, the only one without a serializer.
-    private readonly IBatchSerializer<T>? _serializer;
-    private readonly bool _byteStream;
-    
-    // Sender State: the accumulator of the mode, which the producer fills, and the source the send
-    // worker reads it through.
-    private BatchAccumulator<T>? _batchAccumulator;
-    private ByteStreamAccumulator? _byteAccumulator;
+    // Sender State: the source the producer fills and the send worker reads. Held once the sender
+    // starts, and dropped when it completes.
+    private readonly IBatchSource _batches;
     private IBatchSource? _source;
+    private ChunkType _batchType = ChunkType.Batch;
 
     private readonly ConcurrentDictionary<int, BatchEntry> _unackedBatches = new();
 
     private Task? _sendWorker;
 
-    // In-flight window (ClientOptions.MaxInFlightBatches). Slots are taken by the accumulator - when
-    // a batch is handed off, or in the byte-stream mode when it is opened - and released here when
-    // the batch leaves _unackedBatches. Null = unbounded.
+    // In-flight window (ClientOptions.MaxInFlightBatches). Slots are taken by the source, before the
+    // body of the batch exists, and released here when the batch leaves _unackedBatches. Null =
+    // unbounded.
     private SemaphoreSlim? _inFlightSlots;
 
     private int _pendingBatches = 0;
@@ -82,24 +77,13 @@ internal class BatchProcessor<T> : IAsyncDisposable
     public int UnackedCount => _unackedBatches.Count;
     public int NextExpectedBatchId => _receiverState?.NextExpectedBatchId ?? 0;
 
-    public BatchProcessor(ISessionContext<T> context, string transferId, int batchSize)
+    /// <param name="batches">Where the batches to send come from; opened when the sender starts.</param>
+    public BatchProcessor(ISessionContext<T> context, string transferId, IBatchSource batches)
     {
         _context = context;
         _transferId = transferId;
-        _batchSize = batchSize;
+        _batches = batches;
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
-
-        _byteStream = context.Options.ByteStreamBatchBytes is not null;
-        if (_byteStream)
-        {
-            if (typeof(T) != typeof(byte[]))
-                throw new InvalidOperationException("The byte-stream mode carries byte[] only.");
-        }
-        else
-        {
-            _serializer = context.Serializer
-                ?? throw new InvalidOperationException("A serializer is required outside the byte-stream mode.");
-        }
     }
 
     public Task StartSenderAsync(CancellationToken token)
@@ -112,20 +96,11 @@ internal class BatchProcessor<T> : IAsyncDisposable
             ? new SemaphoreSlim(max, max)
             : null;
 
-        IBatchSource source;
-        if (_byteStream)
-        {
-            _byteAccumulator = new ByteStreamAccumulator(
-                _context.Options.ByteStreamBatchBytes!.Value, _context.BatchFlushIntervalMs,
-                _context.StreamManager, _inFlightSlots, ReleaseInFlightSlot);
-            source = new ByteBatchSource(_byteAccumulator);
-        }
-        else
-        {
-            _batchAccumulator = new BatchAccumulator<T>(_batchSize, _context.BatchFlushIntervalMs, _inFlightSlots);
-            source = new ItemBatchSource<T>(_batchAccumulator, _serializer!, _context.StreamManager, ReleaseInFlightSlot);
-        }
+        var source = _batches;
+        source.Open(_inFlightSlots, ReleaseInFlightSlot);
 
+        // Kept apart from the source: a resend after the sender has completed still writes batches.
+        _batchType = source.BatchType;
         _source = source;
         source.StartFlushInterval();
 
@@ -147,40 +122,6 @@ internal class BatchProcessor<T> : IAsyncDisposable
 
         _receiverState = new ReceiverState(_sink, startBatchId);
         return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Adds an item; in the byte-stream mode, appends its bytes to the stream, where no boundary
-    /// between two calls survives.
-    /// </summary>
-    public async Task SendAsync(T item, CancellationToken token)
-    {
-        if (_batchAccumulator != null)
-            await _batchAccumulator.AddAsync(item, token);
-        else if (_byteAccumulator != null)
-            await _byteAccumulator.AddAsync((byte[])(object)item!, token);
-    }
-
-    public async Task SendRangeAsync(IEnumerable<T> items, CancellationToken token)
-    {
-        if (_batchAccumulator != null)
-        {
-            await _batchAccumulator.AddRangeAsync(items, token);
-        }
-        else if (_byteAccumulator != null)
-        {
-            foreach (var item in items)
-                await _byteAccumulator.AddAsync((byte[])(object)item!, token);
-        }
-    }
-
-    /// <summary>
-    /// Appends bytes to the stream of a byte-stream transfer. They are copied before this returns.
-    /// </summary>
-    public async Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken token)
-    {
-        if (_byteAccumulator != null)
-            await _byteAccumulator.AddAsync(bytes, token);
     }
 
     /// <summary>
@@ -214,9 +155,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
             _sendWorker = null;
         }
         source.Dispose();
+        source.Detach();
         _source = null;
-        _batchAccumulator = null;
-        _byteAccumulator = null;
     }
     
     /// <summary>
@@ -396,8 +336,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
         if (chunk.Header.Type != _sink.BatchType)
             throw new UndecodableBatchException("A batch of a kind this transfer does not carry was received.");
 
-        // The copy is what is handed on: the byte-stream mode gives this owner away, never the
-        // chunk's own, whose copies would each dispose it.
+        // The copy is what is handed on: a sink that keeps the memory gives this owner away, never
+        // the chunk's own, whose copies would each dispose it.
         var owner = new PooledMemoryOwner(chunk.Payload);
         var rxResult = await _receiverState.ProcessBatchAsync(chunk.Header.BatchId, owner, owner.Memory, ct);
         
@@ -441,9 +381,8 @@ internal class BatchProcessor<T> : IAsyncDisposable
     /// <summary>
     /// Gives an in-flight slot back to the producer. Called from every path that removes a batch
     /// from <see cref="_unackedBatches"/>, from the send worker when a batch fails before it ever
-    /// gets there, from <see cref="ItemBatchSource{T}"/> for a batch it cannot serialize, and from
-    /// <see cref="ByteStreamAccumulator"/> for a batch it never hands off. Missing one of those
-    /// closes the window permanently.
+    /// gets there, and from the <see cref="IBatchSource"/> for a batch it cannot produce or never
+    /// hands off. Missing one of those closes the window permanently.
     /// </summary>
     /// <remarks>
     /// This runs on the ACK-reading loop (the Control stream read task), which is distinct from
@@ -636,8 +575,7 @@ internal class BatchProcessor<T> : IAsyncDisposable
         {
             var memory = payload.Memory;
             var count = BinaryPrimitives.ReadInt32LittleEndian(memory.Span[..4]);
-            var type = _byteStream ? ChunkType.StreamBatch : ChunkType.Batch;
-            await ChunkIO.WriteBatchAsync(outputStream, transferGuid, type, batchId, count, memory[4..], token);
+            await ChunkIO.WriteBatchAsync(outputStream, transferGuid, _batchType, batchId, count, memory[4..], token);
             Interlocked.Add(ref _payloadBytes, memory.Length);
             return true;
         }

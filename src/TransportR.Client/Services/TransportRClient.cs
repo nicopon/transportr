@@ -459,8 +459,11 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     ILogger ISessionConfig.Logger => _logger;
     IBatchSerializer<T>? ISessionConfig<T>.Serializer => _serializer;
 
-    // The builder gives a byte-stream client byte[] as its item type, and an item client its
-    // serializer; BatchProcessor, built before it asks for a sink, refuses either one missing.
+    ISendPort<T> ISessionConfig<T>.CreateSendPort(int batchSize) =>
+        SessionPorts.CreateSend(_options, _serializer, _streamManager, batchSize);
+
+    // The sink is only asked for after the send port, which has refused a client without the
+    // serializer its mode needs.
     IReceiveSink<T> ISessionConfig<T>.CreateReceiveSink() => _options.ByteStreamBatchBytes is null
         ? new ItemChunkSink<T>(new ReceiveBuffer<T>(_options.ReceiveBufferCapacity), _serializer!)
         : (IReceiveSink<T>)(object)new ByteChunkSink(new ReceiveBuffer<ByteChunk>(_options.ReceiveBufferCapacity));

@@ -1,34 +1,51 @@
 using Microsoft.IO;
 using TransportR.Interfaces;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
 /// <summary>
-/// Serializes each batch of a <see cref="BatchAccumulator{T}"/> as the send worker reads it.
+/// The items of a transfer, batched and then serialized as the send worker reads each batch.
 /// </summary>
 /// <remarks>
 /// Serializing in the read keeps one channel and one worker between the producer and the wire, and
 /// leaves the slot where the accumulator took it, before the serialization. A batch is read once, so
 /// <see cref="IBatchSerializer{T}.SerializeBatchAsync"/> runs at most once per batch.
 /// </remarks>
-/// <param name="releaseSlot">Gives back the slot of a batch that cannot be serialized.</param>
 internal sealed class ItemBatchSource<T>(
-    BatchAccumulator<T> accumulator,
     IBatchSerializer<T> serializer,
     RecyclableMemoryStreamManager streams,
-    Action releaseSlot) : IBatchSource
+    int batchSize,
+    int flushIntervalMs) : IBatchSource, ISendPort<T>
 {
-    public void StartFlushInterval() => accumulator.StartFlushInterval();
+    private BatchAccumulator<T>? _accumulator;
+    private Action _releaseSlot = static () => { };
+
+    public IBatchSource Source => this;
+
+    public ChunkType BatchType => ChunkType.Batch;
+
+    private BatchAccumulator<T> Accumulator =>
+        _accumulator ?? throw new InvalidOperationException("The source is not open.");
+
+    public void Open(SemaphoreSlim? inFlightSlots, Action releaseSlot)
+    {
+        _releaseSlot = releaseSlot;
+        _accumulator = new BatchAccumulator<T>(batchSize, flushIntervalMs, inFlightSlots);
+    }
+
+    public void StartFlushInterval() => Accumulator.StartFlushInterval();
 
     public ValueTask<bool> WaitToReadAsync(CancellationToken ct) =>
-        accumulator.BatchReader.WaitToReadAsync(ct);
+        Accumulator.BatchReader.WaitToReadAsync(ct);
 
     /// <summary>
-    /// Reads the next batch and serializes it behind its item count.
+    /// Reads the next batch and serializes it behind its item count. A batch that cannot be
+    /// serialized gives its slot back.
     /// </summary>
     public async ValueTask<OutgoingBatch?> TryReadAsync(CancellationToken ct)
     {
-        if (!accumulator.BatchReader.TryRead(out var next)) return null;
+        if (!Accumulator.BatchReader.TryRead(out var next)) return null;
 
         var (items, batchId) = next;
         RecyclableMemoryStream? body = null;
@@ -42,15 +59,34 @@ internal sealed class ItemBatchSource<T>(
         catch
         {
             body?.Dispose();
-            releaseSlot();
+            _releaseSlot();
             throw;
         }
         return new OutgoingBatch(body, batchId, items.Count);
     }
 
-    public ValueTask CompleteAsync(CancellationToken ct) => accumulator.CompleteAsync(ct);
+    public ValueTask CompleteAsync(CancellationToken ct) => Accumulator.CompleteAsync(ct);
 
-    public void Abandon() => accumulator.Abandon();
+    public void Abandon() => _accumulator?.Abandon();
 
-    public void Dispose() => accumulator.Dispose();
+    public void Dispose() => _accumulator?.Dispose();
+
+    public void Detach() => _accumulator = null;
+
+    public async Task SendAsync(T item, CancellationToken token)
+    {
+        if (_accumulator is { } accumulator)
+            await accumulator.AddAsync(item, token);
+    }
+
+    public async Task SendRangeAsync(IEnumerable<T> items, CancellationToken token)
+    {
+        if (_accumulator is { } accumulator)
+            await accumulator.AddRangeAsync(items, token);
+    }
+
+    /// <summary>
+    /// Nothing: bytes are appended to a stream of bytes, which this is not.
+    /// </summary>
+    public Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken token) => Task.CompletedTask;
 }

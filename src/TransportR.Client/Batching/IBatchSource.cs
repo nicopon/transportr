@@ -1,4 +1,5 @@
 using Microsoft.IO;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
@@ -13,6 +14,18 @@ namespace TransportR.Client.Batching;
 /// </remarks>
 internal interface IBatchSource : IDisposable
 {
+    /// <summary>
+    /// The chunk type the batches of this source are written with.
+    /// </summary>
+    ChunkType BatchType { get; }
+
+    /// <summary>
+    /// Opens the source on the send window of the session, once, before anything else is called.
+    /// </summary>
+    /// <param name="inFlightSlots"><c>null</c> when the window is unbounded.</param>
+    /// <param name="releaseSlot">Gives back the slot of a batch that never reaches the wire.</param>
+    void Open(SemaphoreSlim? inFlightSlots, Action releaseSlot);
+
     void StartFlushInterval();
 
     /// <summary>
@@ -37,11 +50,17 @@ internal interface IBatchSource : IDisposable
     /// Releases a producer parked on the in-flight window and accepts nothing more.
     /// </summary>
     void Abandon();
+
+    /// <summary>
+    /// Cuts the producer's end loose from a source that is complete and disposed: what it adds from
+    /// then on is dropped without a word, where a source that was only disposed refuses it.
+    /// </summary>
+    void Detach();
 }
 
 /// <summary>
 /// A batch read from an <see cref="IBatchSource"/>. <paramref name="Body"/> holds a 4-byte count,
 /// then the payload.
 /// </summary>
-/// <param name="Count">The items of the batch; in the byte-stream mode, the bytes of its payload.</param>
+/// <param name="Count">The items of the batch; for a source of bytes, the bytes of its payload.</param>
 internal readonly record struct OutgoingBatch(RecyclableMemoryStream Body, int BatchId, int Count);

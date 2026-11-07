@@ -23,7 +23,8 @@ internal interface ISessionConfig
 }
 
 /// <summary>
-/// Adds the serializer and the receiving sink, which is where the item type enters a session.
+/// Adds the serializer, the send port and the receiving sink, which is where the item type enters a
+/// session.
 /// </summary>
 internal interface ISessionConfig<T> : ISessionConfig
 {
@@ -32,6 +33,11 @@ internal interface ISessionConfig<T> : ISessionConfig
     /// the payload crosses the wire as it is.
     /// </summary>
     IBatchSerializer<T>? Serializer { get; }
+
+    /// <summary>
+    /// A new send port for a session of the given batch size, of the mode the client was built for.
+    /// </summary>
+    ISendPort<T> CreateSendPort(int batchSize);
 
     /// <summary>
     /// A new sink for a session that starts receiving, of the mode the client was built for. The

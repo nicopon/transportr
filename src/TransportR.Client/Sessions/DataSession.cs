@@ -15,7 +15,7 @@ namespace TransportR.Client.Sessions;
 
 /// <summary>
 /// Encapsulates the state and logic for a single data transfer session.
-/// Handles bidirectional HTTP streams, batch serialization, acknowledgements, and reconnection.
+/// Handles bidirectional HTTP streams, acknowledgements, and reconnection.
 /// </summary>
 internal class DataSession<T> : IDataSession<T>
 {
@@ -53,6 +53,7 @@ internal class DataSession<T> : IDataSession<T>
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
     private readonly BatchProcessor<T> _batchProcessor;
+    private readonly ISendPort<T> _send;
     private readonly ReconnectionHandler _reconnectionHandler;
     private readonly DataSessionStateMachine _fsm;
     private bool _isSender;
@@ -118,7 +119,8 @@ internal class DataSession<T> : IDataSession<T>
         DataUrl = dataUrl.TrimEnd('/');
         
         _cts = new CancellationTokenSource();
-        _batchProcessor = new BatchProcessor<T>(context, transferId, batchSize);
+        _send = context.CreateSendPort(batchSize);
+        _batchProcessor = new BatchProcessor<T>(context, transferId, _send.Source);
         _fsm = new DataSessionStateMachine(transferId, context.Logger);
         
         // Pass segregated interfaces to HttpStreamManager
@@ -189,7 +191,7 @@ internal class DataSession<T> : IDataSession<T>
     {
         if (RefusedAsCompleted() is { } refused) return refused;
 
-        var send = _batchProcessor.SendAsync(item, cancellationToken);
+        var send = _send.SendAsync(item, cancellationToken);
         // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
         // dispose can fault before this is even checked, and that path must still go through
         // WhileAcknowledgingAsync to be translated into TransferFailedException.
@@ -202,7 +204,7 @@ internal class DataSession<T> : IDataSession<T>
     {
         if (RefusedAsCompleted() is { } refused) return refused;
 
-        var send = _batchProcessor.SendBytesAsync(bytes, cancellationToken);
+        var send = _send.SendBytesAsync(bytes, cancellationToken);
         return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
@@ -210,7 +212,7 @@ internal class DataSession<T> : IDataSession<T>
     {
         if (RefusedAsCompleted() is { } refused) return refused;
 
-        var send = _batchProcessor.SendRangeAsync(items, cancellationToken);
+        var send = _send.SendRangeAsync(items, cancellationToken);
         return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 

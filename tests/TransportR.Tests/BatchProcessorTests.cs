@@ -22,9 +22,9 @@ public class BatchProcessorTests
         _stubContext = new StubSessionContext();
     }
 
-    private BatchProcessor<string> CreateProcessor(int batchSize = 100)
+    private TestBatchProcessor<string> CreateProcessor(int batchSize = 100)
     {
-        return new BatchProcessor<string>(_stubContext, _transferId.ToString(), batchSize);
+        return new TestBatchProcessor<string>(_stubContext, _transferId.ToString(), _stubContext.CreateSendPort(batchSize));
     }
 
     [Fact]
@@ -361,13 +361,15 @@ public class BatchProcessorTests
     {
         public ILogger Logger { get; } = new StubLogger();
         public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
+        public ISendPort<string> CreateSendPort(int batchSize) =>
+            SessionPorts.CreateSend(Options, Serializer, StreamManager, batchSize);
         public IReceiveSink<string> CreateReceiveSink() => new ItemChunkSink<string>(new ReceiveBuffer<string>(Options.ReceiveBufferCapacity), Serializer);
         // Both null: BatchProcessor reaches neither. The transport lives behind
         // HttpStreamManager, which these tests do not start.
         public HttpClient HttpClient => null!;
-        public int BatchFlushIntervalMs => 50;
+        public int BatchFlushIntervalMs => Options.BatchFlushIntervalMs;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
-        public ClientOptions Options { get; } = new ClientOptions();
+        public ClientOptions Options { get; } = new ClientOptions { BatchFlushIntervalMs = 50 };
         public void RemoveSession(string transferId) { }
 
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
@@ -412,7 +414,7 @@ public class BatchProcessorTests
 
     // ---- In-flight window (ClientOptions.MaxInFlightBatches) ----
 
-    private BatchProcessor<string> CreateWindowedProcessor(int maxInFlight, int batchSize = 1)
+    private TestBatchProcessor<string> CreateWindowedProcessor(int maxInFlight, int batchSize = 1)
     {
         _stubContext.Options.MaxInFlightBatches = maxInFlight;
         return CreateProcessor(batchSize);
@@ -503,7 +505,7 @@ public class BatchProcessorTests
 
     // A batch reaches the outgoing channel after it is registered, so reading it is waiting for its
     // registration. Nothing else reads the channel in these tests.
-    private static async Task ReadOutgoingAsync(BatchProcessor<string> processor, int count)
+    private static async Task ReadOutgoingAsync(TestBatchProcessor<string> processor, int count)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         for (var i = 0; i < count; i++)

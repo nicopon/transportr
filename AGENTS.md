@@ -161,7 +161,7 @@ and consumes a `Receive<T>` handle via `IAsyncEnumerable`. A transfer the host o
 sender through `OnSendRequested` instead; a client with no handler refuses it. `BatchAccumulator` buffers items
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
 loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands the batches, in order, to
-the sink the client built (over a `ReceiveBuffer`). `ControlChannel` owns the stream of events and the requests made of the control
+the sink the client built (over a `ReceiveBuffer`), as the send worker reads them from the source it built. `ControlChannel` owns the stream of events and the requests made of the control
 plane, and opens the stream again when it is lost; `HttpStreamManager` owns the data-plane
 streams, picks what carries each write stream and reports how every attempt ended, and `DataSession` reopens them
 after a cut (the hub never proactively notifies clients of a disconnect — see "Disconnection Detection" in
