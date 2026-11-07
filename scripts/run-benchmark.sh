@@ -139,10 +139,19 @@ export HUB_PORT=${HUB_PORT:-5252}
 export HUB_URL="http://localhost:$HUB_PORT"
 export HEALTH_URL="http://localhost:$HUB_PORT/health"
 
+# A byte stream has no items to count, and the clients refuse a setting that does: say so here, before
+# anything starts, rather than from a client that fails to build.
+if [ -n "$BYTE_STREAM_BATCH_BYTES" ] && { [ -n "$BATCH_SIZE" ] || [ -n "$RECEIVE_MAX_ITEMS" ]; }; then
+    log_error "BATCH_SIZE and RECEIVE_MAX_ITEMS count items and cannot be combined with BYTE_STREAM_BATCH_BYTES"
+    exit 1
+fi
+
 # Sender configuration
 export Sender__HubUrl="$HUB_URL"
 export Sender__EnableAuth="${ENABLE_AUTH:-false}"
-export Sender__BatchSize="$BATCH_SIZE"
+if [ -n "$BATCH_SIZE" ]; then
+    export Sender__BatchSize="$BATCH_SIZE"
+fi
 export Sender__BatchFlushIntervalMs="$BATCH_FLUSH_INTERVAL_MS"
 # Only exported when a scenario asks for it; unset means the historical unbounded sender.
 if [ -n "$MAX_IN_FLIGHT_BATCHES" ]; then
@@ -180,7 +189,9 @@ fi
 # Receiver configuration
 export Receiver__HubUrl="$HUB_URL"
 export Receiver__EnableAuth="${ENABLE_AUTH:-false}"
-export Receiver__BatchSize="$BATCH_SIZE"
+if [ -n "$BATCH_SIZE" ]; then
+    export Receiver__BatchSize="$BATCH_SIZE"
+fi
 export Receiver__OutputDirectory="$OUTPUT_DIR"
 export Receiver__Group="receivers"
 
@@ -198,6 +209,13 @@ if [ -n "$RECEIVE_MAX_BYTES" ]; then
 fi
 if [ -n "$CONSUME_ITEMS_PER_SECOND" ]; then
     export Receiver__ConsumeItemsPerSecond="$CONSUME_ITEMS_PER_SECOND"
+fi
+
+# The byte-stream mode: the one figure it needs is the budget of a batch, and the samples take it on both
+# ends. Unset, the clients carry items; the batch size of those does not exist in this mode.
+if [ -n "$BYTE_STREAM_BATCH_BYTES" ]; then
+    export Sender__ByteStreamBatchBytes="$BYTE_STREAM_BATCH_BYTES"
+    export Receiver__ByteStreamBatchBytes="$BYTE_STREAM_BATCH_BYTES"
 fi
 
 # Receiver Auth (for automatic token acquisition)
@@ -363,31 +381,37 @@ stop_rss_sampler
 echo -e "${GREEN}==================================================${NC}"
 log_info "Benchmark completed."
 
-EXPECTED_FILES=$NUM_SENDERS
-FOUND_FILES=$(find "$OUTPUT_DIR" -name "orders_*.csv" 2>/dev/null | wc -l | tr -d ' ')
+# A byte stream has no lines to count: its output is the source file, judged on its size and its hash.
+if [ -n "$BYTE_STREAM_BATCH_BYTES" ]; then
+    source "$SCRIPT_DIR/lib/byte-stream.sh"
+    check_byte_stream_output || exit 1
+else
+    EXPECTED_FILES=$NUM_SENDERS
+    FOUND_FILES=$(find "$OUTPUT_DIR" -name "orders_*.csv" 2>/dev/null | wc -l | tr -d ' ')
 
-if [ "$FOUND_FILES" -ne "$EXPECTED_FILES" ]; then
-    log_error "❌ Error: Expected $EXPECTED_FILES CSV files, found $FOUND_FILES"
-    exit 1
-fi
-
-TOTAL_LINES=0
-EXPECTED_LINES=${NUM_ITEMS:-2000000}
-
-for f in "$OUTPUT_DIR"/orders_*.csv; do
-    [ -e "$f" ] || continue
-    FILE_LINES=$(wc -l < "$f" | tr -d ' ')
-    echo "File $(basename "$f"): $FILE_LINES lines"
-    
-    if [ "$FILE_LINES" -ne "$EXPECTED_LINES" ]; then
-        log_error "❌ Error: $(basename "$f") has $FILE_LINES lines (expected $EXPECTED_LINES)"
-        log_error "--- Receiver Log Tail ---"
-        tail -n 20 "$OUTPUT_DIR/receiver.log" 2>/dev/null
-        log_error "-------------------------"
+    if [ "$FOUND_FILES" -ne "$EXPECTED_FILES" ]; then
+        log_error "❌ Error: Expected $EXPECTED_FILES CSV files, found $FOUND_FILES"
         exit 1
     fi
-    TOTAL_LINES=$((TOTAL_LINES + FILE_LINES))
-done
+
+    TOTAL_LINES=0
+    EXPECTED_LINES=${NUM_ITEMS:-2000000}
+
+    for f in "$OUTPUT_DIR"/orders_*.csv; do
+        [ -e "$f" ] || continue
+        FILE_LINES=$(wc -l < "$f" | tr -d ' ')
+        echo "File $(basename "$f"): $FILE_LINES lines"
+
+        if [ "$FILE_LINES" -ne "$EXPECTED_LINES" ]; then
+            log_error "❌ Error: $(basename "$f") has $FILE_LINES lines (expected $EXPECTED_LINES)"
+            log_error "--- Receiver Log Tail ---"
+            tail -n 20 "$OUTPUT_DIR/receiver.log" 2>/dev/null
+            log_error "-------------------------"
+            exit 1
+        fi
+        TOTAL_LINES=$((TOTAL_LINES + FILE_LINES))
+    done
+fi
 
 # A single fault is only a test if it fell while the transfer was under way. Both moments are
 # recorded with the sender's liveness by start_hold_injection; a hold that fired after the sender
@@ -453,4 +477,8 @@ if [ -n "$ASSERT_WRITE_TRANSPORT" ] || [ "$EXPECT_WRITE_FALLBACK" == "true" ] ||
     check_write_transport || exit 1
 fi
 
-log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."
+if [ -n "$BYTE_STREAM_BATCH_BYTES" ]; then
+    log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_BYTES bytes, identical to the source."
+else
+    log_info "✅ $SCENARIO_NAME PASSED! Total: $TOTAL_LINES lines."
+fi
