@@ -194,6 +194,14 @@ internal class DataSession<T> : IDataSession<T>
         return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
     }
 
+    public bool IsByteStream => _config.Options.ByteStreamBatchBytes is not null;
+
+    public Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+    {
+        var send = _batchProcessor.SendBytesAsync(bytes, cancellationToken);
+        return send.IsCompletedSuccessfully ? send : WhileAcknowledgingAsync(send, cancellationToken);
+    }
+
     public Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken)
     {
         var send = _batchProcessor.SendRangeAsync(items, cancellationToken);
@@ -391,6 +399,17 @@ internal class DataSession<T> : IDataSession<T>
         // The last item is not the last word: the acknowledgement is still queued behind it, and a
         // caller that stops here as soon as items stop arriving can abandon a transfer it in fact
         // received in full.
+        await WaitForCompletionAsync(cancellationToken);
+    }
+
+    public async IAsyncEnumerable<ByteChunk> ReceiveChunksAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var chunk in _batchProcessor.ReceiveChunksAsync(cancellationToken))
+        {
+            yield return chunk;
+        }
+
+        // As for ReceiveAsync: the last chunk is not the last word.
         await WaitForCompletionAsync(cancellationToken);
     }
 

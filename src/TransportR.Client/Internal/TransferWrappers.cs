@@ -1,4 +1,5 @@
 using TransportR.Abstractions;
+using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
 
 namespace TransportR.Client.Internal;
@@ -11,6 +12,13 @@ internal class HttpSend<T>(IDataSession<T> session) : Send<T>(session.TransferId
     public override Task SendAsync(T item, CancellationToken cancellationToken = default)
     {
             return session.SendAsync(item, cancellationToken);
+    }
+
+    internal bool IsByteStream => session.IsByteStream;
+
+    internal Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken)
+    {
+        return session.SendBytesAsync(bytes, cancellationToken);
     }
 
     public override Task SendAsync(IEnumerable<T> items, CancellationToken cancellationToken = default)
@@ -37,6 +45,13 @@ internal class HttpReceive<T>(IDataSession<T> session) : Receive<T>(session.Tran
     public override IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken = default)
     {
         return session.ReceiveAsync(cancellationToken);
+    }
+
+    internal bool IsByteStream => session.IsByteStream;
+
+    internal IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken cancellationToken)
+    {
+        return session.ReceiveChunksAsync(cancellationToken);
     }
 
     public override Task WaitForCompletionAsync(CancellationToken cancellationToken = default)

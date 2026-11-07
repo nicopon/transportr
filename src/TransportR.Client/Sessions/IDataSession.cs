@@ -1,3 +1,4 @@
+using TransportR.Client.Batching;
 using TransportR.Models;
 
 namespace TransportR.Client.Sessions;
@@ -84,6 +85,17 @@ internal interface IDataSession<T> : IAsyncDisposable
     Task SendAsync(T item, CancellationToken cancellationToken);
     
     /// <summary>
+    /// True when the session transfers a stream of bytes, with no serializer
+    /// (<see cref="Configuration.ClientOptions.ByteStreamBatchBytes"/>).
+    /// </summary>
+    bool IsByteStream { get; }
+
+    /// <summary>
+    /// Appends bytes to the stream of a byte-stream session. They are copied before this returns.
+    /// </summary>
+    Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Send multiple items.
     /// </summary>
     Task SendRangeAsync(IEnumerable<T> items, CancellationToken cancellationToken);
@@ -98,6 +110,12 @@ internal interface IDataSession<T> : IAsyncDisposable
     /// not at the last item.
     /// </summary>
     IAsyncEnumerable<T> ReceiveAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The batches of a byte-stream session as they were received, ending as
+    /// <see cref="ReceiveAsync"/> does. Each chunk is the reader's to dispose.
+    /// </summary>
+    IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken cancellationToken);
     
     /// <summary>
     /// Trigger a reconnection attempt.
