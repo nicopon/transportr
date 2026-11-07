@@ -305,6 +305,7 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | Ping | 0x05 | Connection probe (sender → receiver) |
 | Pong | 0x06 | Connection probe response; `BatchId` carries the receiver's next expected batch, the resume point |
 | Abort | 0x07 | One end gave up; `BatchId` carries an `AbortReason` |
+| StreamBatch | 0x08 | Data payload of a transfer without a serializer (raw bytes); `Count` is the payload's size in bytes |
 
 > **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, ProtoBuf, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. A batch body the receiver cannot decode fails its session instead of being resent: it arrived whole, and a resend would decode no better.
 

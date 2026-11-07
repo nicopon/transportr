@@ -114,8 +114,8 @@ host one of those types undoes that.
 Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHeader.cs`:
 Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload. `ChunkIO`
 (`src/TransportR/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
-`BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`) are the whole vocabulary; `Abort`
-carries an `AbortReason` in `BatchId`. Payload
+`BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`, `StreamBatch`) are the whole vocabulary; `Abort`
+carries an `AbortReason` in `BatchId`, and `StreamBatch` is a `Batch` of a transfer without a serializer. Payload
 serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,
 Protobuf,Json,Arrow}` are interchangeable implementations; the hub never needs to know which one is
 in use because it never deserializes the payload. The item type sits on the interface, not on the
@@ -205,7 +205,7 @@ item size, which only the caller knows, so a default would be a guess nobody goe
 `Build()` warns when neither is set.
 
 The sender's `MaxInFlightBatches` counts **batches**, and its slot is taken *by the producer,
-before serialization* — moving it behind the serializer converts a managed backlog into an
+before serialization* (in the byte-stream mode, which has none, before the batch's buffer is rented) — moving it behind the serializer converts a managed backlog into an
 off-heap one. That placement is also why it cannot count bytes: the serialized size is not known
 yet. It does not need to, because the receiver's `ReceiveBufferCapacity` reaches it — a full
 receive buffer parks the read loop, which withholds the ack that reopens the send window.
