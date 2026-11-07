@@ -89,6 +89,12 @@ Unified benchmark runner with scenario support.
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
 | `byte-stream` | `data/orders.bin` carried as bytes, with no serializer; the receiver's file must have the size and the SHA-256 of the source |
 | `byte-stream-cut-sender` | `chaos-cut-sender` for the byte-stream mode, on a window of one batch; the transfer must resume and the file must still be the source |
+| `byte-stream-cut-receiver` | `chaos-cut-receiver` for the byte-stream mode, on a window of one batch; the transfer must resume and the file must still be the source |
+| `byte-stream-segments` | `byte-stream` with a WebSocket excluded; every write stream must be carried by segments |
+| `byte-stream-segments-cut-sender` | `byte-stream-cut-sender` over segments only |
+| `byte-stream-oidc` | `byte-stream` against the TestIdp, under JWT authentication |
+| `byte-stream-parallel` | one sender opens a byte-stream transfer to each of two receivers; both files must be the source |
+| `byte-stream-ha-redis` | `byte-stream` through two hubs behind the TestProxy, with the Redis state store |
 
 ### Asserting what carried the write streams
 
@@ -107,7 +113,7 @@ the receiver's own logs:
 | `EXPECT_FAILURE_MESSAGE` | With `EXPECT_TRANSFER_FAILURE`: what the sender's failure message must contain. Default: `requires a WebSocket` |
 | `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket`; set empty for a run where the hub is not meant to have seen the request |
 | `SOURCE_MAX_ITEMS` | The sender stops after that many items, which sends a prefix of the source file |
-| `BYTE_STREAM_BATCH_BYTES` | Both samples run in the byte-stream mode, with batches cut at that many bytes. The run is judged on the size and the SHA-256 of the receiver's `.bin` file, not on lines; `BATCH_SIZE` and `RECEIVE_MAX_ITEMS` count items and are refused alongside it |
+| `BYTE_STREAM_BATCH_BYTES` | Both samples run in the byte-stream mode, with batches cut at that many bytes. The run is judged on the size and the SHA-256 of the receiver's `.bin` file, not on lines; `BATCH_SIZE`, `RECEIVE_MAX_ITEMS`, `SOURCE_MAX_ITEMS` and `CONSUME_ITEMS_PER_SECOND` count items and are refused alongside it |
 | `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET), `hold` (accept the upgrade and relay nothing) or `hold-late` (answer the client's first message, then read nothing) |
 
 The chaos scenarios assert no transport: a client that has had three connections in a row cut within

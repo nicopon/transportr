@@ -141,8 +141,9 @@ export HEALTH_URL="http://localhost:$HUB_PORT/health"
 
 # A byte stream has no items to count, and the clients refuse a setting that does: say so here, before
 # anything starts, rather than from a client that fails to build.
-if [ -n "$BYTE_STREAM_BATCH_BYTES" ] && { [ -n "$BATCH_SIZE" ] || [ -n "$RECEIVE_MAX_ITEMS" ]; }; then
-    log_error "BATCH_SIZE and RECEIVE_MAX_ITEMS count items and cannot be combined with BYTE_STREAM_BATCH_BYTES"
+if [ -n "$BYTE_STREAM_BATCH_BYTES" ] \
+   && { [ -n "$BATCH_SIZE" ] || [ -n "$RECEIVE_MAX_ITEMS" ] || [ -n "$SOURCE_MAX_ITEMS" ] || [ -n "$CONSUME_ITEMS_PER_SECOND" ]; }; then
+    log_error "BATCH_SIZE, RECEIVE_MAX_ITEMS, SOURCE_MAX_ITEMS and CONSUME_ITEMS_PER_SECOND count items and cannot be combined with BYTE_STREAM_BATCH_BYTES"
     exit 1
 fi
 
