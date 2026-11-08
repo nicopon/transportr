@@ -7,9 +7,9 @@ namespace TransportR.Client.Batching;
 /// returns it.
 /// </summary>
 /// <remarks>
-/// Holds the receiver's copy of the payload, never the memory the chunk was read into: that owner
-/// belongs to a struct whose copies each dispose it. <see cref="Dispose"/> is idempotent because the
-/// buffer behind it is pooled, and returning one twice hands it to two renters.
+/// Holds the memory the chunk's payload was read into, which the receiver state handed over.
+/// <see cref="Dispose"/> is idempotent because the buffer behind it is pooled, and returning one twice
+/// hands it to two renters.
 /// </remarks>
 internal sealed class ByteChunk(IMemoryOwner<byte> owner, int length) : IDisposable
 {

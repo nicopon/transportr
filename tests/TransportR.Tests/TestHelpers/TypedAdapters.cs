@@ -1,6 +1,9 @@
+using System.Buffers;
+using System.Runtime.InteropServices;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
+using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;
@@ -54,4 +57,18 @@ internal sealed class TestBatchProcessor<T>(
     public IAsyncEnumerable<T> ReceiveAsync(CancellationToken token) => receive.ReceiveAsync(token);
 
     public IAsyncEnumerable<ByteChunk> ReceiveChunksAsync(CancellationToken token) => receive.ReceiveChunksAsync(token);
+
+    /// <summary>
+    /// Hands the processor a chunk a test built, payload included: the chunk is then the processor's
+    /// to dispose, as the memory a chunk is read into is.
+    /// </summary>
+    public Task ProcessChunkAsync(ChunkData chunk, CancellationToken ct = default) =>
+        ProcessChunkAsync(chunk.Header, chunk.Header.PayloadLength > 0 ? new ChunkPayload(chunk) : null, ct);
+
+    private sealed class ChunkPayload(ChunkData chunk) : IMemoryOwner<byte>
+    {
+        public Memory<byte> Memory => MemoryMarshal.AsMemory(chunk.Payload);
+
+        public void Dispose() => chunk.Dispose();
+    }
 }

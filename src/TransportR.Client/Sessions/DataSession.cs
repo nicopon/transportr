@@ -905,8 +905,7 @@ internal class DataSession : IDataSession
                     break;
                 }
 
-                using var chunkData = await ChunkIO.ReadChunkAsync(inputStream, token);
-                if (chunkData == null)
+                if (await ChunkIO.ReadOwnedChunkAsync(inputStream, token) is not { } chunk)
                 {
                     // If stream ends but we haven't received Complete, it's an error (premature disconnect)
                     // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).
@@ -919,7 +918,8 @@ internal class DataSession : IDataSession
 
                 try
                 {
-                    await _batchProcessor.ProcessChunkAsync(chunkData.Value, token);
+                    // The payload is the processor's from this call on: nothing in this loop returns it.
+                    await _batchProcessor.ProcessChunkAsync(chunk.Header, chunk.Payload, token);
                 }
                 catch (UndecodableBatchException ex) when (!_cts.IsCancellationRequested && !IsStopped)
                 {

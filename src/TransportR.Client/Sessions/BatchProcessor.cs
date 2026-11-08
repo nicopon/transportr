@@ -174,36 +174,50 @@ internal class BatchProcessor : IAsyncDisposable
         return _completeAckReceived?.Task.WaitAsync(token) ?? Task.CompletedTask;
     }
     
-    public async Task ProcessChunkAsync(ChunkData chunk, CancellationToken ct = default)
+    /// <summary>
+    /// Handles one chunk read off the data stream.
+    /// </summary>
+    /// <param name="payload">
+    /// The memory the payload was read into, exactly its length; <c>null</c> when it has none. Owned
+    /// by this call from its start, whatever happens: a batch's goes on to the receiver state unless
+    /// the batch is refused, anything else is returned here, and either way once.
+    /// </param>
+    /// <param name="ct">Cancels a batch's wait for room in the receive buffer.</param>
+    public async Task ProcessChunkAsync(ChunkHeader header, IMemoryOwner<byte>? payload, CancellationToken ct = default)
     {
-        Interlocked.Add(ref _payloadBytes, chunk.Header.PayloadLength);
+        Interlocked.Add(ref _payloadBytes, header.PayloadLength);
 
-        switch (chunk.Header.Type)
+        if (header.Type is ChunkType.Batch or ChunkType.StreamBatch)
         {
-            case ChunkType.Batch:
-            case ChunkType.StreamBatch:
-                await HandleBatchChunkAsync(chunk, ct);
-                break;
-            case ChunkType.BatchAck:
-                HandleBatchAck(chunk.Header.BatchId);
-                break;
-            case ChunkType.Ping:
-                await HandlePingAsync();
-                break;
-            case ChunkType.Pong:
-                HandlePong(chunk.Header.BatchId);
-                break;
-            case ChunkType.Complete:
-                await HandleCompleteAsync(chunk);
-                break;
-            case ChunkType.CompleteAck:
-                HandleCompleteAck();
-                break;
-            case ChunkType.Abort:
-                HandleAbort((AbortReason)chunk.Header.BatchId);
-                break;
-            default:
-                throw new WireProtocolViolationException($"Unknown chunk type: {(byte)chunk.Header.Type}");
+            await HandleBatchChunkAsync(header, payload, ct);
+            return;
+        }
+
+        using (payload)
+        {
+            switch (header.Type)
+            {
+                case ChunkType.BatchAck:
+                    HandleBatchAck(header.BatchId);
+                    break;
+                case ChunkType.Ping:
+                    await HandlePingAsync();
+                    break;
+                case ChunkType.Pong:
+                    HandlePong(header.BatchId);
+                    break;
+                case ChunkType.Complete:
+                    await HandleCompleteAsync(header);
+                    break;
+                case ChunkType.CompleteAck:
+                    HandleCompleteAck();
+                    break;
+                case ChunkType.Abort:
+                    HandleAbort((AbortReason)header.BatchId);
+                    break;
+                default:
+                    throw new WireProtocolViolationException($"Unknown chunk type: {(byte)header.Type}");
+            }
         }
     }
     /// <summary>
@@ -324,21 +338,31 @@ internal class BatchProcessor : IAsyncDisposable
         }
     }
     
-    private async Task HandleBatchChunkAsync(ChunkData chunk, CancellationToken ct)
+    /// <param name="payload">
+    /// Returned by this method until the receiver state takes it, which it does on every path that
+    /// reaches it.
+    /// </param>
+    private async Task HandleBatchChunkAsync(ChunkHeader header, IMemoryOwner<byte>? payload, CancellationToken ct)
     {
-        if (_receiverState == null || _sink == null) return;
+        if (_receiverState == null || _sink == null)
+        {
+            payload?.Dispose();
+            return;
+        }
 
-        // Checked before any memory is rented. An UndecodableBatchException, because it is the one
+        // Checked before anything is decoded. An UndecodableBatchException, because it is the one
         // that makes the session tell the sender; a plain protocol violation would only end this side.
-        if (chunk.Header.Type != _sink.BatchType)
+        if (header.Type != _sink.BatchType)
+        {
+            payload?.Dispose();
             throw new UndecodableBatchException("A batch of a kind this transfer does not carry was received.");
+        }
 
-        // The copy is what is handed on: a sink that keeps the memory gives this owner away, never
-        // the chunk's own, whose copies would each dispose it.
-        var owner = new PooledMemoryOwner(chunk.Payload);
-        var rxResult = await _receiverState.ProcessBatchAsync(chunk.Header.BatchId, owner, owner.Memory, ct);
-        
-        Interlocked.Add(ref _itemsReceived, chunk.Header.Count);
+        // A batch without a payload is handed on all the same, over memory with nothing to return.
+        var owner = payload ?? new PooledPayload(0);
+        var rxResult = await _receiverState.ProcessBatchAsync(header.BatchId, owner, owner.Memory, ct);
+
+        Interlocked.Add(ref _itemsReceived, header.Count);
 
         // Chunks held out of order carry serialized bytes that no budget counts. Over an ordered
         // stream this should never fire; it is here so that "should never" is something a run can
@@ -441,9 +465,9 @@ internal class BatchProcessor : IAsyncDisposable
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Complete, _maxBatchIdSent));
     }
     
-    private async Task HandleCompleteAsync(ChunkData chunk)
+    private async Task HandleCompleteAsync(ChunkHeader header)
     {
-        int lastBatchIdFromSender = chunk.Header.BatchId;
+        int lastBatchIdFromSender = header.BatchId;
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
         
         // Validation: every batch up to lastBatchId must already be in.

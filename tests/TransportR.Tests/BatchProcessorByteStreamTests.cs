@@ -89,21 +89,6 @@ public class BatchProcessorByteStreamTests
     }
 
     [Fact]
-    public async Task ProcessChunk_CopiesThePayload_SoTheChunkTheReadLoopDisposesIsNotTheOneHandedOn()
-    {
-        await using var processor = CreateProcessor();
-        await processor.StartReceiverAsync();
-        var payload = Bytes(3, 6);
-
-        await processor.ProcessChunkAsync(CreateChunk(0, payload));
-        Array.Clear(payload);
-        processor.CompleteReceiver();
-
-        await foreach (var batch in processor.ReceiveAsync(CancellationToken.None))
-            Assert.Equal(Bytes(3, 6), batch);
-    }
-
-    [Fact]
     public async Task ProcessChunk_AnItemBatchInByteStreamMode_IsRefusedAsUndecodable_AndNothingIsDelivered()
     {
         await using var processor = CreateProcessor();
