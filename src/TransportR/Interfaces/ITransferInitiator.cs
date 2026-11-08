@@ -8,7 +8,8 @@ namespace TransportR.Interfaces;
 /// The transfer goes through the same authorization and handshake as one a sender initiates. The
 /// sender's handle reaches it through <see cref="IDataSender{T}.OnSendRequested"/>, whereas a sender
 /// that asks for a transfer is not called back and starts from the id it is returned; the receiver
-/// sees an ordinary <see cref="IDataReceiver{T}.OnTransferStarted"/>.
+/// sees an ordinary <see cref="IDataReceiver{T}.OnTransferStarted"/>. The sender batches as it was
+/// configured: the host does not set how.
 /// </remarks>
 public interface ITransferInitiator
 {
