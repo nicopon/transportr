@@ -51,6 +51,47 @@ await transfer.CompleteAsync();
 await client.DisposeAsync();
 ```
 
+## Moving raw bytes
+
+A file, a pipe or any other stream of bytes needs no item type and no serializer: `ByteStreamClientBuilder` builds a
+`ByteStreamClient`, whose transfers are a `ByteSend` and a `ByteReceive`. The bytes are cut into batches of `batchBytes`,
+the argument of the builder, and are sent as they are: never compressed, and no boundary of the sender's calls reaches the
+receiver.
+
+```csharp
+// Sender
+var sender = new ByteStreamClientBuilder(batchBytes: 1 << 20)
+    .WithUrl("http://localhost:5000")
+    .WithMaxInFlightBatches(8)            // optional: bounds what the sender holds
+    .Build();
+await sender.ConnectAsync(new[] { "senders" });
+var receivers = await sender.GetReceiversAsync();
+await using var send = await sender.InitTransferAsync(receivers[0].ClientId);
+await using var source = File.OpenRead("data.bin");
+await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), which copies them before it returns
+await send.CompleteAsync();               // returns once the receiver has acknowledged everything
+
+// Receiver
+var receiver = new ByteStreamClientBuilder(batchBytes: 1 << 20)
+    .WithUrl("http://localhost:5000")
+    .WithReceiveCapacity(64 << 20)        // optional: bounds what the receiver holds, in wire bytes
+    .Build();
+receiver.OnTransferStarted += async transfer =>
+{
+    await using (transfer)
+    {
+        await using var file = File.Create("out.bin");
+        await transfer.CopyToAsync(file); // or transfer.ReadAsync(buffer), which returns 0 once the transfer is over
+    }
+};
+await receiver.ConnectAsync(new[] { "receivers" });
+```
+
+The builder has the options of the item builder that mean something for bytes (`WithClientCredentials`, `WithAccessToken`,
+`WithTokenProvider`, `WithWriteTransport`, `WithLoggerFactory`, among others). One that means something only for items (`WithSerializer`, `WithBatchSize`, a bound in items) is not an overload that exists. Both ends
+of a transfer must be `ByteStreamClient`s, or both item clients. `TransferInfo.ItemsProcessed` is 0 for a byte transfer, which has
+no items; `BytesTransferred` carries the count.
+
 ## Advanced Configuration
 
 ### Authentication

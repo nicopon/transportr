@@ -40,6 +40,13 @@ public interface IDataReceiver<T> : IDataClient
 }
 ```
 
+### ByteSend / ByteReceive
+
+The handles of a byte-stream transfer, which `ByteStreamClient` (in `TransportR.Client`) opens: raw bytes, no item type and no
+serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)` and `CompleteAsync`; `ByteReceive` has
+`ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are abstract, like `Send<T>` and `Receive<T>`, and
+are disposed once the transfer has ended.
+
 ## Protocols
 
 The chunk types and the protocol flow are described in [TransportRArchitecture.md](https://github.com/nicopon/TransportR/blob/main/TransportRArchitecture.md).
