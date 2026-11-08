@@ -50,6 +50,11 @@ public static class ChunkIO
     /// Writes a batch chunk of the given type whose payload is a sequence, the bytes on the wire being
     /// those of the overload that takes the payload in one block.
     /// </summary>
+    /// <remarks>
+    /// The header and each segment go to <paramref name="stream"/> as writes of their own, with no
+    /// buffer to join them: for a stream that buffers what it is given, as each write stream of the
+    /// client does, and sends it on a flush or a full buffer, never per write.
+    /// </remarks>
     internal static async Task WriteBatchAsync(
         Stream stream,
         Guid transferId,
@@ -62,20 +67,12 @@ public static class ChunkIO
         if (type is not (ChunkType.Batch or ChunkType.StreamBatch))
             throw new ArgumentOutOfRangeException(nameof(type), type, "Not a batch chunk type.");
 
-        var payloadLength = checked((int)payload.Length);
-        var header = ChunkHeader.CreateBatch(transferId, batchId, count, payloadLength) with { Type = type };
+        var header = ChunkHeader.CreateBatch(transferId, batchId, count, checked((int)payload.Length)) with { Type = type };
+        await WriteHeaderOnlyAsync(stream, header, ct).ConfigureAwait(false);
 
-        int totalSize = ChunkHeader.Size + payloadLength;
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(totalSize);
-        try
+        foreach (var segment in payload)
         {
-            header.WriteTo(buffer.AsSpan());
-            payload.CopyTo(buffer.AsSpan(ChunkHeader.Size));
-            await stream.WriteAsync(buffer.AsMemory(0, totalSize), ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
+            await stream.WriteAsync(segment, ct).ConfigureAwait(false);
         }
     }
 

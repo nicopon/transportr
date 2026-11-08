@@ -48,6 +48,26 @@ public class SegmentedWriteStreamTests
         Assert.Equal((4L, "ef"), (hub.Segments[1].Offset, hub.Segments[1].Body));
     }
 
+    /// <summary>
+    /// What a chunk's header and body written apart rely on: the segments depend on the bytes written
+    /// and the flushes, not on how many writes carried them.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task TwoWrites_SendTheSegmentsOneWriteWould_WhereverTheBufferFills(int firstWrite)
+    {
+        var hub = new ScriptedHub();
+        var stream = Open(hub, bufferSize: 4);
+
+        await WriteAsync(stream, "abcdef"[..firstWrite]);
+        await WriteAsync(stream, "abcdef"[firstWrite..]);
+        await stream.FlushAsync();
+
+        Assert.Equal([(0L, "abcd"), (4L, "ef")], hub.Segments.Select(s => (s.Offset, s.Body)));
+    }
+
     [Fact]
     public async Task ASegmentTheHubHeld_GoesAgainFromWhereThePeerStands()
     {
