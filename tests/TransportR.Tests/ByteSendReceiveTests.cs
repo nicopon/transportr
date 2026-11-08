@@ -78,7 +78,7 @@ public class ByteSendReceiveTests
     [Fact]
     public async Task CopyFromAsync_WhenAnAppendFails_DoesNotReturnTheBufferThatAppendMayStillBeReading()
     {
-        // A cancelled caller is let go before the producer it was waiting on: the buffer may still be read.
+        // A derived class may return from a failed write while it still reads the buffer: it is not returned to the pool.
         var session = new FakeSession { IsByteStream = true, AppendFailure = new IOException("The append failed.") };
         await using var send = new HttpByteSend(session, session.SendBytesAsync);
 

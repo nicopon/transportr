@@ -71,8 +71,10 @@ public class BatchEntryTests
     }
 
     /// <summary>
-    /// The releases that cross are the ones that matter: <c>BatchProcessor.DisposeAsync</c> walks
-    /// <c>_unackedBatches</c> while the ack loop removes and releases the same entry.
+    /// The releases that cross are the ones that matter. <c>BatchProcessor.DisposeAsync</c> and the
+    /// acknowledgement loop both take the entry out of <c>_unackedBatches</c> before releasing it, so
+    /// only one of them gives back the dictionary's reference; what still crosses is an
+    /// acknowledgement (or the disposal) and a write in progress.
     /// </summary>
     /// <remarks>
     /// Probabilistic in what it triggers, exact in what it asserts: a payload disposed twice is a

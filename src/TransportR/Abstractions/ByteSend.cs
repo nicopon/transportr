@@ -71,9 +71,9 @@ public abstract class ByteSend : Transfer, IAsyncDisposable
         }
         finally
         {
-            // A write that ended in an exception may still be copying from the buffer: a cancelled
-            // caller is let go before the producer it was waiting on. Returning it then would hand
-            // memory being read to another renter, so it is left to the garbage collector.
+            // A derived class may return from a failed write while it still reads the buffer (the
+            // client's own does not). Returning the buffer then would hand memory being read to
+            // another renter, so it is left to the garbage collector.
             if (!writing) ArrayPool<byte>.Shared.Return(buffer);
         }
     }
