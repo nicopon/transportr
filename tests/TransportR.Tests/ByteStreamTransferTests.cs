@@ -180,6 +180,37 @@ public class ByteStreamTransferTests
     }
 
     [Fact]
+    public async Task ReadAsync_ReadsTheWholeStreamIdenticalToTheByte_AndReturnsZeroOnlyOnceTheTransferHasEnded()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
+        var (send, receive) = await OpenAsync(sender, receiver);
+        await using var _ = send;
+        await using var __ = receive;
+
+        var source = Payload(7321);
+        var received = new MemoryStream();
+        var consumer = Task.Run(async () =>
+        {
+            // Smaller than a batch and not a divisor of it: a read ends inside a batch.
+            var buffer = new byte[333];
+            int read;
+            while ((read = await receive.ReadAsync(buffer)) > 0) received.Write(buffer, 0, read);
+            return receive.WaitForCompletionAsync().IsCompletedSuccessfully;
+        });
+
+        await send.CopyFromAsync(new TrickleStream(source, most: 700));
+        await Task.Delay(500);
+        Assert.False(consumer.IsCompleted, "ReadAsync returned 0 before the transfer was completed.");
+
+        await send.CompleteAsync().WaitAsync(Bound);
+        Assert.True(await consumer.WaitAsync(Bound), "ReadAsync returned 0 before the transfer had ended.");
+        Assert.True(source.AsSpan().SequenceEqual(received.ToArray()));
+    }
+
+    [Fact]
     public async Task CopyFromAsync_LeavesTheTransferOpen_UntilTheCallerCompletesIt()
     {
         using var host = TestHubServerFactory.CreateHost();

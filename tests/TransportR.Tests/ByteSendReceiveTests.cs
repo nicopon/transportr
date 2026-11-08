@@ -218,6 +218,214 @@ public class ByteSendReceiveTests
         Assert.Equal(0, session.ChunkReads);
     }
 
+    // --- ReadAsync ---
+
+    private static async Task<List<byte[]>> ReadAllAsync(ByteReceive receive, int bufferLength)
+    {
+        var reads = new List<byte[]>();
+        var buffer = new byte[bufferLength];
+        int read;
+        while ((read = await receive.ReadAsync(buffer)) > 0) reads.Add(buffer[..read]);
+        return reads;
+    }
+
+    [Fact]
+    public async Task ReadAsync_GivesAtMostTheBufferOfTheBytesInOrder_AcrossChunks_AndDisposesEachChunkOnce()
+    {
+        var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]), new CountingOwner([6]) };
+        var session = new FakeSession { IsByteStream = true, Chunks = owners };
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+
+        var reads = await ReadAllAsync(receive, bufferLength: 2);
+
+        Assert.Equal([[1, 2], [3], [4, 5], [6]], reads);
+        Assert.All(owners, owner => Assert.Equal(1, owner.Disposed));
+    }
+
+    [Fact]
+    public async Task ReadAsync_ReturnsZeroOnlyOnceTheTransferHasReachedItsOutcome_AndAgainOnTheNextCall()
+    {
+        var session = new FakeSession { IsByteStream = true, Chunks = [new CountingOwner([1])] };
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+        var buffer = new byte[8];
+
+        Assert.Equal(1, await receive.ReadAsync(buffer));
+        Assert.Equal(0, session.WaitCalls);
+
+        Assert.Equal(0, await receive.ReadAsync(buffer));
+        Assert.Equal(1, session.WaitCalls);
+        Assert.Equal(0, await receive.ReadAsync(buffer));
+    }
+
+    [Fact]
+    public async Task ReadAsync_WithAnEmptyBuffer_IsRefused_ForZeroMeansTheEnd()
+    {
+        var session = new FakeSession { IsByteStream = true, Chunks = [new CountingOwner([1])] };
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () => await receive.ReadAsync(Memory<byte>.Empty));
+    }
+
+    [Fact]
+    public async Task ReadAsync_WhenTheTransferFailed_HandsWhatWasAdmittedFirst_ThenThrowsTheFailure()
+    {
+        var owner = new CountingOwner([7, 8]);
+        var session = new FakeSession { IsByteStream = true };
+        await using var receive = new HttpByteReceive(session, token => ThenFailure(owner));
+        var buffer = new byte[8];
+
+        Assert.Equal(2, await receive.ReadAsync(buffer));
+        var failure = await Assert.ThrowsAsync<TransferFailedException>(async () => await receive.ReadAsync(buffer));
+
+        Assert.Equal("The transfer was ended.", failure.Message);
+        Assert.Equal(1, owner.Disposed);
+    }
+
+    [Fact]
+    public async Task ReadAsync_CutByItsToken_LosesNothing_TheNextCallGetsTheBytesThatWaitYielded()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new CountingOwner([1, 2, 3]);
+        var session = new FakeSession { IsByteStream = true };
+        await using var receive = new HttpByteReceive(session, token => AfterGate(gate.Task, owner));
+        var buffer = new byte[8];
+        using var cts = new CancellationTokenSource();
+
+        var cut = receive.ReadAsync(buffer, cts.Token).AsTask();
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cut);
+        gate.SetResult();
+
+        Assert.Equal(3, await receive.ReadAsync(buffer));
+        Assert.Equal([1, 2, 3], buffer[..3]);
+        Assert.Equal(1, owner.Disposed);
+    }
+
+    [Fact]
+    public async Task ReadAsync_AndCopyToAsync_ExcludeEachOther_WhileOneIsUnderWay()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new FakeSession { IsByteStream = true };
+        await using var receive = new HttpByteReceive(session, token => AfterGate(gate.Task, new CountingOwner([1])));
+        var buffer = new byte[8];
+
+        var reading = receive.ReadAsync(buffer).AsTask();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await receive.ReadAsync(buffer));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => receive.CopyToAsync(new MemoryStream()));
+        gate.SetResult();
+        Assert.Equal(1, await reading);
+    }
+
+    [Fact]
+    public async Task CopyToAsync_AfterAPartialRead_WritesTheRestOfThatChunkFirst_WithoutAnotherCopy()
+    {
+        var owners = new[] { new CountingOwner([1, 2, 3, 4]), new CountingOwner([5, 6]) };
+        var session = new FakeSession { IsByteStream = true, Chunks = owners };
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+        Assert.Equal(1, await receive.ReadAsync(new byte[1]));
+        var destination = new MemoryStream();
+
+        await receive.CopyToAsync(destination);
+
+        Assert.Equal([2, 3, 4, 5, 6], destination.ToArray());
+        Assert.All(owners, owner => Assert.Equal(1, owner.Disposed));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WhileAChunkIsHeldUnread_GivesItBackOnce_AndDoesItAgainWithoutHarm()
+    {
+        var owner = new CountingOwner([1, 2, 3]);
+        var session = new FakeSession { IsByteStream = true, Chunks = [owner] };
+        var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+        Assert.Equal(1, await receive.ReadAsync(new byte[1]));
+        Assert.Equal(0, owner.Disposed);
+
+        await receive.DisposeAsync();
+        await receive.DisposeAsync();
+
+        Assert.Equal(1, owner.Disposed);
+        Assert.Equal(2, session.DisposeCalls);
+    }
+
+    private static async IAsyncEnumerable<ByteChunk> ThenFailure(CountingOwner owner)
+    {
+        await Task.Yield();
+        yield return new ByteChunk(owner, owner.Memory.Length);
+        throw new TransferFailedException("fake", "The transfer was ended.");
+    }
+
+    private static async IAsyncEnumerable<ByteChunk> AfterGate(Task gate, CountingOwner owner)
+    {
+        await gate;
+        yield return new ByteChunk(owner, owner.Memory.Length);
+    }
+
+    // --- The abstract handles ---
+
+    [Fact]
+    public async Task ByteSend_CanBeDerivedFromByATestDouble_WhoseWriteAsyncServesCopyFromAsync()
+    {
+        await using var send = new RecordingByteSend();
+        var source = Sequence(200_000);
+
+        await send.CopyFromAsync(new MemoryStream(source));
+
+        Assert.Equal(source, send.Written.ToArray());
+        Assert.Equal("recording", send.TransferId);
+        Assert.Equal(0, send.CompleteCalls);
+    }
+
+    [Fact]
+    public async Task ByteReceive_CanBeDerivedFromByATestDouble()
+    {
+        await using var receive = new SequenceByteReceive([1, 2, 3]);
+        var destination = new MemoryStream();
+
+        await receive.CopyToAsync(destination);
+
+        Assert.Equal([1, 2, 3], destination.ToArray());
+        Assert.Equal("sequence", receive.TransferId);
+        await receive.WaitForCompletionAsync();
+    }
+
+    private sealed class RecordingByteSend() : ByteSend("recording")
+    {
+        public List<byte> Written { get; } = [];
+        public int CompleteCalls { get; private set; }
+
+        public override Task WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken = default)
+        {
+            Written.AddRange(bytes.ToArray());
+            return Task.CompletedTask;
+        }
+
+        public override Task CompleteAsync(CancellationToken cancellationToken = default)
+        {
+            CompleteCalls++;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class SequenceByteReceive(byte[] bytes) : ByteReceive("sequence")
+    {
+        private int _position;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var count = Math.Min(buffer.Length, bytes.Length - _position);
+            bytes.AsMemory(_position, count).CopyTo(buffer);
+            _position += count;
+            return ValueTask.FromResult(count);
+        }
+
+        public override async Task CopyToAsync(Stream destination, CancellationToken cancellationToken = default)
+        {
+            await destination.WriteAsync(bytes.AsMemory(_position), cancellationToken);
+            _position = bytes.Length;
+        }
+    }
+
     // --- Doubles ---
 
     private sealed class CountingOwner(byte[] data) : IMemoryOwner<byte>
@@ -359,7 +567,13 @@ public class ByteSendReceiveTests
         public Task StartReceiverAsync() => Task.CompletedTask;
         public Task SendRangeAsync(IEnumerable<byte[]> items, CancellationToken cancellationToken) => Task.CompletedTask;
         public void TriggerReconnect() { }
-        public Task WaitForCompletionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public int WaitCalls { get; private set; }
+
+        public Task WaitForCompletionAsync(CancellationToken cancellationToken)
+        {
+            WaitCalls++;
+            return Task.CompletedTask;
+        }
         public Task EndByHubAsync() => Task.CompletedTask;
     }
 }
