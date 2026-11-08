@@ -7,17 +7,23 @@ using TransportR.Models;
 namespace TransportR.Client.Internal;
 
 /// <summary>
-/// A data session with the ends of it that carry the item type, which a second handle for the same
-/// transfer has to find again.
+/// A data session with the ends of it that a client builds for the kind of transfer it carries, which
+/// a second handle for the same transfer has to find again.
 /// </summary>
-internal sealed record TransferSession<T>(IDataSession Session, ISendPort<T> Send, IReceivePort<T> Receive);
+internal abstract record TransferSession(IDataSession Session);
+
+/// <summary>
+/// A session of items: the ends that carry the item type.
+/// </summary>
+internal sealed record TransferSession<T>(IDataSession Session, ISendPort<T> Send, IReceivePort<T> Receive)
+    : TransferSession(Session);
 
 /// <summary>
 /// Manages active Data sessions for a client.
 /// </summary>
-internal class SessionRegistry<T> : IAsyncDisposable
+internal class SessionRegistry<TSession> : IAsyncDisposable where TSession : TransferSession
 {
-    private readonly ConcurrentDictionary<string, TransferSession<T>> _sessions = new();
+    private readonly ConcurrentDictionary<string, TSession> _sessions = new();
     private readonly ILogger _logger;
 
     public SessionRegistry(ILogger logger)
@@ -28,17 +34,17 @@ internal class SessionRegistry<T> : IAsyncDisposable
     public int Count => _sessions.Count;
     public IEnumerable<IDataSession> Sessions => _sessions.Values.Select(s => s.Session);
 
-    public TransferSession<T> GetOrAdd(string transferId, Func<string, TransferSession<T>> valueFactory)
+    public TSession GetOrAdd(string transferId, Func<string, TSession> valueFactory)
     {
         return _sessions.GetOrAdd(transferId, valueFactory);
     }
 
-    public bool TryGetSession(string transferId, out TransferSession<T>? session)
+    public bool TryGetSession(string transferId, out TSession? session)
     {
         return _sessions.TryGetValue(transferId, out session);
     }
 
-    public bool TryRemove(string transferId, out TransferSession<T>? session)
+    public bool TryRemove(string transferId, out TSession? session)
     {
         return _sessions.TryRemove(transferId, out session);
     }

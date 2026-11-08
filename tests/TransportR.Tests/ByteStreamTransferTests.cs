@@ -43,7 +43,7 @@ public class ByteStreamTransferTests
 
         return new TransportRClient<byte[]>(
             channel,
-            new SessionRegistry<byte[]>(logger),
+            new SessionRegistry<TransferSession<byte[]>>(logger),
             serializer,
             logger,
             defaultBatchSize: 100,

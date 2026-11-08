@@ -11,7 +11,7 @@ public class SessionRegistryTests
     [Fact]
     public async Task GetOrAdd_ShouldAddNewSession()
     {
-        await using var registry = new SessionRegistry<string>(_stubContext.Logger);
+        await using var registry = new SessionRegistry<TransferSession<string>>(_stubContext.Logger);
         var transferId = "t1";
         
         var session = registry.GetOrAdd(transferId, id => 
@@ -25,7 +25,7 @@ public class SessionRegistryTests
     [Fact]
     public async Task TryGetSession_ShouldReturnExisting()
     {
-        await using var registry = new SessionRegistry<string>(_stubContext.Logger);
+        await using var registry = new SessionRegistry<TransferSession<string>>(_stubContext.Logger);
         var transferId = "t2";
         
         registry.GetOrAdd(transferId, id => _stubContext.NewTransferSession(id, 100, "http://dummy", affinity: null));
@@ -40,7 +40,7 @@ public class SessionRegistryTests
     [Fact]
     public async Task TryRemove_ShouldRemoveSession()
     {
-        await using var registry = new SessionRegistry<string>(_stubContext.Logger);
+        await using var registry = new SessionRegistry<TransferSession<string>>(_stubContext.Logger);
         var transferId = "t3";
         registry.GetOrAdd(transferId, id => _stubContext.NewTransferSession(id, 100, "http://dummy", affinity: null));
         
@@ -54,7 +54,7 @@ public class SessionRegistryTests
     [Fact]
     public async Task DisposeAsync_ShouldDisposeSessions()
     {
-        var registry = new SessionRegistry<string>(_stubContext.Logger);
+        var registry = new SessionRegistry<TransferSession<string>>(_stubContext.Logger);
         registry.GetOrAdd("s1", id => _stubContext.NewTransferSession(id, 100, "http://dummy", affinity: null));
         registry.GetOrAdd("s2", id => _stubContext.NewTransferSession(id, 100, "http://dummy", affinity: null));
         

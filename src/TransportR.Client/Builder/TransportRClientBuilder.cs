@@ -260,7 +260,7 @@ public class TransportRClientBuilder<T>
         var hubUrl = _url.TrimEnd('/');
         var dataUrl = hubUrl + WireRoutes.StreamBase;
 
-        var sessionRegistry = new SessionRegistry<T>(logger);
+        var sessionRegistry = new SessionRegistry<TransferSession<T>>(logger);
 
         // Create Infrastructure dependencies
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();

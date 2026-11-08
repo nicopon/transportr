@@ -24,7 +24,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     // Dependencies
     private readonly ClientConnection _connection;
-    private readonly SessionRegistry<T> _sessionRegistry;
+    private readonly SessionRegistry<TransferSession<T>> _sessionRegistry;
     private readonly IBatchSerializer<T>? _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
@@ -40,12 +40,12 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     public event Func<Send<T>, Task>? OnSendRequested;
 
-    private readonly TransferSignaling<T> _signaling;
+    private readonly TransferSignaling<TransferSession<T>, Send<T>, Receive<T>> _signaling;
 
     // Internal so that only the builder instantiates it.
     internal TransportRClient(
         ControlChannel channel,
-        SessionRegistry<T> sessionRegistry,
+        SessionRegistry<TransferSession<T>> sessionRegistry,
         IBatchSerializer<T>? serializer,
         ILogger logger,
         int defaultBatchSize,
@@ -65,14 +65,14 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         _streamManager = streamManager;
         
         // SRP: Extract signaling logic
-        _signaling = new TransferSignaling<T>(
+        _signaling = new TransferSignaling<TransferSession<T>, Send<T>, Receive<T>>(
             channel,
             sessionRegistry,
-            this, // ISessionContext
-            batchSize => SessionPorts.Create(options, serializer, streamManager, batchSize),
+            NewSession,
+            session => new HttpSend<T>(session.Session, session.Send),
+            session => new HttpReceive<T>(session.Session, session.Receive),
             logger,
             defaultBatchSize,
-            dataUrl,
             (t) => OnTransferStarted?.Invoke(t) ?? Task.CompletedTask,
             () => OnSendRequested
         );
@@ -182,6 +182,17 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     }
     
     // --- Internal Logic ---
+
+    /// <summary>
+    /// A session with the sending and receiving ends the client builds for it. Building them is
+    /// where a client that cannot carry its item type is refused.
+    /// </summary>
+    private TransferSession<T> NewSession(string transferId, int batchSize, string? affinity)
+    {
+        var (send, receive) = SessionPorts.Create(_options, _serializer, _streamManager, batchSize);
+        var session = new DataSession(this, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
+        return new TransferSession<T>(session, send, receive);
+    }
 
     /// <summary>
     /// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where

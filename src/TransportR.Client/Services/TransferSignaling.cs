@@ -12,22 +12,34 @@ namespace TransportR.Client.Services;
 /// Handles the events of the hub's stream, and coordinates session lifecycle (creation/removal)
 /// based on them.
 /// </summary>
-internal class TransferSignaling<T>
+/// <remarks>
+/// Knows neither what a transfer carries nor how its ends are built: the client makes the sessions and
+/// the handles that go with them.
+/// </remarks>
+/// <typeparam name="TSession">The session the client keeps, with the ends it builds for it.</typeparam>
+/// <typeparam name="TSend">The handle a sender is given.</typeparam>
+/// <typeparam name="TReceive">The handle a receiver is given.</typeparam>
+internal class TransferSignaling<TSession, TSend, TReceive>
+    where TSession : TransferSession
+    where TSend : IAsyncDisposable
 {
     private readonly ControlChannel _channel;
-    private readonly SessionRegistry<T> _sessionRegistry;
-    private readonly ISessionContext _context;
-    private readonly Func<int, (ISendPort<T> Send, IReceivePort<T> Receive)> _createPorts;
+    private readonly SessionRegistry<TSession> _sessionRegistry;
+    private readonly Func<string, int, string?, TSession> _newSession;
+    private readonly Func<TSession, TSend> _makeSend;
+    private readonly Func<TSession, TReceive> _makeReceive;
     private readonly ILogger _logger;
     private readonly int _defaultBatchSize;
-    private readonly string _dataUrl;
-    private readonly Func<Receive<T>, Task>? _onTransferStarted;
-    private readonly Func<Func<Send<T>, Task>?> _sendRequestedHandler;
+    private readonly Func<TReceive, Task>? _onTransferStarted;
+    private readonly Func<Func<TSend, Task>?> _sendRequestedHandler;
 
-    /// <param name="createPorts">
-    /// Makes the sending and the receiving end of a session of the given batch size, of the mode the
-    /// client was built for.
+    /// <param name="newSession">
+    /// Makes the session of a transfer, given its id, its batch size and the affinity that reached the
+    /// instance holding its bridge. Building the sending and receiving ends is where a client that
+    /// cannot carry what it was asked to is refused.
     /// </param>
+    /// <param name="makeSend">The handle of a session a sender starts.</param>
+    /// <param name="makeReceive">The handle of a session a receiver starts.</param>
     /// <param name="sendRequestedHandler">
     /// Returns the handler currently attached for transfers the host opens, or null when there is
     /// none. Asked on every request, because the answer decides whether the transfer is refused
@@ -35,23 +47,23 @@ internal class TransferSignaling<T>
     /// </param>
     public TransferSignaling(
         ControlChannel channel,
-        SessionRegistry<T> sessionRegistry,
-        ISessionContext context,
-        Func<int, (ISendPort<T> Send, IReceivePort<T> Receive)> createPorts,
+        SessionRegistry<TSession> sessionRegistry,
+        Func<string, int, string?, TSession> newSession,
+        Func<TSession, TSend> makeSend,
+        Func<TSession, TReceive> makeReceive,
         ILogger logger,
         int defaultBatchSize,
-        string dataUrl,
-        Func<Receive<T>, Task>? onTransferStarted,
-        Func<Func<Send<T>, Task>?> sendRequestedHandler)
+        Func<TReceive, Task>? onTransferStarted,
+        Func<Func<TSend, Task>?> sendRequestedHandler)
     {
         _sendRequestedHandler = sendRequestedHandler;
         _channel = channel;
         _sessionRegistry = sessionRegistry;
-        _context = context;
-        _createPorts = createPorts;
+        _newSession = newSession;
+        _makeSend = makeSend;
+        _makeReceive = makeReceive;
         _logger = logger;
         _defaultBatchSize = defaultBatchSize;
-        _dataUrl = dataUrl;
         _onTransferStarted = onTransferStarted;
     }
 
@@ -115,10 +127,10 @@ internal class TransferSignaling<T>
         CallbackOutcome outcome;
         try
         {
-            var session = _sessionRegistry.GetOrAdd(ready.TransferId, id => NewSession(id, _defaultBatchSize, affinity));
+            var session = _sessionRegistry.GetOrAdd(ready.TransferId, id => _newSession(id, _defaultBatchSize, affinity));
             await session.Session.StartReceiverAsync();
 
-            var transfer = new HttpReceive<T>(session.Session, session.Receive);
+            var transfer = _makeReceive(session);
             if (_onTransferStarted != null)
             {
                 await _onTransferStarted(transfer);
@@ -140,7 +152,7 @@ internal class TransferSignaling<T>
     /// the hub never calls the sender back during that handshake.
     /// </summary>
     /// <param name="affinity">What reached the instance that ran the handshake, and holds the bridge.</param>
-    public async Task<HttpSend<T>> StartRequestedSendAsync(string transferId, int size, Guid receiverId, string? affinity)
+    public async Task<TSend> StartRequestedSendAsync(string transferId, int size, Guid receiverId, string? affinity)
     {
         _logger.LogDebug("Starting send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", transferId, receiverId, size);
 
@@ -149,20 +161,9 @@ internal class TransferSignaling<T>
             throw new InvalidOperationException($"Session {transferId} already exists. Cannot overwrite.");
         }
 
-        var session = _sessionRegistry.GetOrAdd(transferId, id => NewSession(id, size, affinity));
+        var session = _sessionRegistry.GetOrAdd(transferId, id => _newSession(id, size, affinity));
         await session.Session.StartSenderAsync();
-        return new HttpSend<T>(session.Session, session.Send);
-    }
-
-    /// <summary>
-    /// A session with the sending and receiving ends the client builds for it. Building them is
-    /// where a client that cannot carry its item type is refused.
-    /// </summary>
-    private TransferSession<T> NewSession(string transferId, int batchSize, string? affinity)
-    {
-        var (send, receive) = _createPorts(batchSize);
-        var session = new DataSession(_context, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
-        return new TransferSession<T>(session, send, receive);
+        return _makeSend(session);
     }
 
     private async Task HandleRequestSend(RequestSendEvent request)
@@ -191,7 +192,7 @@ internal class TransferSignaling<T>
         await ReplyAsync(request.RequestId, request.TransferId, outcome, affinity);
     }
 
-    private async Task<CallbackOutcome> StartHostRequestedSendAsync(RequestSendEvent request, Func<Send<T>, Task> handler, string? affinity)
+    private async Task<CallbackOutcome> StartHostRequestedSendAsync(RequestSendEvent request, Func<TSend, Task> handler, string? affinity)
     {
         if (_sessionRegistry.ContainsKey(request.TransferId))
         {
@@ -200,10 +201,10 @@ internal class TransferSignaling<T>
 
         _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", request.TransferId, request.ReceiverId, request.BatchSize);
 
-        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => NewSession(id, request.BatchSize, affinity));
+        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => _newSession(id, request.BatchSize, affinity));
         await session.Session.StartSenderAsync();
 
-        var transfer = new HttpSend<T>(session.Session, session.Send);
+        var transfer = _makeSend(session);
         try
         {
             await handler(transfer);
