@@ -48,9 +48,6 @@ internal sealed class ItemChunkSink<T>(ReceiveBuffer<T> buffer, IBatchSerializer
 
     public IAsyncEnumerable<T> ReadItemsAsync(CancellationToken ct) => buffer.ReadAllAsync(ct);
 
-    public IAsyncEnumerable<ByteChunk> ReadChunksAsync(CancellationToken ct) =>
-        throw new InvalidOperationException("Not a byte-stream transfer");
-
     /// <summary>
     /// Decodes a batch body straight out of the memory it was read into.
     /// </summary>

@@ -227,35 +227,6 @@ public class BatchProcessorByteStreamTests
         Assert.Throws<InvalidOperationException>(() => processor.ReceiveChunksAsync(CancellationToken.None));
     }
 
-    [Fact]
-    public void ReceiveChunksAsync_OutsideTheByteStreamMode_Throws()
-    {
-        var context = new ItemSessionContext();
-        var (_, receive) = context.CreatePorts(10);
-        receive.OpenSink();
-
-        Assert.Throws<InvalidOperationException>(() => receive.ReceiveChunksAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public void AnItemSink_RefusesToReadChunks()
-    {
-        var context = new ItemSessionContext();
-        var sink = new ItemChunkSink<string>(new ReceiveBuffer<string>(context.Options.ReceiveBufferCapacity), context.Serializer);
-
-        Assert.Throws<InvalidOperationException>(() => sink.ReadChunksAsync(CancellationToken.None));
-    }
-
-    [Fact]
-    public void ItemMode_WithoutASerializer_RefusesToBeBuilt()
-    {
-        // The options carry no byte-stream size, so this is the item mode with nothing to encode it.
-        var context = new ByteStreamSessionContext();
-
-        Assert.Throws<InvalidOperationException>(
-            () => SessionPorts.Create<byte[]>(context.Options, serializer: null, context.StreamManager, 10));
-    }
-
     // ---- Sending ----
 
     private async Task<TestByteBatchProcessor> StartSenderAsync(int budget = 4, int? window = null)
@@ -658,6 +629,4 @@ public class BatchProcessorByteStreamTests
         public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
     }
-
-    private sealed class ItemSessionContext : StubSessionContext;
 }

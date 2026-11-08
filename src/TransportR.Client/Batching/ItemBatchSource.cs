@@ -23,8 +23,6 @@ internal sealed class ItemBatchSource<T>(
 
     public IBatchSource Source => this;
 
-    public bool IsByteStream => false;
-
     public ChunkType BatchType => ChunkType.Batch;
 
     private BatchAccumulator<T> Accumulator =>
@@ -86,9 +84,4 @@ internal sealed class ItemBatchSource<T>(
         if (_accumulator is { } accumulator)
             await accumulator.AddRangeAsync(items, token);
     }
-
-    /// <summary>
-    /// Nothing: bytes are appended to a stream of bytes, which this is not.
-    /// </summary>
-    public Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken token) => Task.CompletedTask;
 }

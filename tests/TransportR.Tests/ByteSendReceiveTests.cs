@@ -440,15 +440,12 @@ public class ByteSendReceiveTests
         }
     }
 
-    private sealed class FakeSession : IDataSession, ISendPort<byte[]>, IReceivePort<byte[]>
+    private sealed class FakeSession : IDataSession
     {
         public bool IsByteStream { get; init; }
-        public IBatchSource Source => throw new NotSupportedException();
-        public IChunkSink OpenSink() => throw new NotSupportedException();
         public Task? RefusedAsCompleted() => null;
         public Task WhileSending(Task send, CancellationToken cancellationToken) => send;
         public IReadOnlyList<CountingOwner> Chunks { get; init; } = [];
-        public IReadOnlyList<byte[]> ItemsToReceive { get; init; } = [];
 
         public List<byte> AppendedBytes { get; } = [];
         public List<int> AppendCalls { get; } = [];
@@ -471,13 +468,6 @@ public class ByteSendReceiveTests
             return Task.CompletedTask;
         }
 
-        public Task SendAsync(byte[] item, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Items.Add(item);
-            return Task.CompletedTask;
-        }
-
         public Task CompleteAsync(CancellationToken cancellationToken = default)
         {
             CompleteCalls++;
@@ -491,16 +481,6 @@ public class ByteSendReceiveTests
             {
                 await Task.Yield();
                 yield return new ByteChunk(owner, owner.Memory.Length);
-            }
-        }
-
-        public async IAsyncEnumerable<byte[]> ReceiveAsync([EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            ItemReads++;
-            foreach (var item in ItemsToReceive)
-            {
-                await Task.Yield();
-                yield return item;
             }
         }
 
@@ -524,7 +504,6 @@ public class ByteSendReceiveTests
         public DateTime StartedAt => DateTime.UtcNow;
         public Task StartSenderAsync() => Task.CompletedTask;
         public Task StartReceiverAsync() => Task.CompletedTask;
-        public Task SendRangeAsync(IEnumerable<byte[]> items, CancellationToken cancellationToken) => Task.CompletedTask;
         public void TriggerReconnect() { }
         public int WaitCalls { get; private set; }
 

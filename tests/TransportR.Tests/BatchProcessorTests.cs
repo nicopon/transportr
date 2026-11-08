@@ -342,14 +342,6 @@ public class BatchProcessorTests
         Assert.Equal(0, processor.ItemsReceived);
     }
 
-    [Fact]
-    public void ByteStreamMode_WithAnItemTypeOtherThanByteArray_RefusesToBeBuilt()
-    {
-        _stubContext.Options.ByteStreamBatchBytes = 1024;
-
-        Assert.Throws<InvalidOperationException>(() => CreateProcessor());
-    }
-
     private sealed class ArrayMemoryOwner(byte[] data) : IMemoryOwner<byte>
     {
         public Memory<byte> Memory => data;

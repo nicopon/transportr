@@ -25,7 +25,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     // Dependencies
     private readonly ClientConnection _connection;
     private readonly SessionRegistry<TransferSession<T>> _sessionRegistry;
-    private readonly IBatchSerializer<T>? _serializer;
+    private readonly IBatchSerializer<T> _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
     
@@ -46,7 +46,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     internal TransportRClient(
         ControlChannel channel,
         SessionRegistry<TransferSession<T>> sessionRegistry,
-        IBatchSerializer<T>? serializer,
+        IBatchSerializer<T> serializer,
         ILogger logger,
         int defaultBatchSize,
         ClientOptions options,
@@ -179,8 +179,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     // --- Internal Logic ---
 
     /// <summary>
-    /// A session with the sending and receiving ends the client builds for it. Building them is
-    /// where a client that cannot carry its item type is refused.
+    /// A session with the sending and receiving ends the client builds for it.
     /// </summary>
     private TransferSession<T> NewSession(string transferId, int batchSize, string? affinity)
     {
@@ -189,11 +188,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         return new TransferSession<T>(session, send, receive);
     }
 
-    /// <summary>
-    /// <c>null</c> in the byte-stream mode (<see cref="ClientOptions.ByteStreamBatchBytes"/>), where
-    /// the payload crosses the wire as it is.
-    /// </summary>
-    internal IBatchSerializer<T>? Serializer => _serializer;
+    internal IBatchSerializer<T> Serializer => _serializer;
 
     #region ISessionContext Implementation
 

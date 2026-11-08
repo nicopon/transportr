@@ -10,15 +10,11 @@ namespace TransportR.Client.Batching;
 internal sealed class ByteBatchSource(
     int batchBytes,
     int flushIntervalMs,
-    RecyclableMemoryStreamManager streams) : IBatchSource, ISendPort<byte[]>
+    RecyclableMemoryStreamManager streams) : IBatchSource
 {
     private const int LengthPrefixBytes = sizeof(int);
 
     private ByteStreamAccumulator? _accumulator;
-
-    public IBatchSource Source => this;
-
-    public bool IsByteStream => true;
 
     public ChunkType BatchType => ChunkType.StreamBatch;
 
@@ -48,21 +44,6 @@ internal sealed class ByteBatchSource(
     public void Dispose() => _accumulator?.Dispose();
 
     public void Detach() => _accumulator = null;
-
-    public async Task SendAsync(byte[] item, CancellationToken token)
-    {
-        if (_accumulator is { } accumulator)
-            await accumulator.AddAsync(item, token);
-    }
-
-    public async Task SendRangeAsync(IEnumerable<byte[]> items, CancellationToken token)
-    {
-        if (_accumulator is { } accumulator)
-        {
-            foreach (var item in items)
-                await accumulator.AddAsync(item, token);
-        }
-    }
 
     public async Task SendBytesAsync(ReadOnlyMemory<byte> bytes, CancellationToken token)
     {
