@@ -318,6 +318,25 @@ public class ByteSendReceiveTests
     }
 
     [Fact]
+    public async Task ReadAsync_WhileACopyIsUnderWay_IsRefused()
+    {
+        var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4]) };
+        var session = new FakeSession { IsByteStream = true, Chunks = owners };
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
+        using var cts = new CancellationTokenSource();
+        var destination = new WaitingDestination();
+        var copy = receive.CopyToAsync(destination, cts.Token);
+        await destination.Writing.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await receive.ReadAsync(new byte[8]));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => receive.CopyToAsync(new MemoryStream()));
+
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => copy.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, owners[0].Disposed);
+    }
+
+    [Fact]
     public async Task CopyToAsync_AfterAPartialRead_WritesTheRestOfThatChunkFirst_WithoutAnotherCopy()
     {
         var owners = new[] { new CountingOwner([1, 2, 3, 4]), new CountingOwner([5, 6]) };
