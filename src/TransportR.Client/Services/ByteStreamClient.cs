@@ -28,7 +28,7 @@ namespace TransportR.Client.Services;
 /// </remarks>
 public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDisposable
 {
-    // What the hub's transfer request still names: a byte client cuts its batches by size, and has no count.
+    // The batch size its sessions carry: a byte client cuts its batches by size, and has no count.
     private const int RequestedBatchSize = 1000;
 
     /// <inheritdoc />
@@ -137,7 +137,7 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
     {
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (BatchBytes={BatchBytes})...", targetClientId, _batchBytes);
 
-        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId, RequestedBatchSize);
+        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId);
         return await _signaling.StartRequestedSendAsync(transferId, RequestedBatchSize, targetClientId, affinity);
     }
 

@@ -43,7 +43,7 @@ internal sealed record RegisteredEvent(string ConnectionId);
 
 internal sealed record ReadyToReceiveEvent(Guid RequestId, string TransferId, Guid SenderId);
 
-internal sealed record RequestSendEvent(Guid RequestId, string TransferId, int BatchSize, Guid ReceiverId);
+internal sealed record RequestSendEvent(Guid RequestId, string TransferId, Guid ReceiverId);
 
 internal sealed record CancelTransferEvent(string TransferId);
 
@@ -61,7 +61,7 @@ internal enum CallbackOutcome
 
 internal sealed record CallbackReply(CallbackOutcome Outcome);
 
-internal sealed record InitTransferRequest(Guid TargetClientId, int BatchSize, int TimeoutMs);
+internal sealed record InitTransferRequest(Guid TargetClientId, int TimeoutMs);
 
 internal sealed record InitTransferResponse(string TransferId);
 

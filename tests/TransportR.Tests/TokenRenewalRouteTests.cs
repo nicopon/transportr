@@ -92,7 +92,7 @@ public class TokenRenewalRouteTests
 
         Assert.Empty(await ReceiversAsync(host, callerId, token));
         using var refusal = await RawHub.SendAsync(host, HttpMethod.Post, callerId, WireRoutes.TransfersSegment, token,
-            new InitTransferRequest(receiverId, 10, 1000));
+            new InitTransferRequest(receiverId, 1000));
         Assert.Equal(HttpStatusCode.Conflict, refusal.StatusCode);
         Assert.Contains("not authorized", (await refusal.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json))!.Message, StringComparison.OrdinalIgnoreCase);
     }

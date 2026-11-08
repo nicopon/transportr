@@ -343,7 +343,7 @@ public class ByteStreamTransferTests
 
         // The host does not know the sender's mode: the figure it passes is a count of items, and means nothing here.
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
 
         await using var send = await sendHandle.Task.WaitAsync(Bound);
         await using var receive = await receiveHandle.Task.WaitAsync(Bound);

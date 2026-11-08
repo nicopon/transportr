@@ -259,7 +259,7 @@ internal class ClientController : ControllerBase
 
             if (Redirect(target) is { } redirect) return StatusCode(StatusCodes.Status421MisdirectedRequest, redirect);
 
-            var transferId = await _initiator.HandshakeAsync(source, target, request.BatchSize, request.TimeoutMs,
+            var transferId = await _initiator.HandshakeAsync(source, target, request.TimeoutMs,
                 requestSender: false, HttpContext.RequestAborted);
             return Ok(new InitTransferResponse(transferId));
         }

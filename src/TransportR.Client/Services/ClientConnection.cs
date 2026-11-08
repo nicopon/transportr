@@ -266,11 +266,11 @@ internal sealed class ClientConnection : IAsyncDisposable
     /// that holds the receiver, and returns the transfer the hub opened with the affinity that reached
     /// that instance.
     /// </summary>
-    public async Task<(string TransferId, string? Affinity)> OpenTransferAsync(Guid targetClientId, int batchSize)
+    public async Task<(string TransferId, string? Affinity)> OpenTransferAsync(Guid targetClientId)
     {
         // The affinity this request carries is the transfer's from then on: the handshake runs on the
         // instance it reaches, and the bridge is there.
-        var request = new InitTransferRequest(targetClientId, batchSize, (int)_options.HandshakeTimeout.TotalMilliseconds);
+        var request = new InitTransferRequest(targetClientId, (int)_options.HandshakeTimeout.TotalMilliseconds);
         var affinity = _channel.CookieHeader();
 
         // The hub answers within the handshake timeout it was given or not at all, and the HttpClient has

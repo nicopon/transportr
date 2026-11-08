@@ -89,7 +89,7 @@ public class TransferIntegrationTests
 
         // Neither client asks for anything: the host names both ends.
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
 
         // Both handles are handed out inside the handshake, before the host has the id to match
         // them against - a host that routes by transfer id has to hold them until it does.
@@ -138,7 +138,7 @@ public class TransferIntegrationTests
         await receiver.ConnectAsync();
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        var init = initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        var init = initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
         await using var send = await asked.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -227,7 +227,7 @@ public class TransferIntegrationTests
         await using var sender = await RawHub.OpenAsync(host, senderId, token: null, "test");
 
         var opening = RawHub.SendAsync(host, HttpMethod.Post, senderId, WireRoutes.TransfersSegment, token: null,
-            new InitTransferRequest(receiverId, 10, 5_000));
+            new InitTransferRequest(receiverId, 5_000));
 
         var asked = await receiver.NextEventAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(ControlPlane.ReadyToReceive, asked?.EventType);
@@ -846,7 +846,7 @@ public class TransferIntegrationTests
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
-            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
+            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000));
 
         Assert.Contains("refused", ex.Message, StringComparison.OrdinalIgnoreCase);
 
@@ -872,7 +872,7 @@ public class TransferIntegrationTests
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
         await Assert.ThrowsAsync<HubRequestFailedException>(
-            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000));
+            () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000));
 
         Assert.Empty(sender.GetTransfers());
         await AssertEventuallyEmptyAsync(receiver);
@@ -902,7 +902,7 @@ public class TransferIntegrationTests
         Assert.Empty(receiver.GetTransfers());
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
-        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, batchSize: 10, timeoutMs: 20_000);
+        var transferId = await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, timeoutMs: 20_000);
 
         await using var send = await sendHandle.Task;
         await using var receive = await receiveHandle.Task;

@@ -34,7 +34,7 @@ public class RefusedHeaderTests
             WireRoutes.PresenceSegment => await RawHub.SendAsync(host, HttpMethod.Post, clientId, $"{route}/conn-1", token: null),
             WireRoutes.ReceiversSegment => await RawHub.SendAsync(host, HttpMethod.Get, clientId, route, token: null),
             WireRoutes.TransfersSegment => await RawHub.SendAsync(host, HttpMethod.Post, clientId, route, token: null,
-                new InitTransferRequest(Guid.NewGuid(), 10, 1000)),
+                new InitTransferRequest(Guid.NewGuid(), 1000)),
             WireRoutes.RepliesSegment => await RawHub.SendAsync(host, HttpMethod.Post, clientId, $"{route}/{Guid.NewGuid()}", token: null,
                 new CallbackReply(CallbackOutcome.Accepted)),
             WireRoutes.HeartbeatSegment => await RawHub.SendAsync(host, HttpMethod.Post, clientId,

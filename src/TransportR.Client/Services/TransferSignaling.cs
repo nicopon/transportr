@@ -199,9 +199,9 @@ internal class TransferSignaling<TSession, TSend, TReceive>
             throw new InvalidOperationException($"Session {request.TransferId} already exists. Cannot overwrite.");
         }
 
-        _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}, BatchSize={Size}", request.TransferId, request.ReceiverId, request.BatchSize);
+        _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}", request.TransferId, request.ReceiverId);
 
-        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => _newSession(id, request.BatchSize, affinity));
+        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => _newSession(id, _defaultBatchSize, affinity));
         await session.Session.StartSenderAsync();
 
         var transfer = _makeSend(session);

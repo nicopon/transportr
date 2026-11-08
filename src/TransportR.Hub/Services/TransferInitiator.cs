@@ -50,7 +50,6 @@ internal class TransferInitiator : ITransferInitiator
     public async Task<string> InitTransferAsync(
         Guid senderClientId,
         Guid receiverClientId,
-        int batchSize,
         int timeoutMs,
         CancellationToken cancellationToken = default)
     {
@@ -85,7 +84,7 @@ internal class TransferInitiator : ITransferInitiator
             throw new HubRequestFailedException("Source and target clients are not both connected to this hub instance.");
         }
 
-        return await HandshakeAsync(sender, receiver, batchSize, timeoutMs, requestSender: true, cancellationToken);
+        return await HandshakeAsync(sender, receiver, timeoutMs, requestSender: true, cancellationToken);
     }
 
     internal void ValidateTransferRequest(ClientRegistration sourceClient, ClientRegistration targetClient)
@@ -127,15 +126,14 @@ internal class TransferInitiator : ITransferInitiator
     internal async Task<string> HandshakeAsync(
         ClientRegistration sender,
         ClientRegistration receiver,
-        int batchSize,
         int timeoutMs,
         bool requestSender,
         CancellationToken cancellationToken = default)
     {
         var transferId = Guid.NewGuid().ToString();
 
-        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (BatchSize={Size}, opened by {Opener})",
-            transferId, sender.ClientId, receiver.ClientId, batchSize, requestSender ? "the host" : "the sender");
+        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (opened by {Opener})",
+            transferId, sender.ClientId, receiver.ClientId, requestSender ? "the host" : "the sender");
 
         await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId);
 
@@ -178,7 +176,7 @@ internal class TransferInitiator : ITransferInitiator
             try
             {
                 senderReady = await _streams.AskAsync(sender.ConnectionId, ControlPlane.RequestSend,
-                    requestId => new RequestSendEvent(requestId, transferId, batchSize, receiver.ClientId), cts.Token);
+                    requestId => new RequestSendEvent(requestId, transferId, receiver.ClientId), cts.Token);
             }
             catch (IOException ex)
             {

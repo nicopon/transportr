@@ -164,7 +164,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         int size = batchSize ?? _defaultBatchSize;
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (Size={Size})...", targetClientId, size);
 
-        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId, size);
+        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId);
         return await _signaling.StartRequestedSendAsync(transferId, size, targetClientId, affinity);
     }
 
