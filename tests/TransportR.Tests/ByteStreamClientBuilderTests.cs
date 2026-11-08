@@ -57,7 +57,6 @@ public class ByteStreamClientBuilderTests
         Assert.Equal(BufferCapacity.Bytes(1 << 20), options.ReceiveBufferCapacity);
         Assert.Equal(WriteTransportPolicy.SegmentsOnly, options.WriteTransportPolicy);
         Assert.Equal(TimeSpan.FromMinutes(1), options.TokenRefreshThreshold);
-        Assert.Null(options.ByteStreamBatchBytes);
     }
 
     [Fact]

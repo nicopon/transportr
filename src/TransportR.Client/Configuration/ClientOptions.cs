@@ -171,11 +171,4 @@ internal class ClientOptions
     /// </para>
     /// </remarks>
     public BufferCapacity? ReceiveBufferCapacity { get; set; }
-
-    /// <summary>
-    /// The size, in bytes, at which a batch of the byte-stream mode is cut. <c>null</c> (the default)
-    /// is the item mode, where a serializer encodes the batches. Internal: a mode the client is built
-    /// in, not a setting for callers.
-    /// </summary>
-    internal int? ByteStreamBatchBytes { get; set; }
 }
