@@ -12,8 +12,6 @@ internal sealed class ByteBatchSource(
     int flushIntervalMs,
     RecyclableMemoryStreamManager streams) : IBatchSource
 {
-    private const int LengthPrefixBytes = sizeof(int);
-
     private ByteStreamAccumulator? _accumulator;
 
     public ChunkType BatchType => ChunkType.StreamBatch;
@@ -31,7 +29,7 @@ internal sealed class ByteBatchSource(
 
     public ValueTask<OutgoingBatch?> TryReadAsync(CancellationToken ct) =>
         ValueTask.FromResult<OutgoingBatch?>(Accumulator.BatchReader.TryRead(out var next)
-            ? new OutgoingBatch(next.Batch, next.BatchId, (int)next.Batch.Length - LengthPrefixBytes)
+            ? new OutgoingBatch(next.Batch, next.BatchId, Count: 0)
             : null);
 
     public ValueTask CompleteAsync(CancellationToken ct) => Accumulator.CompleteAsync(ct);

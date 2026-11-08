@@ -326,7 +326,24 @@ public class BatchProcessorByteStreamTests
         Assert.All(chunks, c => Assert.Equal(c.Header.Count, c.Header.PayloadLength));
         Assert.Equal([0, 1, 2], chunks.Select(c => c.Header.BatchId));
         Assert.Equal(bytes, chunks.SelectMany(c => c.Body));
-        Assert.Equal(9, processor.ItemsSent);
+        Assert.Equal(0, processor.ItemsSent);
+    }
+
+    [Fact]
+    public async Task ABatchOfBytes_CountsNoItem_OnEitherEnd_ButItsBytes()
+    {
+        await using var sender = await StartSenderAsync(budget: 4);
+        await sender.SendAsync(Sequence(6), CancellationToken.None);
+        await sender.CompleteSenderAsync(CancellationToken.None);
+        await WriteQueuedAsync(sender, 2);
+
+        await using var receiver = CreateProcessor();
+        await receiver.StartReceiverAsync();
+        await receiver.ProcessChunkAsync(CreateChunk(0, Bytes(1, 10)));
+
+        Assert.Equal(0, sender.ItemsSent);
+        Assert.Equal(0, receiver.ItemsReceived);
+        Assert.True(sender.PayloadBytes > 0);
     }
 
     [Fact]
@@ -341,7 +358,7 @@ public class BatchProcessorByteStreamTests
 
         var chunks = await WriteQueuedAsync(processor, 3);
         Assert.Equal(bytes, chunks.SelectMany(c => c.Body));
-        Assert.Equal(10, processor.ItemsSent);
+        Assert.Equal(0, processor.ItemsSent);
     }
 
     [Fact]

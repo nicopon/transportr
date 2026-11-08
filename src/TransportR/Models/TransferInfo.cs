@@ -37,7 +37,7 @@ public enum TransferStatus
 /// <param name="DataUrl">URL of the data plane endpoint used for this transfer.</param>
 /// <param name="Direction">Whether this client is sending or receiving.</param>
 /// <param name="Status">Current status of the transfer.</param>
-/// <param name="ItemsProcessed">Number of items sent or received; in the byte-stream mode, which has no items, the number of bytes.</param>
+/// <param name="ItemsProcessed">Number of items sent or received; 0 for a transfer of bytes, which has none (see <paramref name="BytesTransferred"/>).</param>
 /// <param name="BytesTransferred">Total bytes transferred (compressed).</param>
 /// <param name="StartedAt">When the transfer started.</param>
 /// <param name="Duration">How long the transfer has been running (or ran).</param>

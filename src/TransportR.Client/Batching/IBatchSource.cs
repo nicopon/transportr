@@ -62,5 +62,5 @@ internal interface IBatchSource : IDisposable
 /// A batch read from an <see cref="IBatchSource"/>. <paramref name="Body"/> holds a 4-byte count,
 /// then the payload.
 /// </summary>
-/// <param name="Count">The items of the batch; for a source of bytes, the bytes of its payload.</param>
+/// <param name="Count">The items of the batch; 0 for a source of bytes, which has none.</param>
 internal readonly record struct OutgoingBatch(RecyclableMemoryStream Body, int BatchId, int Count);

@@ -362,7 +362,8 @@ internal class BatchProcessor : IAsyncDisposable
         var owner = payload ?? new PooledPayload(0);
         var rxResult = await _receiverState.ProcessBatchAsync(header.BatchId, owner, owner.Memory, ct);
 
-        Interlocked.Add(ref _itemsReceived, header.Count);
+        // The count of a batch of bytes is its length, not items.
+        if (header.Type == ChunkType.Batch) Interlocked.Add(ref _itemsReceived, header.Count);
 
         // Chunks held out of order carry serialized bytes that no budget counts. Over an ordered
         // stream this should never fire; it is here so that "should never" is something a run can
