@@ -211,6 +211,26 @@ public class ByteStreamTransferTests
     }
 
     [Fact]
+    public async Task AReadOnAHandleThatWasDisposedBetweenTwoReads_FailsTheTransfer_NotWithACancellation()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
+        var (send, receive) = await OpenAsync(sender, receiver);
+        await using var _ = send;
+
+        await send.CopyFromAsync(new MemoryStream(Payload(2500)));
+        var buffer = new byte[100];
+        Assert.Equal(100, await receive.ReadAsync(buffer).AsTask().WaitAsync(Bound));
+
+        await receive.DisposeAsync();
+
+        await Assert.ThrowsAsync<TransferFailedException>(async () => await receive.ReadAsync(buffer));
+        await Assert.ThrowsAsync<TransferFailedException>(() => receive.CopyToAsync(new MemoryStream()));
+    }
+
+    [Fact]
     public async Task CopyFromAsync_LeavesTheTransferOpen_UntilTheCallerCompletesIt()
     {
         using var host = TestHubServerFactory.CreateHost();

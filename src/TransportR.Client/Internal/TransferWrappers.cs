@@ -213,6 +213,14 @@ internal sealed class HttpByteReceive(IDataSession session, Func<CancellationTok
     {
         while (_current is null)
         {
+            // Once released the enumerator is gone and its token cancelled: what the session says of a
+            // handle let go is the answer, not the cancellation.
+            if (Volatile.Read(ref _released) != 0)
+            {
+                await session.WaitForCompletionAsync(cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+
             _chunks ??= readChunks(_lifetime.Token).GetAsyncEnumerator(_lifetime.Token);
             _moving ??= _chunks.MoveNextAsync().AsTask();
 
