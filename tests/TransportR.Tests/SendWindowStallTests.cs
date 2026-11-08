@@ -1,4 +1,6 @@
 using TransportR.Abstractions;
+using TransportR.Client.Batching;
+using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
 using TransportR.Models;
 using TransportR.Tests.TestHelpers;
@@ -76,6 +78,46 @@ public class SendWindowStallTests
 
         // A caller who gave up says nothing about the receiver, which may still be draining.
         Assert.NotEqual(SessionState.Failed, session.State);
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledWhileItsAddStillReadsTheBuffer_ReturnsOnlyOnceTheAddIsDoneWithIt()
+    {
+        var context = new StubSessionContext(new HttpClient(new NeverAnswers()));
+        context.Options.CompleteStallTimeout = TimeSpan.FromMinutes(5);
+
+        await using var session = new DataSession(
+            context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null,
+            new ByteBatchSource(4, context.Options.BatchFlushIntervalMs, context.StreamManager),
+            new ByteReceivePort(context.Options.ReceiveBufferCapacity).OpenSink);
+        await session.StartSenderAsync();
+
+        // Past its wait for a slot an add copies whatever its token says: one granted its slot as the
+        // caller cancels reads the caller's buffer after the cancellation, and stops at its next wait.
+        var granted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        byte[]? copied = null;
+        async Task AddAsync(ReadOnlyMemory<byte> bytes, CancellationToken token)
+        {
+            await granted.Task;
+            copied = bytes.ToArray();
+            token.ThrowIfCancellationRequested();
+        }
+
+        var send = new HttpByteSend(session, AddAsync);
+        byte[] buffer = [1, 2, 3, 4];
+        using var cts = new CancellationTokenSource();
+
+        var write = send.WriteAsync(buffer, cts.Token);
+        // The caller takes its buffer back the moment the call returns.
+        var reused = write.ContinueWith(_ => Array.Clear(buffer), TaskContinuationOptions.ExecuteSynchronously);
+
+        await cts.CancelAsync();
+        await Task.WhenAny(write, Task.Delay(300));
+        granted.SetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write.WaitAsync(TimeSpan.FromSeconds(5)));
+        await reused.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal([1, 2, 3, 4], copied);
     }
 
     /// <summary>Keeps the session loop waiting on its streams, so nothing else changes its state.</summary>

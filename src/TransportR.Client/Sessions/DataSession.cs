@@ -248,11 +248,11 @@ internal class DataSession : IDataSession
             }
 
             // Wakes when an acknowledgement reopens the window, or when the receiver will have been
-            // silent for the whole bound: no moment in between can change the verdict.
-            await send.WaitAsync(stallTimeout - silence, cancellationToken)
+            // silent for the whole bound: no moment in between can change the verdict. Not on the
+            // caller's token, which the send carries and ends on at its next wait: past its own wait a
+            // send goes on reading the caller's buffer, which the caller takes back once this returns.
+            await send.WaitAsync(stallTimeout - silence)
                 .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-
-            if (!send.IsCompleted) cancellationToken.ThrowIfCancellationRequested();
         }
 
         await AwaitOrTranslateAsync(send, cancellationToken);
