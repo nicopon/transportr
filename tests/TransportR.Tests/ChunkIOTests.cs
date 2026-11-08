@@ -246,6 +246,56 @@ public class ChunkIOTests
     }
 
     [Fact]
+    public void ReadFromStreamAsync_AllocatesNoBufferForTheHeader()
+    {
+        // Arrange: headers back to back in a memory stream, which completes every read at once, so a
+        // read never leaves this thread and the counter below sees all it allocates.
+        const int reads = 1_000;
+        var header = new byte[ChunkHeader.Size];
+        ChunkHeader.CreateControl(Guid.NewGuid(), 0, ChunkType.Ping).WriteTo(header);
+        var stream = new MemoryStream();
+        for (var i = 0; i < reads; i++) stream.Write(header);
+
+        // A first pass leaves nothing to set up in the second: the code is compiled, the stream holds
+        // the task it hands back for a read of a header's length, the pool has an array on this thread.
+        ReadHeaders(stream, reads);
+
+        // Act
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        ReadHeaders(stream, reads);
+        var perRead = (GC.GetAllocatedBytesForCurrentThread() - before) / reads;
+
+        // Assert
+        Assert.InRange(perRead, 0, MaxBytesPerHeaderRead);
+    }
+
+    /// <summary>
+    /// What a read of a header may allocate: its task, and in a Debug build its state machine, which
+    /// the compiler makes a class there. Halfway between that and the same plus an array of a
+    /// header's size, so that one such array per read goes over it.
+    /// </summary>
+#if DEBUG
+    private const long MaxBytesPerHeaderRead = 244;
+#else
+    private const long MaxBytesPerHeaderRead = 132;
+#endif
+
+    /// <summary>
+    /// Reads <paramref name="count"/> headers from the start of <paramref name="stream"/>, allocating
+    /// nothing besides what each read does.
+    /// </summary>
+    private static void ReadHeaders(MemoryStream stream, int count)
+    {
+        stream.Position = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var read = ChunkHeader.ReadFromStreamAsync(stream);
+            Assert.True(read.IsCompletedSuccessfully);
+            Assert.True(read.Result.HasValue);
+        }
+    }
+
+    [Fact]
     public void ChunkType_HasExpectedValues()
     {
         // Verify chunk type values match protocol specification

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 
 namespace TransportR.Protocol;
@@ -72,31 +73,39 @@ public readonly struct ChunkHeader
     /// <returns>Parsed header, or null if stream ended.</returns>
     public static async Task<ChunkHeader?> ReadFromStreamAsync(Stream stream, CancellationToken ct = default)
     {
-        byte[] buffer = new byte[Size];
-        int totalRead = 0;
-        
-        while (totalRead < Size)
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(Size);
+
+        try
         {
-            int read = await stream.ReadAsync(buffer, totalRead, Size - totalRead, ct).ConfigureAwait(false);
-            if (read == 0)
+            int totalRead = 0;
+
+            while (totalRead < Size)
             {
-                // EOF before reading any data = normal end
-                if (totalRead == 0) return null;
-                // EOF mid-header = error
-                throw new EndOfStreamException($"Unexpected end of stream while reading chunk header (read {totalRead}/{Size} bytes)");
+                int read = await stream.ReadAsync(buffer, totalRead, Size - totalRead, ct).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    // EOF before reading any data = normal end
+                    if (totalRead == 0) return null;
+                    // EOF mid-header = error
+                    throw new EndOfStreamException($"Unexpected end of stream while reading chunk header (read {totalRead}/{Size} bytes)");
+                }
+                totalRead += read;
             }
-            totalRead += read;
+
+            var header = ReadFrom(buffer.AsSpan(0, Size));
+
+            // Version validation
+            if (header.Version != CurrentVersion)
+            {
+                throw new WireProtocolViolationException($"Unsupported protocol version: {header.Version} (expected {CurrentVersion})");
+            }
+
+            return header;
         }
-        
-        var header = ReadFrom(buffer);
-        
-        // Version validation
-        if (header.Version != CurrentVersion)
+        finally
         {
-            throw new WireProtocolViolationException($"Unsupported protocol version: {header.Version} (expected {CurrentVersion})");
+            ArrayPool<byte>.Shared.Return(buffer);
         }
-        
-        return header;
     }
 
     /// <summary>
