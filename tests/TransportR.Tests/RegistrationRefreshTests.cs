@@ -332,6 +332,28 @@ public class RegistrationRefreshTests
     }
 
     [Fact]
+    public async Task Refresh_WhoseTokenPushIsUnderWay_EndsCancelled_WhenTheClientIsDisposed()
+    {
+        // The push waits on the hub, and the client's disposal is what has to end that wait: the
+        // HttpClient it goes over is disposed after it, and would end it as a timeout.
+        await using var node = await Node.StartAsync(["alpha"], outlive: false);
+        node.Store.RenewDelay = TimeSpan.FromSeconds(3);
+        var renewals = node.Store.Writes.Count(w => w.Kind == "Renewal");
+
+        var refresh = node.Client.RefreshRegistrationAsync();
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (node.Store.Writes.Count(w => w.Kind == "Renewal") == renewals)
+        {
+            Assert.True(DateTime.UtcNow < deadline, "the refresh never pushed its token");
+            await Task.Delay(5);
+        }
+
+        await node.Client.DisposeAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresh.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
     public async Task Refresh_WithoutATokenProvider_RegistersTheClientAgain()
     {
         // Dev mode, or a static token: nothing to renew, and a hub that forgot the client is told again.
