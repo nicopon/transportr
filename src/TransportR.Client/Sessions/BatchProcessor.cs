@@ -311,8 +311,17 @@ internal class BatchProcessor : IAsyncDisposable
         Interlocked.Add(ref _itemsSent, count);
         
         UpdateMaxBatchIdSent(batchId);
-        
-        await _sendChannel.Writer.WriteAsync(new BatchControlMessage(batchId, entry), ct);
+
+        try
+        {
+            await _sendChannel.Writer.WriteAsync(new BatchControlMessage(batchId, entry), ct);
+        }
+        catch
+        {
+            // A message the channel refused reaches no write loop, the one that gives its reference back.
+            entry.Release();
+            throw;
+        }
     }
     
     private async Task HandleBatchChunkAsync(ChunkData chunk, CancellationToken ct)

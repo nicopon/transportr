@@ -539,6 +539,25 @@ public class BatchProcessorByteStreamTests
         await processor.SendAsync(Sequence(1), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task ABatchThatFailsOnceRegistered_HasItsStreamDisposedOnce_WithItsAck()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        await using var processor = await StartSenderAsync(budget: 4, window: 1);
+        var failed = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);
+        processor.OnSerializationFailed += ex => failed.TrySetResult(ex);
+
+        // The queue to the write loop is closed: the batch is registered, then cannot be queued.
+        processor.CompleteSenderChannel();
+        await processor.SendAsync(Sequence(4), CancellationToken.None);
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await AckAsync(processor, 0);
+
+        Assert.Equal(1, streams.Disposed);
+        Assert.Equal(0, streams.DisposedTwice);
+    }
+
     public enum FailedBy { Fail, ReceivedAbort }
 
     private async Task EndTheTransferAsync(TestBatchProcessor<byte[]> processor, FailedBy how)
