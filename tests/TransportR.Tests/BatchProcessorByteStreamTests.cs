@@ -300,6 +300,21 @@ public class BatchProcessorByteStreamTests
         return await ReadWireAsync(wire);
     }
 
+    /// <summary>
+    /// Writes the next <paramref name="count"/> batches the processor queued and then gives back the
+    /// reference each message held, as the write loop does.
+    /// </summary>
+    private async Task WriteAsTheWriteLoopAsync(TestBatchProcessor<byte[]> processor, int count)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        for (var i = 0; i < count; i++)
+        {
+            var message = Assert.IsType<BatchControlMessage>(await processor.OutgoingMessages.ReadAsync(deadline.Token));
+            Assert.True(await processor.WriteBatchAsync(Stream.Null, _transferId, message.BatchId, message.Entry, deadline.Token));
+            message.Entry.Release();
+        }
+    }
+
     private static async Task<List<(ChunkHeader Header, byte[] Body)>> ReadWireAsync(MemoryStream wire)
     {
         wire.Position = 0;
@@ -406,6 +421,29 @@ public class BatchProcessorByteStreamTests
     }
 
     [Fact]
+    public async Task AWrittenBatch_KeepsItsStreamThroughAResend_AndHasItDisposedOnceWithItsAck_ImplicitOrNot()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        await using var processor = await StartSenderAsync(budget: 4);
+        await processor.SendAsync(Sequence(10), CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+        await WriteAsTheWriteLoopAsync(processor, 3);
+        Assert.Equal(0, streams.Disposed);
+
+        // The receiver says it has batch 0: acknowledged without being resent, unlike 1 and 2.
+        using var reopened = new MemoryStream();
+        await processor.ResendUnackedBatchesAsync(reopened, _transferId, didPingPong: true, nextExpectedFromPong: 1, CancellationToken.None);
+        Assert.Equal(1, streams.Disposed);
+        Assert.Equal([1, 2], (await ReadWireAsync(reopened)).Select(c => c.Header.BatchId));
+
+        await AckAsync(processor, 1);
+        await AckAsync(processor, 2);
+
+        Assert.Equal(3, streams.Disposed);
+        Assert.Equal(0, streams.DisposedTwice);
+    }
+
+    [Fact]
     public async Task SendAsync_WhenTheWindowIsFull_ParksTheProducerBeforeRentingABatch_UntilAnAck()
     {
         var streams = new StreamCounts(_context.StreamManager);
@@ -434,13 +472,14 @@ public class BatchProcessorByteStreamTests
 
         await processor.SendAsync(Sequence(4), CancellationToken.None);
         await WaitUntil(() => processor.UnackedCount == 1);
-        Assert.Equal(1, streams.Disposed);
+        await WriteAsTheWriteLoopAsync(processor, 1);
 
         var parked = processor.SendAsync(Sequence(1), CancellationToken.None);
         Assert.NotSame(parked, await Task.WhenAny(parked, Task.Delay(200)));
         await AckAsync(processor, 0);
         await parked.WaitAsync(TimeSpan.FromSeconds(5));
 
+        Assert.Equal(1, streams.Disposed);
         Assert.Equal(0, streams.DisposedTwice);
         Assert.Empty(logs.MessagesFrom(LogLevel.Error));
     }

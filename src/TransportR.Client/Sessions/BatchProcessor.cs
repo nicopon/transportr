@@ -1,8 +1,8 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using Microsoft.IO;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
@@ -245,19 +245,28 @@ internal class BatchProcessor : IAsyncDisposable
 
     private async Task SendBatchAsync(OutgoingBatch batch, CancellationToken ct)
     {
-        // The batch came with its slot. From the moment it lands in _unackedBatches, the ack path
-        // owns giving it back; before that, this method does.
+        // The batch came with its slot and its body. The slot is the ack path's to give back from the
+        // moment the batch lands in _unackedBatches, the body its entry's to dispose from the moment
+        // one holds it; short of either, this method gives back what it still has.
+        BatchEntry? entry = null;
         var registered = false;
         try
         {
-            using (batch.Body)
-            {
-                await RegisterBatchAsync(batch.Body, batch.BatchId, batch.Count, () => registered = true, ct);
-            }
+            // A chunk gives the length of its payload as an int.
+            if (batch.Body.Length > int.MaxValue)
+                throw new InvalidOperationException("The batch is larger than a chunk can carry.");
+
+            entry = new BatchEntry(batch.Body, batch.Body.GetReadOnlySequence());
+            await RegisterBatchAsync(entry, batch.BatchId, batch.Count, () => registered = true, ct);
         }
         catch
         {
-            if (!registered) ReleaseInFlightSlot();
+            if (!registered)
+            {
+                if (entry is null) batch.Body.Dispose();
+                else entry.Release();
+                ReleaseInFlightSlot();
+            }
             throw;
         }
     }
@@ -282,27 +291,20 @@ internal class BatchProcessor : IAsyncDisposable
     }
 
     /// <summary>
-    /// Copies a batch - its 4-byte count, then its body - out of <paramref name="memoryStream"/> into a
-    /// <see cref="BatchEntry"/>, registers it as unacknowledged and queues it for the write loop. The
-    /// stream stays the caller's to dispose. <paramref name="onRegistered"/> runs once the entry is in
-    /// <see cref="_unackedBatches"/>: from then on, the ack path owns the batch's slot.
+    /// Registers a batch - its 4-byte count, then its body, held by <paramref name="entry"/> - as
+    /// unacknowledged and queues it for the write loop. <paramref name="onRegistered"/> runs once the
+    /// entry is in <see cref="_unackedBatches"/>: from then on, the ack path owns the batch's slot and
+    /// the entry's first reference.
     /// </summary>
     private async Task RegisterBatchAsync(
-        RecyclableMemoryStream memoryStream, int batchId, int count, Action onRegistered, CancellationToken ct)
+        BatchEntry entry, int batchId, int count, Action onRegistered, CancellationToken ct)
     {
-        var totalLen = (int)memoryStream.Length;
-        var owner = new PooledMemoryOwner(memoryStream.GetBuffer().AsMemory(0, totalLen));
-        
-        // Wrap in BatchEntry
-        var entry = new BatchEntry(owner);
-        
         // 1 reference for _unackedBatches (initial ref = 1)
         _unackedBatches[batchId] = entry;
         onRegistered();
 
         // 1 reference for BatchControlMessage. TryRetain increments the entry's ref count and
-        // hands back the payload; the message carries the entry itself, so the return is unused.
-        // Cannot be null here - the entry was created on the line above.
+        // hands back the body; the message carries the entry itself, so the return is unused.
         entry.TryRetain();
 
         Interlocked.Increment(ref _pendingBatches);
@@ -554,15 +556,12 @@ internal class BatchProcessor : IAsyncDisposable
     /// </summary>
     public async Task<bool> WriteBatchAsync(Stream outputStream, Guid transferGuid, int batchId, BatchEntry entry, CancellationToken token)
     {
-        var payload = entry.TryRetain();
-        if (payload == null) return false;
+        if (entry.TryRetain() is not { } body) return false;
 
         try
         {
-            var memory = payload.Memory;
-            var count = BinaryPrimitives.ReadInt32LittleEndian(memory.Span[..4]);
-            await ChunkIO.WriteBatchAsync(outputStream, transferGuid, _batchType, batchId, count, memory[4..], token);
-            Interlocked.Add(ref _payloadBytes, memory.Length);
+            await ChunkIO.WriteBatchAsync(outputStream, transferGuid, _batchType, batchId, ReadCount(body), body.Slice(sizeof(int)), token);
+            Interlocked.Add(ref _payloadBytes, body.Length);
             return true;
         }
         finally
@@ -570,7 +569,13 @@ internal class BatchProcessor : IAsyncDisposable
             entry.Release();
         }
     }
-    
+
+    private static int ReadCount(ReadOnlySequence<byte> body)
+    {
+        Span<byte> count = stackalloc byte[sizeof(int)];
+        body.Slice(0, sizeof(int)).CopyTo(count);
+        return BinaryPrimitives.ReadInt32LittleEndian(count);
+    }
 
 
     public ValueTask DisposeAsync()
@@ -592,7 +597,14 @@ internal class BatchProcessor : IAsyncDisposable
         _sink?.Complete();
         _sink?.DiscardUnread();
         _receiverState?.DiscardReordered();
-        
+
+        // A queued batch holds a reference of its own, which only the write loop gives back once it
+        // has read the message. The channel hands each message out once, to that loop or here.
+        while (_sendChannel.Reader.TryRead(out var queued))
+        {
+            if (queued is BatchControlMessage batch) batch.Entry.Release();
+        }
+
         foreach(var kvp in _unackedBatches)
         {
             // Force release/dispose

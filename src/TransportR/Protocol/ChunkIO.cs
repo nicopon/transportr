@@ -47,6 +47,39 @@ public static class ChunkIO
     }
 
     /// <summary>
+    /// Writes a batch chunk of the given type whose payload is a sequence, the bytes on the wire being
+    /// those of the overload that takes the payload in one block.
+    /// </summary>
+    internal static async Task WriteBatchAsync(
+        Stream stream,
+        Guid transferId,
+        ChunkType type,
+        int batchId,
+        int count,
+        ReadOnlySequence<byte> payload,
+        CancellationToken ct = default)
+    {
+        if (type is not (ChunkType.Batch or ChunkType.StreamBatch))
+            throw new ArgumentOutOfRangeException(nameof(type), type, "Not a batch chunk type.");
+
+        var payloadLength = checked((int)payload.Length);
+        var header = ChunkHeader.CreateBatch(transferId, batchId, count, payloadLength) with { Type = type };
+
+        int totalSize = ChunkHeader.Size + payloadLength;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(totalSize);
+        try
+        {
+            header.WriteTo(buffer.AsSpan());
+            payload.CopyTo(buffer.AsSpan(ChunkHeader.Size));
+            await stream.WriteAsync(buffer.AsMemory(0, totalSize), ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
     /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.
     /// </summary>
     public static async Task WriteControlAsync(

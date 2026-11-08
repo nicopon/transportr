@@ -1,3 +1,4 @@
+using System.Buffers;
 using TransportR.Protocol;
 
 namespace POC_DataProxy.Tests;
@@ -306,5 +307,39 @@ public class ChunkIOTests
             () => ChunkIO.WriteBatchAsync(ms, Guid.NewGuid(), type, batchId: 0, count: 1, new byte[] { 1 }));
 
         Assert.Equal(0, ms.Length);
+    }
+
+    [Fact]
+    public async Task WriteBatchAsync_APayloadInSegments_PutsTheSameBytesOnTheWireAsInOneBlock()
+    {
+        var transferId = Guid.NewGuid();
+        byte[] payload = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        var first = new Segment(payload[..3]);
+        var last = first.Append(payload[3..4]).Append(payload[4..]);
+        var segmented = new ReadOnlySequence<byte>(first, 0, last, last.Memory.Length);
+        Assert.False(segmented.IsSingleSegment);
+
+        using var inOneBlock = new MemoryStream();
+        await ChunkIO.WriteBatchAsync(inOneBlock, transferId, ChunkType.StreamBatch, batchId: 7, count: payload.Length, payload);
+        using var inSegments = new MemoryStream();
+        await ChunkIO.WriteBatchAsync(inSegments, transferId, ChunkType.StreamBatch, batchId: 7, count: payload.Length, segmented);
+
+        Assert.Equal(inOneBlock.ToArray(), inSegments.ToArray());
+    }
+
+    private sealed class Segment : ReadOnlySequenceSegment<byte>
+    {
+        public Segment(ReadOnlyMemory<byte> memory, long runningIndex = 0)
+        {
+            Memory = memory;
+            RunningIndex = runningIndex;
+        }
+
+        public Segment Append(ReadOnlyMemory<byte> memory)
+        {
+            var next = new Segment(memory, RunningIndex + Memory.Length);
+            Next = next;
+            return next;
+        }
     }
 }

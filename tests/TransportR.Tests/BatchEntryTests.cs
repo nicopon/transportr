@@ -23,7 +23,7 @@ public class BatchEntryTests
     public void Release_DisposesThePayloadOnce()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner);
+        var entry = new BatchEntry(owner, ReadOnlySequence<byte>.Empty);
 
         entry.Release();
 
@@ -34,7 +34,7 @@ public class BatchEntryTests
     public void Release_PastZero_DoesNotDisposeAgain()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner);
+        var entry = new BatchEntry(owner, ReadOnlySequence<byte>.Empty);
 
         entry.Release();
         entry.Release();
@@ -47,7 +47,7 @@ public class BatchEntryTests
     public void TryRetain_AfterRelease_ReturnsNull()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner);
+        var entry = new BatchEntry(owner, ReadOnlySequence<byte>.Empty);
 
         entry.Release();
 
@@ -59,7 +59,7 @@ public class BatchEntryTests
     public void Retain_ThenRelease_KeepsThePayloadUntilTheLastReference()
     {
         var owner = new CountingOwner();
-        var entry = new BatchEntry(owner);
+        var entry = new BatchEntry(owner, ReadOnlySequence<byte>.Empty);
 
         Assert.NotNull(entry.TryRetain());
         entry.Release();
@@ -83,7 +83,7 @@ public class BatchEntryTests
         for (var i = 0; i < 2_000; i++)
         {
             var owner = new CountingOwner();
-            var entry = new BatchEntry(owner);
+            var entry = new BatchEntry(owner, ReadOnlySequence<byte>.Empty);
 
             using var barrier = new Barrier(2);
             var releases = new[]
