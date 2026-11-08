@@ -1,5 +1,6 @@
 using System.Buffers;
 using TransportR.Client.Internal;
+using TransportR.Protocol;
 
 namespace TransportR.Tests;
 
@@ -99,9 +100,9 @@ public class BatchEntryTests
     }
 
     [Fact]
-    public void PooledMemoryOwner_DisposedTwice_StaysConsistent()
+    public void PooledPayload_DisposedTwice_StaysConsistent()
     {
-        var pooled = new PooledMemoryOwner(new byte[] { 1, 2, 3 });
+        var pooled = new PooledPayload(3);
 
         pooled.Dispose();
         pooled.Dispose();

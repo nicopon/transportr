@@ -1,7 +1,6 @@
 using System.Buffers;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
-using TransportR.Client.Internal;
 using TransportR.Protocol;
 using System.Runtime.InteropServices;
 
@@ -22,7 +21,7 @@ public class ReceiverStateOwnershipTests
     {
         // The counting owners of the other tests say how often a chunk is disposed; this one says that
         // the dispose reaches the pool. The pool hands this thread back the last array it returned.
-        var owner = new PooledMemoryOwner(new byte[5000]);
+        var owner = new PooledPayload(5000);
         Assert.True(MemoryMarshal.TryGetArray<byte>(owner.Memory, out var segment));
         var rented = segment.Array!;
 
