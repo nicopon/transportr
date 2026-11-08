@@ -19,12 +19,10 @@ public class ReceivedChunkOwnershipTests
     private readonly Guid _transferId = Guid.NewGuid();
     private readonly StubSessionContext _context = new();
 
-    private TestBatchProcessor<byte[]> ByteProcessor()
-    {
-        _context.Options.ByteStreamBatchBytes = 1024;
-        var (send, receive) = SessionPorts.Create<byte[]>(_context.Options, serializer: null, _context.StreamManager, batchSize: 1024);
-        return new TestBatchProcessor<byte[]>(_context, _transferId.ToString(), send, receive);
-    }
+    private TestByteBatchProcessor ByteProcessor() =>
+        new(_context, _transferId.ToString(),
+            new ByteBatchSource(1024, _context.Options.BatchFlushIntervalMs, _context.StreamManager),
+            new ByteReceivePort(_context.Options.ReceiveBufferCapacity));
 
     private TestBatchProcessor<string> ItemProcessor()
     {

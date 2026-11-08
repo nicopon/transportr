@@ -21,10 +21,10 @@ public class BatchProcessorByteStreamTests
     private readonly ByteStreamSessionContext _context = new();
     private readonly Guid _transferId = Guid.NewGuid();
 
-    private TestBatchProcessor<byte[]> CreateProcessor()
+    private TestByteBatchProcessor CreateProcessor()
     {
-        _context.Options.ByteStreamBatchBytes = 1024;
-        return _context.NewProcessor(_transferId.ToString(), batchSize: 1024);
+        _context.BatchBytes = 1024;
+        return _context.NewProcessor(_transferId.ToString());
     }
 
     private ChunkData CreateChunk(int batchId, byte[] payload, ChunkType type = ChunkType.StreamBatch)
@@ -252,16 +252,17 @@ public class BatchProcessorByteStreamTests
         // The options carry no byte-stream size, so this is the item mode with nothing to encode it.
         var context = new ByteStreamSessionContext();
 
-        Assert.Throws<InvalidOperationException>(() => context.NewProcessor(_transferId.ToString(), 10));
+        Assert.Throws<InvalidOperationException>(
+            () => SessionPorts.Create<byte[]>(context.Options, serializer: null, context.StreamManager, 10));
     }
 
     // ---- Sending ----
 
-    private async Task<TestBatchProcessor<byte[]>> StartSenderAsync(int budget = 4, int? window = null)
+    private async Task<TestByteBatchProcessor> StartSenderAsync(int budget = 4, int? window = null)
     {
-        _context.Options.ByteStreamBatchBytes = budget;
+        _context.BatchBytes = budget;
         _context.Options.MaxInFlightBatches = window;
-        var processor = _context.NewProcessor(_transferId.ToString(), batchSize: 1024);
+        var processor = _context.NewProcessor(_transferId.ToString());
         await processor.StartSenderAsync(CancellationToken.None);
         return processor;
     }
@@ -273,7 +274,7 @@ public class BatchProcessorByteStreamTests
     /// Writes the next <paramref name="count"/> batches the processor queued, as the write loop does,
     /// and reads them back off that wire.
     /// </summary>
-    private async Task<List<(ChunkHeader Header, byte[] Body)>> WriteQueuedAsync(TestBatchProcessor<byte[]> processor, int count)
+    private async Task<List<(ChunkHeader Header, byte[] Body)>> WriteQueuedAsync(TestByteBatchProcessor processor, int count)
     {
         using var wire = new MemoryStream();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -289,7 +290,7 @@ public class BatchProcessorByteStreamTests
     /// Writes the next <paramref name="count"/> batches the processor queued and then gives back the
     /// reference each message held, as the write loop does.
     /// </summary>
-    private async Task WriteAsTheWriteLoopAsync(TestBatchProcessor<byte[]> processor, int count)
+    private async Task WriteAsTheWriteLoopAsync(TestByteBatchProcessor processor, int count)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         for (var i = 0; i < count; i++)
@@ -321,7 +322,7 @@ public class BatchProcessorByteStreamTests
         }
     }
 
-    private Task AckAsync(TestBatchProcessor<byte[]> processor, int batchId) =>
+    private Task AckAsync(TestByteBatchProcessor processor, int batchId) =>
         processor.ProcessChunkAsync(new ChunkData(ChunkHeader.CreateControl(_transferId, batchId, ChunkType.BatchAck), null, 0));
 
     [Fact]
@@ -545,7 +546,7 @@ public class BatchProcessorByteStreamTests
 
     public enum FailedBy { Fail, ReceivedAbort }
 
-    private async Task EndTheTransferAsync(TestBatchProcessor<byte[]> processor, FailedBy how)
+    private async Task EndTheTransferAsync(TestByteBatchProcessor processor, FailedBy how)
     {
         if (how == FailedBy.Fail)
         {
@@ -646,11 +647,12 @@ public class BatchProcessorByteStreamTests
         public RecyclableMemoryStreamManager StreamManager { get; } = new();
         public ClientOptions Options { get; } = new() { BatchFlushIntervalMs = 50 };
 
-        public TestBatchProcessor<byte[]> NewProcessor(string transferId, int batchSize)
-        {
-            var (send, receive) = SessionPorts.Create<byte[]>(Options, serializer: null, StreamManager, batchSize);
-            return new TestBatchProcessor<byte[]>(this, transferId, send, receive);
-        }
+        public int BatchBytes { get; set; } = 1024;
+
+        public TestByteBatchProcessor NewProcessor(string transferId) =>
+            new(this, transferId,
+                new ByteBatchSource(BatchBytes, Options.BatchFlushIntervalMs, StreamManager),
+                new ByteReceivePort(Options.ReceiveBufferCapacity));
         public void RemoveSession(string transferId) { }
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
         public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;

@@ -11,11 +11,11 @@ using TransportR.Models;
 namespace TransportR.Tests;
 
 /// <summary>
-/// <c>CopyFromAsync</c> and <c>CopyToAsync</c> over a stand-in session, which says which path each took
-/// and lets the tests count what is returned to the pool. The same calls over a real hub are in
-/// <see cref="ByteStreamTransferTests"/>.
+/// <c>CopyFromAsync</c> and <c>CopyToAsync</c> of the handles of a stream of bytes over a stand-in
+/// session, which lets the tests count what is returned to the pool. The same calls over a real hub are
+/// in <see cref="ByteStreamTransferTests"/>.
 /// </summary>
-public class ByteStreamExtensionsTests
+public class ByteSendReceiveTests
 {
     private const int ReadSize = 81920;
 
@@ -27,7 +27,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_OnAByteStreamHandle_AppendsBytesAndSendsNoItem()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session, session);
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
         var source = Sequence(200_000);
 
         await send.CopyFromAsync(new MemoryStream(source));
@@ -41,7 +41,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_NeitherCompletesNorDisposesTheHandle()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session, session);
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
 
         await send.CopyFromAsync(new MemoryStream(Sequence(1000)));
 
@@ -53,7 +53,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_OnAnEmptySource_SendsNothing()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session, session);
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
 
         await send.CopyFromAsync(new MemoryStream());
 
@@ -93,7 +93,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_WhenTheSourceThrows_ReportsItUnwrapped_AndTheHandleCanStillBeReleased()
     {
         var session = new FakeSession { IsByteStream = true };
-        var send = new HttpSend<byte[]>(session, session);
+        var send = new HttpByteSend(session, session.SendBytesAsync);
 
         var thrown = await Assert.ThrowsAsync<IOException>(() => send.CopyFromAsync(new ThrowingStream(Sequence(100))));
 
@@ -108,7 +108,7 @@ public class ByteStreamExtensionsTests
     {
         // A cancelled caller is let go before the producer it was waiting on: the buffer may still be read.
         var session = new FakeSession { IsByteStream = true, AppendFailure = new IOException("The append failed.") };
-        await using var send = new HttpSend<byte[]>(session, session);
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
 
         await Assert.ThrowsAsync<IOException>(() => send.CopyFromAsync(new MemoryStream(Sequence(10))));
 
@@ -127,7 +127,7 @@ public class ByteStreamExtensionsTests
     public async Task CopyFromAsync_WhenCancelled_Throws_AndAppendsNothingMore()
     {
         var session = new FakeSession { IsByteStream = true };
-        await using var send = new HttpSend<byte[]>(session, session);
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
 
@@ -145,7 +145,7 @@ public class ByteStreamExtensionsTests
         var seeded = ArrayPool<byte>.Shared.Rent(ReadSize);
         ArrayPool<byte>.Shared.Return(seeded);
         var session = new FakeSession { IsByteStream = true };
-        var send = new HttpSend<byte[]>(session, session);
+        var send = new HttpByteSend(session, session.SendBytesAsync);
 
         var copy = send.CopyFromAsync(new MemoryStream(Sequence(1000)));
 
@@ -161,7 +161,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]), new CountingOwner([6]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session, session);
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
         var destination = new MemoryStream();
 
         await receive.CopyToAsync(destination);
@@ -177,7 +177,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session, session);
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
 
         var thrown = await Assert.ThrowsAsync<IOException>(() => receive.CopyToAsync(new ThrowingDestination()));
 
@@ -192,7 +192,7 @@ public class ByteStreamExtensionsTests
     {
         var owners = new[] { new CountingOwner([1, 2, 3]), new CountingOwner([4, 5]) };
         var session = new FakeSession { IsByteStream = true, Chunks = owners };
-        await using var receive = new HttpReceive<byte[]>(session, session);
+        await using var receive = new HttpByteReceive(session, session.ReceiveChunksAsync);
         using var cts = new CancellationTokenSource();
         var destination = new WaitingDestination();
 

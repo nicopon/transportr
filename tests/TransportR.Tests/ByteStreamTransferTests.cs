@@ -24,42 +24,88 @@ public class ByteStreamTransferTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(20);
 
-    private static TransportRClient<byte[]> CreateClient(
-        HttpMessageHandler handler, int? byteStreamBytes, IBatchSerializer<byte[]>? serializer = null,
-        Action<ClientOptions>? configure = null)
+    private static (ControlChannel Channel, HttpClient Http, ClientOptions Options, ILogger Logger) Parts(
+        HttpMessageHandler handler, Action<ClientOptions>? configure)
     {
         const string url = "http://localhost";
         var options = new ClientOptions
         {
             // A TestServer handler cannot carry a WebSocket.
             WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly,
-            MaxInFlightBatches = 4,
-            ByteStreamBatchBytes = byteStreamBytes
+            MaxInFlightBatches = 4
         };
         configure?.Invoke(options);
         ILogger logger = NullLogger.Instance;
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
         var channel = new ControlChannel(url, Guid.NewGuid(), httpClient, options, logger);
+        return (channel, httpClient, options, logger);
+    }
 
-        return new TransportRClient<byte[]>(
+    private static ByteStreamClient CreateByteClient(
+        HttpMessageHandler handler, int batchBytes, Action<ClientOptions>? configure = null)
+    {
+        var (channel, httpClient, options, logger) = Parts(handler, configure);
+
+        return new ByteStreamClient(
             channel,
-            new SessionRegistry<TransferSession<byte[]>>(logger),
-            serializer,
+            new SessionRegistry<ByteTransferSession>(logger),
             logger,
-            defaultBatchSize: 100,
+            batchBytes,
             options,
-            url + WireRoutes.StreamBase,
+            "http://localhost" + WireRoutes.StreamBase,
             httpClient,
             new Microsoft.IO.RecyclableMemoryStreamManager());
     }
 
-    private static IBatchSerializer<byte[]> Serializer() => new MessagePackBatchSerializer<byte[]>();
+    private static TransportRClient<byte[]> CreateItemClient(HttpMessageHandler handler)
+    {
+        var (channel, httpClient, options, logger) = Parts(handler, configure: null);
 
-    /// <summary>Opens a transfer between two clients and hands back both handles.</summary>
-    private static async Task<(Send<byte[]> Send, Receive<byte[]> Receive)> OpenAsync(
-        TransportRClient<byte[]> sender, TransportRClient<byte[]> receiver, int? senderBatchSize = null)
+        return new TransportRClient<byte[]>(
+            channel,
+            new SessionRegistry<TransferSession<byte[]>>(logger),
+            new MessagePackBatchSerializer<byte[]>(),
+            logger,
+            defaultBatchSize: 100,
+            options,
+            "http://localhost" + WireRoutes.StreamBase,
+            httpClient,
+            new Microsoft.IO.RecyclableMemoryStreamManager());
+    }
+
+    /// <summary>Opens a transfer between two byte-stream clients and hands back both handles.</summary>
+    private static async Task<(ByteSend Send, ByteReceive Receive)> OpenAsync(ByteStreamClient sender, ByteStreamClient receiver)
+    {
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId);
+        var receive = await receiveHandle.Task.WaitAsync(Bound);
+        return (send, receive);
+    }
+
+    /// <summary>Opens a transfer from a byte-stream client to a client of items and hands back both handles.</summary>
+    private static async Task<(ByteSend Send, Receive<byte[]> Receive)> OpenAsync(ByteStreamClient sender, TransportRClient<byte[]> receiver)
     {
         var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId);
+        var receive = await receiveHandle.Task.WaitAsync(Bound);
+        return (send, receive);
+    }
+
+    /// <summary>Opens a transfer from a client of items to a byte-stream client and hands back both handles.</summary>
+    private static async Task<(Send<byte[]> Send, ByteReceive Receive)> OpenAsync(
+        TransportRClient<byte[]> sender, ByteStreamClient receiver, int senderBatchSize)
+    {
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
 
         await sender.ConnectAsync();
@@ -108,8 +154,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: 1000);
-        await using var receiver = CreateClient(handler, byteStreamBytes: 1000);
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
         await using var __ = receive;
@@ -138,8 +184,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: 1000);
-        await using var receiver = CreateClient(handler, byteStreamBytes: 1000);
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
         await using var __ = receive;
@@ -161,8 +207,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: 1000);
-        await using var receiver = CreateClient(handler, byteStreamBytes: null, Serializer());
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateItemClient(handler);
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
         await using var __ = receive;
@@ -189,8 +235,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: null, Serializer());
-        await using var receiver = CreateClient(handler, byteStreamBytes: 1000);
+        await using var sender = CreateItemClient(handler);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
         var (send, receive) = await OpenAsync(sender, receiver, senderBatchSize: 5);
         await using var _ = send;
         await using var __ = receive;
@@ -213,13 +259,13 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: 1000, configure: o =>
+        await using var sender = CreateByteClient(handler, batchBytes: 1000, configure: o =>
         {
             o.MaxInFlightBatches = 1;
             o.CompleteStallTimeout = TimeSpan.FromSeconds(2);
         });
         // A receiver nobody reads from: its buffer fills, its read loop parks, and it acknowledges no more.
-        await using var receiver = CreateClient(handler, byteStreamBytes: 1000, configure: o =>
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000, configure: o =>
             o.ReceiveBufferCapacity = BufferCapacity.Bytes(1));
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
@@ -234,11 +280,11 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
-        await using var sender = CreateClient(handler, byteStreamBytes: 1000);
-        await using var receiver = CreateClient(handler, byteStreamBytes: 1000);
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
 
-        var sendHandle = new TaskCompletionSource<Send<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
         sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
         await sender.ConnectAsync();
@@ -271,8 +317,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var gate = new SendGate(host.GetTestServer().CreateHandler());
-        await using var sender = CreateClient(host.GetTestServer().CreateHandler(), byteStreamBytes: 1000);
-        await using var receiver = CreateClient(gate, byteStreamBytes: 1000);
+        await using var sender = CreateByteClient(host.GetTestServer().CreateHandler(), batchBytes: 1000);
+        await using var receiver = CreateByteClient(gate, batchBytes: 1000);
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
         await using var __ = receive;
@@ -303,8 +349,8 @@ public class ByteStreamTransferTests
     {
         using var host = TestHubServerFactory.CreateHost();
         var gate = new SendGate(host.GetTestServer().CreateHandler());
-        await using var sender = CreateClient(host.GetTestServer().CreateHandler(), byteStreamBytes: 1000);
-        await using var receiver = CreateClient(gate, byteStreamBytes: 1000);
+        await using var sender = CreateByteClient(host.GetTestServer().CreateHandler(), batchBytes: 1000);
+        await using var receiver = CreateByteClient(gate, batchBytes: 1000);
         var (send, receive) = await OpenAsync(sender, receiver);
         await using var _ = send;
         await using var __ = receive;
@@ -319,7 +365,7 @@ public class ByteStreamTransferTests
         // not part of the transfer, and its caller is told.
         gate.Close();
         var completing = send.CompleteAsync();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => send.SendAsync(new byte[] { 1 }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => send.WriteAsync(new byte[] { 1 }));
         await Assert.ThrowsAsync<InvalidOperationException>(() => send.CopyFromAsync(new MemoryStream(new byte[10])));
 
         gate.Open();
