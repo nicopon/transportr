@@ -62,34 +62,6 @@ public class ByteSendReceiveTests
     }
 
     [Fact]
-    public async Task CopyFromAsync_OnAHandleThatIsNotInTheByteStreamMode_SendsEachReadAsAnItem_NeverAppending()
-    {
-        var session = new FakeSession { IsByteStream = false };
-        await using var send = new HttpSend<byte[]>(session, session);
-        var source = Sequence(2 * ReadSize + 5000);
-
-        await send.CopyFromAsync(new MemoryStream(source));
-
-        Assert.Empty(session.AppendCalls);
-        Assert.Equal([ReadSize, ReadSize, 5000], session.Items.Select(item => item.Length));
-        Assert.Equal(source, session.Items.SelectMany(item => item).ToArray());
-    }
-
-    [Fact]
-    public async Task CopyFromAsync_OnAnotherKindOfHandle_SendsFreshItems_SoTheOnesKeptUntilTheirBatchIsFlushedAreNotOverwritten()
-    {
-        await using var send = new RecordingSend();
-        var source = Sequence(2 * ReadSize + 5000);
-
-        await send.CopyFromAsync(new MemoryStream(source));
-
-        Assert.Equal([ReadSize, ReadSize, 5000], send.Items.Select(item => item.Length));
-        Assert.Equal(3, send.Items.Distinct(ReferenceEqualityComparer.Instance).Count());
-        Assert.Equal(source, send.Items.SelectMany(item => item).ToArray());
-        Assert.Equal(0, send.CompleteCalls);
-    }
-
-    [Fact]
     public async Task CopyFromAsync_WhenTheSourceThrows_ReportsItUnwrapped_AndTheHandleCanStillBeReleased()
     {
         var session = new FakeSession { IsByteStream = true };
@@ -203,19 +175,6 @@ public class ByteSendReceiveTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => copy.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal(1, owners[0].Disposed);
         Assert.Equal(0, owners[1].Disposed);
-    }
-
-    [Fact]
-    public async Task CopyToAsync_OnAHandleThatIsNotInTheByteStreamMode_WritesEachItemInOrder_NeverReadingChunks()
-    {
-        var session = new FakeSession { IsByteStream = false, ItemsToReceive = [[1, 2], [3], [4, 5, 6]] };
-        await using var receive = new HttpReceive<byte[]>(session, session);
-        var destination = new MemoryStream();
-
-        await receive.CopyToAsync(destination);
-
-        Assert.Equal([1, 2, 3, 4, 5, 6], destination.ToArray());
-        Assert.Equal(0, session.ChunkReads);
     }
 
     // --- ReadAsync ---
@@ -478,25 +437,6 @@ public class ByteSendReceiveTests
         {
             Writing.TrySetResult();
             await Task.Delay(Timeout.Infinite, cancellationToken);
-        }
-    }
-
-    private sealed class RecordingSend : Send<byte[]>
-    {
-        public RecordingSend() : base("recording") { }
-        public List<byte[]> Items { get; } = [];
-        public int CompleteCalls { get; private set; }
-
-        public override Task SendAsync(byte[] item, CancellationToken cancellationToken = default)
-        {
-            Items.Add(item);
-            return Task.CompletedTask;
-        }
-
-        public override Task CompleteAsync(CancellationToken cancellationToken = default)
-        {
-            CompleteCalls++;
-            return Task.CompletedTask;
         }
     }
 

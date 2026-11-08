@@ -161,11 +161,6 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null)
     {
-        if (batchSize is not null && _options.ByteStreamBatchBytes is not null)
-        {
-            throw new ArgumentException("A batch size cannot be given in the byte-stream mode.", nameof(batchSize));
-        }
-
         int size = batchSize ?? _defaultBatchSize;
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (Size={Size})...", targetClientId, size);
 

@@ -89,8 +89,7 @@ internal sealed class ClientBuilderState
     public ILogger CreateLogger<TCategory>() => (_loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<TCategory>();
 
     /// <param name="logger">The client's own, made by <see cref="CreateLogger{TCategory}"/>.</param>
-    /// <param name="byteStreamBatchBytes">The size at which a batch of the byte-stream mode of a typed client is cut.</param>
-    public ClientWiring Assemble(ILogger logger, int? byteStreamBatchBytes = null)
+    public ClientWiring Assemble(ILogger logger)
     {
         RequireUrl();
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
@@ -99,8 +98,7 @@ internal sealed class ClientBuilderState
         {
             BatchFlushIntervalMs = _batchFlushIntervalMs,
             MaxInFlightBatches = _maxInFlightBatches,
-            WriteTransportPolicy = _writeTransportPolicy,
-            ByteStreamBatchBytes = byteStreamBatchBytes
+            WriteTransportPolicy = _writeTransportPolicy
         };
 
         options.ReceiveBufferCapacity = ReceiveCapacity;

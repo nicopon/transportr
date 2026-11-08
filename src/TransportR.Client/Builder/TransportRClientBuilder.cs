@@ -22,15 +22,7 @@ public class TransportRClientBuilder<T>
 {
     private readonly ClientBuilderState _state = new();
     private int _batchSize = 1000;
-    private bool _batchSizeSet;
     private IBatchSerializer<T>? _serializer;
-
-    /// <summary>
-    /// The size at which a batch of the byte-stream mode is cut; <c>null</c> outside that mode. Set by
-    /// <c>WithByteStream</c>, and checked against the other settings by <see cref="Build"/> so that the
-    /// order of the calls does not matter.
-    /// </summary>
-    internal int? ByteStreamBatchBytes { get; set; }
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
@@ -47,7 +39,6 @@ public class TransportRClientBuilder<T>
     public TransportRClientBuilder<T> WithBatchSize(int batchSize)
     {
         _batchSize = batchSize;
-        _batchSizeSet = true;
         return this;
     }
 
@@ -181,32 +172,14 @@ public class TransportRClientBuilder<T>
         _state.RequireUrl();
 
         var logger = _state.CreateLogger<TransportRClient<T>>();
-        if (ByteStreamBatchBytes is not null)
-        {
-            // Each of these means something only for items, and silently ignoring one would hide a
-            // setting that does not do what its caller expects.
-            if (_serializer != null)
-            {
-                throw new InvalidOperationException("A serializer cannot be combined with the byte-stream mode.");
-            }
-            if (_batchSizeSet)
-            {
-                throw new InvalidOperationException("The batch size cannot be set in the byte-stream mode.");
-            }
-            if (_state.ReceiveCapacity?.MaxItems is not null)
-            {
-                throw new InvalidOperationException("The receive capacity cannot be bounded by items in the byte-stream mode.");
-            }
-        }
-        // The serializer is mandatory outside the byte-stream mode and there is no default: picking
-        // one for the caller would pick their wire format, and the serialization packages are
-        // separate on purpose.
-        else if (_serializer == null)
+        // There is no default: picking a serializer for the caller would pick their wire format, and
+        // the serialization packages are separate on purpose.
+        if (_serializer == null)
         {
             throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
         }
 
-        var wiring = _state.Assemble(logger, ByteStreamBatchBytes);
+        var wiring = _state.Assemble(logger);
 
         return new TransportRClient<T>(
             wiring.Channel,
