@@ -492,6 +492,50 @@ public class BatchProcessorByteStreamTests
     }
 
     [Fact]
+    public async Task DisposeAsync_CrossedByTheAckOfABatchBeingResent_LeavesItsStreamToTheResend()
+    {
+        var streams = new StreamCounts(_context.StreamManager);
+        var processor = await StartSenderAsync(budget: 4);
+        await processor.SendAsync(Sequence(12), CancellationToken.None);
+        await processor.CompleteSenderAsync(CancellationToken.None);
+
+        var entries = new List<BatchEntry>();
+        for (var i = 0; i < 3; i++)
+        {
+            var message = Assert.IsType<BatchControlMessage>(await Within(processor.OutgoingMessages.ReadAsync().AsTask()));
+            Assert.True(await processor.WriteBatchAsync(Stream.Null, _transferId, message.BatchId, message.Entry, CancellationToken.None));
+            message.Entry.Release();
+            entries.Add(message.Entry);
+        }
+
+        // Batch 1 is being resent: besides the reference the unacknowledged batches hold, the write holds one.
+        var wire = new GatedWire();
+        var resend = processor.WriteBatchAsync(wire, _transferId, 1, entries[1], CancellationToken.None);
+        await wire.Writing.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The release disposes the streams of batches 0 and 2, which nothing else holds, on either side of
+        // batch 1: processed at the second, the ack of batch 1 lands after the release has passed batch 1
+        // and before it is done, whichever way it goes through them.
+        Task? ack = null;
+        var disposed = 0;
+        _context.StreamManager.StreamDisposed += (_, _) =>
+        {
+            if (Interlocked.Increment(ref disposed) == 2) ack = AckAsync(processor, 1);
+        };
+
+        await processor.DisposeAsync();
+
+        Assert.NotNull(ack);
+        await ack.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, streams.Disposed);
+
+        wire.Gate.SetResult();
+        Assert.True(await Within(resend));
+        Assert.Equal(3, streams.Disposed);
+        Assert.Equal(0, streams.DisposedTwice);
+    }
+
+    [Fact]
     public async Task Exit6_ABatchThatFailsOnceRegistered_LeavesItsSlotToItsAck()
     {
         var logs = new Infrastructure.LogRecorder();
@@ -626,6 +670,20 @@ public class BatchProcessorByteStreamTests
     {
         public Memory<byte> Memory => data;
         public void Dispose() { }
+    }
+
+    /// <summary>A wire whose writes wait for the test to open it.</summary>
+    private sealed class GatedWire : MemoryStream
+    {
+        public TaskCompletionSource Writing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Gate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Writing.TrySetResult();
+            await Gate.Task.WaitAsync(cancellationToken);
+            await base.WriteAsync(buffer, cancellationToken);
+        }
     }
 
     private class ByteStreamSessionContext : ISessionContext

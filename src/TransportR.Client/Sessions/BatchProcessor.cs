@@ -639,12 +639,13 @@ internal class BatchProcessor : IAsyncDisposable
             if (queued is BatchControlMessage batch) batch.Entry.Release();
         }
 
-        foreach(var kvp in _unackedBatches)
+        // The reference the dictionary holds is released by whoever takes the entry out of it, here or
+        // an acknowledgement crossing this release, as in HandleBatchAck. Released here without
+        // the removal, it is released twice, and the second can dispose a body a resend still writes.
+        foreach (var (batchId, _) in _unackedBatches)
         {
-            // Force release/dispose
-            kvp.Value.Release(); 
+            if (_unackedBatches.TryRemove(batchId, out var entry)) entry.Release();
         }
-        _unackedBatches.Clear();
         return ValueTask.CompletedTask;
     }
 }

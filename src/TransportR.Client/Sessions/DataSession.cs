@@ -548,10 +548,13 @@ internal class DataSession : IDataSession
         }
 
         _reconnectionHandler.Dispose();
-        await _batchProcessor.DisposeAsync();
-        await _httpStreamManager.DisposeAsync();
-        _cts.Cancel(); // Stop all loops immediately, do not wait for 5s of retries!
 
+        // The loops stop before what they handle is released: a read loop processes acknowledgements
+        // and a write loop writes batches, both of which the release frees. The session's token goes
+        // first because every attempt's is linked to it, one the session loop may still be opening too.
+        _cts.Cancel();
+        await _httpStreamManager.DisposeAsync();
+        await _batchProcessor.DisposeAsync();
 
         _heartbeatTimer.Dispose();
         _cts.Dispose();
