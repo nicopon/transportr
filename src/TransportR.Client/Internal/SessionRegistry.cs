@@ -19,6 +19,12 @@ internal sealed record TransferSession<T>(IDataSession Session, ISendPort<T> Sen
     : TransferSession(Session);
 
 /// <summary>
+/// A session of bytes: the ends that cut a stream into batches and hand them back as they arrived.
+/// </summary>
+internal sealed record ByteTransferSession(IDataSession Session, ByteBatchSource Send, ByteReceivePort Receive)
+    : TransferSession(Session);
+
+/// <summary>
 /// Manages active Data sessions for a client.
 /// </summary>
 internal class SessionRegistry<TSession> : IAsyncDisposable where TSession : TransferSession
