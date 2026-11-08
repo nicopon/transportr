@@ -20,6 +20,24 @@ public static class TransportRClientBuilderAuthExtensions
         string? scope,
         ILoggerFactory? loggerFactory = null)
     {
+        return builder.WithTokenProvider(CreateProvider(tokenEndpoint, clientId, clientSecret, scope, loggerFactory));
+    }
+
+    /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, ILoggerFactory?)"/>
+    public static ByteStreamClientBuilder WithClientCredentials(
+        this ByteStreamClientBuilder builder,
+        string tokenEndpoint,
+        string clientId,
+        string clientSecret,
+        string? scope,
+        ILoggerFactory? loggerFactory = null)
+    {
+        return builder.WithTokenProvider(CreateProvider(tokenEndpoint, clientId, clientSecret, scope, loggerFactory));
+    }
+
+    private static Func<Task<string>> CreateProvider(
+        string tokenEndpoint, string clientId, string clientSecret, string? scope, ILoggerFactory? loggerFactory)
+    {
         var options = new ClientCredentialsOptions
         {
             TokenEndpoint = tokenEndpoint,
@@ -27,11 +45,11 @@ public static class TransportRClientBuilderAuthExtensions
             ClientSecret = clientSecret,
             Scope = scope
         };
-        
+
         var provider = new ClientCredentialsTokenProvider(
-            options, 
+            options,
             loggerFactory?.CreateLogger<ClientCredentialsTokenProvider>() ?? NullLogger<ClientCredentialsTokenProvider>.Instance);
-        
-        return builder.WithTokenProvider(provider.AsTokenProvider());
+
+        return provider.AsTokenProvider();
     }
 }
