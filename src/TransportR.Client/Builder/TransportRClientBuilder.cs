@@ -1,9 +1,6 @@
-using System.Net;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Client.Services;
-using Microsoft.Extensions.Logging; 
-using Microsoft.Extensions.Logging.Abstractions; // Restore
+using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
 using TransportR.Client.Configuration;
 using TransportR.Models;
@@ -23,18 +20,10 @@ namespace TransportR.Client;
 /// <typeparam name="T">The type of items transfers built by this builder will carry.</typeparam>
 public class TransportRClientBuilder<T>
 {
-    private string? _url;
+    private readonly ClientBuilderState _state = new();
     private int _batchSize = 1000;
     private bool _batchSizeSet;
-    private int _batchFlushIntervalMs = 1000;
-    private int? _maxInFlightBatches;
-    private BufferCapacity? _receiveCapacity;
-    private ILoggerFactory? _loggerFactory;
     private IBatchSerializer<T>? _serializer;
-    private string? _accessToken;
-    private Func<Task<string>>? _tokenProvider;
-    private TimeSpan? _tokenRefreshThreshold;
-    private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
 
     /// <summary>
     /// The size at which a batch of the byte-stream mode is cut; <c>null</c> outside that mode. Set by
@@ -48,7 +37,7 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClientBuilder<T> WithUrl(string url)
     {
-        _url = url;
+        _state.SetUrl(url);
         return this;
     }
 
@@ -67,7 +56,7 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClientBuilder<T> WithBatchTimeout(int timeoutMs)
     {
-        _batchFlushIntervalMs = timeoutMs;
+        _state.SetBatchTimeout(timeoutMs);
         return this;
     }
 
@@ -83,8 +72,7 @@ public class TransportRClientBuilder<T>
     /// </remarks>
     public TransportRClientBuilder<T> WithMaxInFlightBatches(int max)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(max, 0, nameof(max));
-        _maxInFlightBatches = max;
+        _state.SetMaxInFlightBatches(max);
         return this;
     }
 
@@ -113,12 +101,7 @@ public class TransportRClientBuilder<T>
     /// <inheritdoc cref="WithReceiveCapacity(int?, long?)"/>
     public TransportRClientBuilder<T> WithReceiveCapacity(BufferCapacity capacity)
     {
-        if (capacity.IsEmpty)
-            throw new ArgumentException(
-                "A receive capacity needs at least one of the two dimensions bounded. Leave it "
-              + "unset for an unbounded receiver.", nameof(capacity));
-
-        _receiveCapacity = capacity;
+        _state.SetReceiveCapacity(capacity);
         return this;
     }
 
@@ -127,7 +110,7 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClientBuilder<T> WithLoggerFactory(ILoggerFactory loggerFactory)
     {
-        _loggerFactory = loggerFactory;
+        _state.SetLoggerFactory(loggerFactory);
         return this;
     }
 
@@ -145,7 +128,7 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClientBuilder<T> WithAccessToken(string token)
     {
-        _accessToken = token;
+        _state.SetAccessToken(token);
         return this;
     }
 
@@ -154,7 +137,7 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClientBuilder<T> WithTokenProvider(Func<Task<string>> provider)
     {
-        _tokenProvider = provider;
+        _state.SetTokenProvider(provider);
         return this;
     }
 
@@ -172,8 +155,7 @@ public class TransportRClientBuilder<T>
     /// </remarks>
     public TransportRClientBuilder<T> WithTokenRefreshThreshold(TimeSpan threshold)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(threshold, TimeSpan.Zero, nameof(threshold));
-        _tokenRefreshThreshold = threshold;
+        _state.SetTokenRefreshThreshold(threshold);
         return this;
     }
 
@@ -187,12 +169,7 @@ public class TransportRClientBuilder<T>
     /// </remarks>
     public TransportRClientBuilder<T> WithWriteTransport(WriteTransportPolicy policy)
     {
-        if (!Enum.IsDefined(policy))
-        {
-            throw new ArgumentOutOfRangeException(nameof(policy), policy, "Not a write transport policy.");
-        }
-
-        _writeTransportPolicy = policy;
+        _state.SetWriteTransport(policy);
         return this;
     }
 
@@ -201,14 +178,9 @@ public class TransportRClientBuilder<T>
     /// </summary>
     public TransportRClient<T> Build()
     {
-        if (string.IsNullOrWhiteSpace(_url))
-        {
-            throw new InvalidOperationException("Hub URL must be configured using WithUrl().");
-        }
-        
-        // Defaults
-        var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
-        var logger = loggerFactory.CreateLogger<TransportRClient<T>>();
+        _state.RequireUrl();
+
+        var logger = _state.CreateLogger<TransportRClient<T>>();
         if (ByteStreamBatchBytes is not null)
         {
             // Each of these means something only for items, and silently ignoring one would hide a
@@ -221,7 +193,7 @@ public class TransportRClientBuilder<T>
             {
                 throw new InvalidOperationException("The batch size cannot be set in the byte-stream mode.");
             }
-            if (_receiveCapacity?.MaxItems is not null)
+            if (_state.ReceiveCapacity?.MaxItems is not null)
             {
                 throw new InvalidOperationException("The receive capacity cannot be bounded by items in the byte-stream mode.");
             }
@@ -234,69 +206,18 @@ public class TransportRClientBuilder<T>
             throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
         }
 
-        var options = new ClientOptions
-        {
-            BatchFlushIntervalMs = _batchFlushIntervalMs,
-            MaxInFlightBatches = _maxInFlightBatches,
-            WriteTransportPolicy = _writeTransportPolicy,
-            ByteStreamBatchBytes = ByteStreamBatchBytes
-        };
-
-        options.ReceiveBufferCapacity = _receiveCapacity;
-        if (_tokenRefreshThreshold is { } threshold) options.TokenRefreshThreshold = threshold;
-
-        // Neither end bounded is a supported configuration and the right one for a consumer that
-        // keeps up, so this is a warning and not a refusal. It is loud because the failure it
-        // precedes is not: nothing pushes back anywhere, and a consumer that falls behind is
-        // paid for in the sender's memory and then the receiver's, until one of them dies.
-        if (_maxInFlightBatches is null && _receiveCapacity is null)
-        {
-            logger.LogWarning(
-                "No backpressure configured: neither WithMaxInFlightBatches nor WithReceiveCapacity "
-              + "is set, so a consumer slower than the producer is absorbed in memory rather than "
-              + "throttled.");
-        }
-        
-        var hubUrl = _url.TrimEnd('/');
-        var dataUrl = hubUrl + WireRoutes.StreamBase;
-
-        var sessionRegistry = new SessionRegistry<TransferSession<T>>(logger);
-
-        // Create Infrastructure dependencies
-        var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
-
-        // No cookie container: the control channel sets each request's cookies itself, since a
-        // transfer's requests carry another affinity than the client's own.
-        var httpHandler = new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.None,
-            UseCookies = false
-        };
-        
-        var httpClient = new HttpClient(httpHandler)
-        {
-             Timeout = Timeout.InfiniteTimeSpan
-        };
-
-        var channel = new ControlChannel(
-            hubUrl,
-            Guid.NewGuid(),
-            httpClient,
-            options,
-            loggerFactory.CreateLogger<ControlChannel>(),
-            _accessToken,
-            _tokenProvider);
+        var wiring = _state.Assemble(logger, ByteStreamBatchBytes);
 
         return new TransportRClient<T>(
-            channel,
-            sessionRegistry,
+            wiring.Channel,
+            new SessionRegistry<TransferSession<T>>(logger),
             _serializer,
             logger,
             _batchSize,
-            options,
-            dataUrl,
-            httpClient,
-            streamManager
+            wiring.Options,
+            wiring.DataUrl,
+            wiring.HttpClient,
+            wiring.Streams
         );
     }
 }
