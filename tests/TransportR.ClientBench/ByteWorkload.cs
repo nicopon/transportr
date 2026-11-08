@@ -8,8 +8,8 @@ namespace TransportR.ClientBench;
 internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
 {
     private readonly byte[] _block = Pattern.Create(seed);
-    private TransportRClient<byte[]>? _sender;
-    private TransportRClient<byte[]>? _receiver;
+    private ByteStreamClient? _sender;
+    private ByteStreamClient? _receiver;
     private TaskCompletionSource<bool> _received = NewReceived();
     private long _expectedBytes;
 
@@ -17,9 +17,8 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
 
     public override async Task ConnectAsync(string hubUrl, int sendWindow, CancellationToken cancellationToken)
     {
-        _receiver = new TransportRClientBuilder<byte[]>()
+        _receiver = new ByteStreamClientBuilder(batchBytes)
             .WithUrl(hubUrl)
-            .WithByteStream(batchBytes)
             .Build();
         _receiver.OnTransferStarted += transfer =>
         {
@@ -28,9 +27,8 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
         };
         await _receiver.ConnectAsync([ReceiverGroup], cancellationToken).ConfigureAwait(false);
 
-        _sender = new TransportRClientBuilder<byte[]>()
+        _sender = new ByteStreamClientBuilder(batchBytes)
             .WithUrl(hubUrl)
-            .WithByteStream(batchBytes)
             .WithMaxInFlightBatches(sendWindow)
             .Build();
         await _sender.ConnectAsync([SenderGroup], cancellationToken).ConfigureAwait(false);
@@ -52,7 +50,7 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
         return targetBodyBytes;
     }
 
-    private async Task ReceiveAsync(Receive<byte[]> transfer, TaskCompletionSource<bool> received, long expectedBytes, CancellationToken cancellationToken)
+    private async Task ReceiveAsync(ByteReceive transfer, TaskCompletionSource<bool> received, long expectedBytes, CancellationToken cancellationToken)
     {
         try
         {
@@ -74,7 +72,7 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
 
     public override async ValueTask DisposeAsync()
     {
-        await DisposeClientAsync(_sender).ConfigureAwait(false);
-        await DisposeClientAsync(_receiver).ConfigureAwait(false);
+        if (_sender is not null) await _sender.DisposeAsync().ConfigureAwait(false);
+        if (_receiver is not null) await _receiver.DisposeAsync().ConfigureAwait(false);
     }
 }

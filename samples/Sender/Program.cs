@@ -283,11 +283,10 @@ static async Task RunByteStreamAsync(
         return;
     }
 
-    var clientBuilder = new TransportRClientBuilder<byte[]>()
+    var clientBuilder = new ByteStreamClientBuilder(batchBytes)
         .WithUrl(options.HubUrl)
         .WithBatchTimeout(options.BatchTimeoutMs)
-        .WithLoggerFactory(loggerFactory)
-        .WithByteStream(batchBytes);
+        .WithLoggerFactory(loggerFactory);
     logger.LogInformation("Byte-stream mode: batches cut at {BatchBytes} bytes", batchBytes);
 
     if (options.MaxInFlightBatches is { } maxInFlight)
@@ -377,14 +376,14 @@ static async Task RunByteStreamAsync(
 
 // One transfer of the source file. Each has its own reader of the file, as the item mode has.
 static async Task SendFileAsync(
-    TransportRClient<byte[]> broker,
+    ByteStreamClient broker,
     ClientInfo target,
     TimeSpan openDelay,
     string sourceFilePath,
     bool showProgress,
     Microsoft.Extensions.Logging.ILogger logger)
 {
-    Send<byte[]>? transfer = null;
+    ByteSend? transfer = null;
     try
     {
         if (openDelay > TimeSpan.Zero) await Task.Delay(openDelay);

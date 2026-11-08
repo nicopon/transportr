@@ -210,11 +210,11 @@ process.
 | `TransportR.Serialization.Protobuf` | Binary + Zstd | Needs annotated contracts; the most compact payload |
 | `TransportR.Serialization.Json` | Text + Zstd | `compress: false` puts plain JSON on the wire, for debugging |
 | `TransportR.Serialization.Arrow` | Arrow IPC + LZ4 | Apache Arrow `RecordBatch` only; bound the receiver in bytes |
-| `WithByteStream(batchBytes)`, in `TransportR.Client` | Raw bytes, never compressed | `byte[]` clients only: no serializer, no codec. A batch is cut at `batchBytes` bytes, so no boundary of the sender's calls reaches the receiver; feed it with `CopyFromAsync`, read it with `CopyToAsync` |
+| `new ByteStreamClientBuilder(batchBytes)`, in `TransportR.Client` | Raw bytes, never compressed | A client of its own: no serializer, no codec, no item type. A batch is cut at `batchBytes` bytes, so no boundary of the sender's calls reaches the receiver; feed the `ByteSend` it gives with `CopyFromAsync` or `WriteAsync`, read the `ByteReceive` with `CopyToAsync` or `ReadAsync` |
 
 MessagePack and Protobuf are on par in our benchmark; JSON is about 20 % slower to produce. Both ends of a
-transfer must use the same serializer and settings, or both be in the byte-stream mode: a batch the receiver
-cannot decode fails the transfer, and so does a transfer whose ends are not in the same mode, on both sides.
+transfer must use the same serializer and settings, or both be `ByteStreamClient`s: a batch the receiver
+cannot decode fails the transfer, and so does a transfer whose ends are not of the same kind, on both sides.
 
 ### Security
 

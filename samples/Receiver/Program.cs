@@ -253,19 +253,23 @@ static async Task RunByteStreamAsync(
         return;
     }
 
-    var clientBuilder = new TransportRClientBuilder<byte[]>()
+    // A byte stream has no items to bound: the setting fails instead of being ignored.
+    if (options.ReceiveMaxItems is not null)
+    {
+        logger.LogError("A byte stream has no items to bound: ReceiveMaxItems does not apply to the byte-stream mode.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    var clientBuilder = new ByteStreamClientBuilder(batchBytes)
         .WithUrl(options.HubUrl)
-        .WithLoggerFactory(loggerFactory)
-        .WithByteStream(batchBytes);
+        .WithLoggerFactory(loggerFactory);
     logger.LogInformation("Byte-stream mode");
 
-    // Build() refuses a bound in items: a byte stream has none, so the setting fails instead of being ignored.
-    if (options.ReceiveMaxItems is not null || options.ReceiveMaxBytes is not null)
+    if (options.ReceiveMaxBytes is not null)
     {
-        logger.LogInformation("Receive capacity: {Items} items / {Bytes} wire bytes",
-            options.ReceiveMaxItems?.ToString() ?? "unbounded",
-            options.ReceiveMaxBytes?.ToString() ?? "unbounded");
-        clientBuilder.WithReceiveCapacity(options.ReceiveMaxItems, options.ReceiveMaxBytes);
+        logger.LogInformation("Receive capacity: {Bytes} wire bytes", options.ReceiveMaxBytes);
+        clientBuilder.WithReceiveCapacity(options.ReceiveMaxBytes.Value);
     }
 
     if (options.WriteTransport is { } writeTransport)
@@ -305,7 +309,7 @@ static async Task RunByteStreamAsync(
         await broker.ConnectAsync(new[] { options.Group }, cts.Token);
         logger.LogInformation("Client registered (ID={ClientId}, Group={Group}). Waiting for {Count} streams...", broker.ClientId, options.Group, expectedTransfers);
 
-        broker.OnTransferStarted += async (Receive<byte[]> transfer) =>
+        broker.OnTransferStarted += async (ByteReceive transfer) =>
         {
             _ = Task.Run(async () =>
             {
@@ -355,7 +359,7 @@ static async Task RunByteStreamAsync(
     }
 }
 
-static async Task<long> WriteByteStreamAsync(Receive<byte[]> transfer, string outputDirectory, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
+static async Task<long> WriteByteStreamAsync(ByteReceive transfer, string outputDirectory, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
 {
     var binFile = Path.Combine(outputDirectory, $"orders_{transfer.TransferId}.bin");
     logger.LogInformation("[Transfer {TransferId}] Creating file: {Path}", transfer.TransferId, binFile);

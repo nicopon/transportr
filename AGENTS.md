@@ -157,7 +157,8 @@ transfer does and it feeds `TransferState`, not the registration.
 `TransportRClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`
 (`src/TransportR/Interfaces/ITransportRClient.cs`). A sender calls `InitTransferAsync` to get a
 `Send<T>` handle (`src/TransportR/Abstractions/Send.cs`); a receiver registers `OnTransferStarted`
-and consumes a `Receive<T>` handle via `IAsyncEnumerable`. A transfer the host opens reaches the
+and consumes a `Receive<T>` handle via `IAsyncEnumerable`; `ByteStreamClient` (from `ByteStreamClientBuilder(batchBytes)`)
+does the same for a stream of bytes through `ByteSend`/`ByteReceive`, and both compose the internal `ClientConnection`. A transfer the host opens reaches the
 sender through `OnSendRequested` instead; a client with no handler refuses it. `BatchAccumulator` buffers items
 client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
 loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands the batches, in order, to
@@ -206,7 +207,7 @@ item size, which only the caller knows, so a default would be a guess nobody goe
 `Build()` warns when neither is set.
 
 The sender's `MaxInFlightBatches` counts **batches**, and its slot is taken *by the producer,
-before serialization* (in the byte-stream mode, which has none, before the batch's buffer is rented) — moving it behind the serializer converts a managed backlog into an
+before serialization* (in a `ByteStreamClient`, which has none, before the batch's buffer is rented) — moving it behind the serializer converts a managed backlog into an
 off-heap one. That placement is also why it cannot count bytes: the serialized size is not known
 yet. It does not need to, because the receiver's `ReceiveBufferCapacity` reaches it — a full
 receive buffer parks the read loop, which withholds the ack that reopens the send window.
