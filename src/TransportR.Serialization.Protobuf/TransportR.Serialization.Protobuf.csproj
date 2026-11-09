@@ -6,7 +6,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="protobuf-net" Version="3.4.30" />
+    <PackageReference Include="protobuf-net" Version="3.4.40" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 
