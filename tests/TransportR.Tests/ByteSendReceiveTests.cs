@@ -126,6 +126,47 @@ public class ByteSendReceiveTests
         Assert.Same(seeded, ArrayPool<byte>.Shared.Rent(ReadSize));
     }
 
+    [Fact]
+    public async Task CopyFromAsync_WithCustomBufferSize_AppendsBytesAndUsesSpecifiedChunkSize()
+    {
+        const int customSize = 32_768;
+        var session = new FakeSession { IsByteStream = true };
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
+        var source = Sequence(100_000);
+
+        await send.CopyFromAsync(new MemoryStream(source), customSize);
+
+        Assert.Equal(source, session.AppendedBytes.ToArray());
+        Assert.All(session.AppendCalls, length => Assert.InRange(length, 1, customSize));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task CopyFromAsync_WithInvalidBufferSize_ThrowsArgumentOutOfRangeException(int bufferSize)
+    {
+        var session = new FakeSession { IsByteStream = true };
+        await using var send = new HttpByteSend(session, session.SendBytesAsync);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => send.CopyFromAsync(new MemoryStream(Sequence(100)), bufferSize));
+    }
+
+    [Fact]
+    public void CopyFromAsync_WithCustomBufferSize_ReturnsItsReadBufferToTheArrayPool()
+    {
+        const int customSize = 65_536;
+        var seeded = ArrayPool<byte>.Shared.Rent(customSize);
+        ArrayPool<byte>.Shared.Return(seeded);
+        var session = new FakeSession { IsByteStream = true };
+        var send = new HttpByteSend(session, session.SendBytesAsync);
+
+        var copy = send.CopyFromAsync(new MemoryStream(Sequence(1000)), customSize);
+
+        Assert.True(copy.IsCompletedSuccessfully);
+        Assert.Same(seeded, ArrayPool<byte>.Shared.Rent(customSize));
+    }
+
     // --- CopyToAsync ---
 
     [Fact]

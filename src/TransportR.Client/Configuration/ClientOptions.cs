@@ -138,6 +138,8 @@ internal class ClientOptions
     /// idles waiting for acknowledgements — and the right value depends on how large a batch is,
     /// which only the caller knows. This is why there is no default: for item-sized POCOs the
     /// unbounded behaviour is a memory spike, but for multi-megabyte payloads it is the process.
+    /// On high-latency or WAN links, size the window to at least the bandwidth-delay product
+    /// (<c>RTT × bandwidth</c>) to prevent the sender from stalling between acknowledgements.
     /// </para>
     /// </remarks>
     public int? MaxInFlightBatches { get; set; }

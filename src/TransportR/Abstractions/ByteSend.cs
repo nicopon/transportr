@@ -51,18 +51,33 @@ public abstract class ByteSend : Transfer, IAsyncDisposable
     /// <param name="cancellationToken">Stops the copy; bytes already appended stay in the transfer.</param>
     /// <remarks>
     /// The caller completes the transfer with <see cref="CompleteAsync"/> once this returns. Waits and
+    /// failures are those of <see cref="WriteAsync"/>. Uses a default buffer of 80 KB.
+    /// </remarks>
+    public Task CopyFromAsync(Stream source, CancellationToken cancellationToken = default) =>
+        CopyFromAsync(source, ReadBufferBytes, cancellationToken);
+
+    /// <summary>
+    /// Reads <paramref name="source"/> to its end into the transfer with the specified buffer size, and
+    /// returns without completing or disposing the handle, as <see cref="Stream.CopyToAsync(Stream)"/> closes nothing.
+    /// </summary>
+    /// <param name="source">The stream to read. It is not closed.</param>
+    /// <param name="bufferSize">Rented read buffer size in bytes. Must be greater than zero.</param>
+    /// <param name="cancellationToken">Stops the copy; bytes already appended stay in the transfer.</param>
+    /// <remarks>
+    /// The caller completes the transfer with <see cref="CompleteAsync"/> once this returns. Waits and
     /// failures are those of <see cref="WriteAsync"/>.
     /// </remarks>
-    public async Task CopyFromAsync(Stream source, CancellationToken cancellationToken = default)
+    public async Task CopyFromAsync(Stream source, int bufferSize, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bufferSize, 0, nameof(bufferSize));
 
-        var buffer = ArrayPool<byte>.Shared.Rent(ReadBufferBytes);
+        var buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         var writing = false;
         try
         {
             int read;
-            while ((read = await source.ReadAsync(buffer.AsMemory(0, ReadBufferBytes), cancellationToken).ConfigureAwait(false)) > 0)
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, bufferSize), cancellationToken).ConfigureAwait(false)) > 0)
             {
                 writing = true;
                 await WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);

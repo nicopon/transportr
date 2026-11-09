@@ -42,7 +42,7 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
         await using var send = await _sender!.InitTransferAsync(_receiver!.ClientId).ConfigureAwait(false);
         var sending = Task.Run(async () =>
         {
-            await send.CopyFromAsync(new PatternStream(_block, targetBodyBytes), cancellationToken).ConfigureAwait(false);
+            await send.CopyFromAsync(new PatternStream(_block, targetBodyBytes), batchBytes, cancellationToken).ConfigureAwait(false);
             await send.CompleteAsync(cancellationToken).ConfigureAwait(false);
         }, CancellationToken.None);
 

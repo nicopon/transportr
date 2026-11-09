@@ -56,10 +56,17 @@ public class TransportRClientBuilder<T>
     /// producer is made to wait. Unbounded by default.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is the only backpressure path from the receiver back to the producer. Left unset, a
     /// slow receiver makes the sender hold the whole source in memory: TCP throttles the HTTP
     /// write, but nothing upstream of it. The window counts batches, so it bounds roughly
     /// <c>max × batch size</c> — see "Backpressure" in <c>ResilienceArchitecture.md</c> for sizing.
+    /// </para>
+    /// <para>
+    /// On high-latency or WAN links, size the in-flight window to at least the bandwidth-delay product
+    /// (<c>RTT × bandwidth</c>) to avoid starving the sender while waiting for acknowledgements across
+    /// round-trips.
+    /// </para>
     /// </remarks>
     public TransportRClientBuilder<T> WithMaxInFlightBatches(int max)
     {

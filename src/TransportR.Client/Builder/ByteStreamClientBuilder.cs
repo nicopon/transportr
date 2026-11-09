@@ -23,7 +23,9 @@ public sealed class ByteStreamClientBuilder
     /// <param name="batchBytes">
     /// The size, in bytes, at which a batch is cut. It sets what an acknowledgement, a send window slot
     /// and a resend cover, so the sender holds at most this much times <c>WithMaxInFlightBatches</c>. There
-    /// is no default: the right figure depends on the use.
+    /// is no default: the right figure depends on the use. For continuous streaming on WAN or cloud
+    /// links, 256 KB or 512 KB is recommended to align with <c>ClientOptions.StreamBufferSize</c> and
+    /// minimize framing overhead.
     /// At most <c>int.MaxValue - 4</c>, a batch and its 4-byte length being held in one <c>int</c>.
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException">

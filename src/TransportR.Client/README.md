@@ -92,6 +92,13 @@ The builder has the options of the item builder that mean something for bytes (`
 of a transfer must be `ByteStreamClient`s, or both item clients. `TransferInfo.ItemsProcessed` is 0 for a byte transfer, which has
 no items; `BytesTransferred` carries the count.
 
+### Sizing for WAN and high-throughput streaming
+
+On high-latency links, size the in-flight window (`WithMaxInFlightBatches`) to at least the bandwidth-delay product:
+$$\text{Window} = \text{batchBytes} \times \text{MaxInFlightBatches} \ge \text{RTT} \times \text{TargetBandwidth}$$
+
+For continuous streaming at 60–100 MB/s over a 25 ms WAN (BDP $\approx$ 1.5–2.5 MB), use 256 KB or 512 KB batches with an in-flight window of 4–8 MB (e.g. `WithMaxInFlightBatches(16)`). This keeps the pipe full during acknowledgement round-trips and matches `StreamBufferSize` (512 KB).
+
 ## Advanced Configuration
 
 ### Authentication
