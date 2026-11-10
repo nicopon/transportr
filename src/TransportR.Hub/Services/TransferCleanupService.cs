@@ -46,7 +46,7 @@ internal class TransferCleanupService : BackgroundService
             _stalledProgressTimeout?.ToString() ?? "disabled");
 
         using var timer = new PeriodicTimer(_checkInterval, _time);
-        
+
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             try

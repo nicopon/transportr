@@ -11,13 +11,13 @@ internal enum StreamEndReason
     /// This is the expected signal for domino progression.
     /// </summary>
     CleanEOF,
-    
+
     /// <summary>
     /// ReadAsync threw IOException/HttpRequestException.
     /// Network failure or unexpected disconnect - requires reconnect flow.
     /// </summary>
     Rupture,
-    
+
     /// <summary>
     /// CancellationToken was triggered.
     /// Intentional local cancellation (e.g., timeout, user abort).

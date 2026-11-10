@@ -1,8 +1,8 @@
-using Shared.Models;
+using System.Runtime.CompilerServices;
 using MessagePack;
 using MessagePack.Resolvers;
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
+using Shared.Models;
 
 namespace Sender.Services;
 
@@ -36,15 +36,15 @@ public class OrderFileReader
         // Optimized FileStream configuration
         const int BufferSize = 4 * 1024 * 1024; // 4MB
         using var fs = new FileStream(
-            _filePath, 
-            FileMode.Open, 
-            FileAccess.Read, 
-            FileShare.Read, 
-            bufferSize: BufferSize, 
+            _filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: BufferSize,
             FileOptions.SequentialScan);
-        
+
         using var reader = new BinaryReader(fs);
-        
+
         while (fs.Position < fs.Length && !cancellationToken.IsCancellationRequested)
         {
             // Read size (4 bytes)

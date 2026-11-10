@@ -9,28 +9,28 @@ namespace TransportR.Interfaces;
 public interface IStateStore
 {
     // ========== Clients ==========
-    
+
     /// <summary>
     /// Registers a client in the shared store.
     /// </summary>
     Task SaveClientAsync(ClientRegistration client);
-    
+
     /// <summary>
     /// Gets a client by ID.
     /// </summary>
     Task<ClientRegistration?> GetClientAsync(Guid clientId);
-    
+
     /// <summary>
     /// Gets a client by the id of the event stream it registered on.
     /// More efficient than GetAllClientsAsync for single lookups.
     /// </summary>
     Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId);
-    
+
     /// <summary>
     /// Gets all connected clients.
     /// </summary>
     Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync();
-    
+
     /// <summary>
     /// Records that the connection identified by <paramref name="connectionId"/> is gone, and does
     /// nothing if the registration has since moved to another connection.
@@ -49,7 +49,7 @@ public interface IStateStore
     /// Removes a client from the store.
     /// </summary>
     Task DeleteClientAsync(Guid clientId);
-    
+
     /// <summary>
     /// Replaces the groups and the token expiry of a registration, and nothing else, provided it
     /// still belongs to <paramref name="expectedSubject"/>.

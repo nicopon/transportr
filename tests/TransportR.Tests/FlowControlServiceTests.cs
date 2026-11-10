@@ -16,12 +16,12 @@ public class FlowControlServiceTests
             }
         };
         var service = new DefaultFlowControlService(options);
-        
+
         // Act
         var result = service.CanSendTo(
             new HashSet<string> { "senders" },
             new HashSet<string> { "receivers" });
-        
+
         // Assert
         Assert.True(result);
     }
@@ -38,12 +38,12 @@ public class FlowControlServiceTests
             }
         };
         var service = new DefaultFlowControlService(options);
-        
+
         // Act: receiver is in both groups
         var result = service.CanSendTo(
             new HashSet<string> { "senders" },
             new HashSet<string> { "group-a", "group-b" });
-        
+
         // Assert
         Assert.True(result);
     }
@@ -60,12 +60,12 @@ public class FlowControlServiceTests
             }
         };
         var service = new DefaultFlowControlService(options);
-        
+
         // Act: receiver is in both group-a AND group-b
         var result = service.CanSendTo(
             new HashSet<string> { "senders" },
             new HashSet<string> { "group-a", "group-b" });
-        
+
         // Assert: denied because group-b is not covered
         Assert.False(result);
     }
@@ -82,12 +82,12 @@ public class FlowControlServiceTests
             }
         };
         var service = new DefaultFlowControlService(options);
-        
+
         // Act: receiver is in multiple groups
         var result = service.CanSendTo(
             new HashSet<string> { "admins" },
             new HashSet<string> { "group-a", "group-b", "group-c" });
-        
+
         // Assert
         Assert.True(result);
     }
@@ -105,12 +105,12 @@ public class FlowControlServiceTests
             }
         };
         var service = new DefaultFlowControlService(options);
-        
+
         // Act: sender has both roles, receiver has both targets
         var result = service.CanSendTo(
             new HashSet<string> { "role-a", "role-b" },
             new HashSet<string> { "target-a", "target-b" });
-        
+
         // Assert: allowed because combined coverage covers all targets
         Assert.True(result);
     }
@@ -120,12 +120,12 @@ public class FlowControlServiceTests
     {
         var options = new FlowControlOptions();
         var service = new DefaultFlowControlService(options);
-        
+
         // Empty source
         Assert.False(service.CanSendTo(
             new HashSet<string>(),
             new HashSet<string> { "receivers" }));
-        
+
         // Empty target
         Assert.False(service.CanSendTo(
             new HashSet<string> { "senders" },

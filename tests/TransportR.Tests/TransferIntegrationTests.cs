@@ -2,8 +2,6 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using TransportR.Protocol;
-using TransportR.Models;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,12 +14,12 @@ using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Configuration;
 using TransportR.Interfaces;
+using TransportR.Models;
+using TransportR.Protocol;
+using TransportR.Serialization.Json.Services;
+using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Tests.Infrastructure;
 using Xunit.Abstractions;
-
-
-using TransportR.Serialization.MessagePack; // Extension
-using TransportR.Serialization.Json.Services;
 
 namespace TransportR.Tests;
 
@@ -50,13 +48,13 @@ public class TransferIntegrationTests
         // Note: In dev mode (TestHubServerFactory), groups are auto-assigned to ["test"]
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
-        
+
         // Wait briefly for registration
         await Task.Delay(500);
 
         // 4. Setup Receiver to "Accept" the transfer
         bool getReadyCalled = false;
-        receiver.OnTransferStarted += (transfer) => 
+        receiver.OnTransferStarted += (transfer) =>
         {
             getReadyCalled = true;
             return Task.CompletedTask;
@@ -1147,7 +1145,7 @@ public class TransferIntegrationTests
         var options = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
         configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
-        
+
         var registry = new SessionRegistry<TransferSession<string>>(logger);
         serializer ??= new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();

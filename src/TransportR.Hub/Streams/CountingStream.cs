@@ -31,12 +31,12 @@ internal class CountingStream(Stream inner, Action<long> onBytesRead) : Stream
     public override bool CanSeek => inner.CanSeek;
     public override bool CanWrite => inner.CanWrite;
     public override long Length => inner.Length;
-    public override long Position 
-    { 
-        get => inner.Position; 
-        set => inner.Position = value; 
+    public override long Position
+    {
+        get => inner.Position;
+        set => inner.Position = value;
     }
-    
+
     public override void Flush() => inner.Flush();
     public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
     public override void SetLength(long value) => inner.SetLength(value);

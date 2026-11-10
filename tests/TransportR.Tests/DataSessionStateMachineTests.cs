@@ -1,6 +1,6 @@
-using TransportR.Services;
-using TransportR.Models;
 using Microsoft.Extensions.Logging;
+using TransportR.Models;
+using TransportR.Services;
 
 namespace TransportR.Tests;
 
@@ -39,7 +39,7 @@ public class DataSessionStateMachineTests
     {
         _fsm.TransitionTo(SessionState.Starting);
         var result = _fsm.TransitionTo(SessionState.Starting);
-        
+
         Assert.False(result);
         Assert.Equal(SessionState.Starting, _fsm.CurrentState);
     }

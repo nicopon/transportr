@@ -3,9 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
+using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
-using TransportR.Interfaces;
 
 namespace TransportR.Client.Sessions;
 
@@ -42,7 +42,7 @@ internal class HttpStreamManager : IAsyncDisposable
     private readonly string _transferId;
     private readonly string _dataUrl;
     private readonly string? _affinity;
-    
+
     /// <param name="Refused">The hub answered the stream with a refusal, rather than the connection failing under it.</param>
     public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null, bool Refused = false)
     {
@@ -68,7 +68,7 @@ internal class HttpStreamManager : IAsyncDisposable
     private WriteTransport? _writeTransport;
     private Task<StreamResult>? _senderTask;
     private Task<StreamResult>? _receiverTask;
-    
+
     // No more Events - passive component
     public Task<StreamResult>? SenderTask => _senderTask;
     public Task<StreamResult>? ReceiverTask => _receiverTask;
@@ -117,87 +117,87 @@ internal class HttpStreamManager : IAsyncDisposable
 
         if (isSender)
         {
-             // Sender: Data=Write, Control=Read
-             _senderTask = RunDualStreamAsync(true, writeAction, readAction, attempt);
-             _receiverTask = null;
+            // Sender: Data=Write, Control=Read
+            _senderTask = RunDualStreamAsync(true, writeAction, readAction, attempt);
+            _receiverTask = null;
         }
         else
         {
-             // Receiver: Data=Read, Control=Write
-             _receiverTask = RunDualStreamAsync(false, writeAction, readAction, attempt);
-             _senderTask = null;
+            // Receiver: Data=Read, Control=Write
+            _receiverTask = RunDualStreamAsync(false, writeAction, readAction, attempt);
+            _senderTask = null;
         }
     }
-    
+
     /// <summary>
     /// Runs one attempt's pair of streams. The attempt owns <paramref name="attempt"/> for its
     /// whole life, including after the manager has moved on to the next one.
     /// </summary>
     private async Task<StreamResult> RunDualStreamAsync(bool isSender, Func<Stream, CancellationToken, Task> writeAction, Func<Stream, CancellationToken, Task> readAction, CancellationTokenSource attempt)
     {
-         var token = attempt.Token;
-         // Trigger: Data Stream
-         // Trigger: Control Stream
-         
-         Task<StreamResult> tData;
-         Task<StreamResult> tControl;
-         Task<StreamResult> written;
-         Task<StreamResult> read;
+        var token = attempt.Token;
+        // Trigger: Data Stream
+        // Trigger: Control Stream
 
-         if (isSender)
-         {
-             // Sender writes Data, reads Control
-             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, writeAction, readAction, token);
-             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, writeAction, readAction, token);
-             (written, read) = (tData, tControl);
-         }
-         else
-         {
-             // Receiver reads Data, writes Control
-             tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, writeAction, readAction, token);
-             tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, writeAction, readAction, token);
-             (written, read) = (tControl, tData);
-         }
-         WriteTask = written;
-         ReadTask = read;
+        Task<StreamResult> tData;
+        Task<StreamResult> tControl;
+        Task<StreamResult> written;
+        Task<StreamResult> read;
 
-         var tasks = new List<Task<StreamResult>> { tData, tControl };
+        if (isSender)
+        {
+            // Sender writes Data, reads Control
+            tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: true, writeAction, readAction, token);
+            tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: false, writeAction, readAction, token);
+            (written, read) = (tData, tControl);
+        }
+        else
+        {
+            // Receiver reads Data, writes Control
+            tData = RunHttpStreamAsync(ConnectionType.Data, isWrite: false, writeAction, readAction, token);
+            tControl = RunHttpStreamAsync(ConnectionType.Control, isWrite: true, writeAction, readAction, token);
+            (written, read) = (tControl, tData);
+        }
+        WriteTask = written;
+        ReadTask = read;
 
-         while (tasks.Count > 0)
-         {
-             var completedTask = await Task.WhenAny(tasks);
-             tasks.Remove(completedTask);
+        var tasks = new List<Task<StreamResult>> { tData, tControl };
 
-             var result = await completedTask;
-             if (!result.IsSuccess)
-             {
-                 // What the hub relayed to the read side before refusing the write side may still be on
-                 // its way: a receiver's acknowledgement, refused because the sender's Abort ended the
-                 // transfer, comes back ahead of that Abort. Cancelling the read side now loses it, and
-                 // the session fails on the refusal instead of the Abort's reason. A cut is not waited
-                 // on: nothing says the hub is done with the read side, and the reconnection has to be quick.
-                 if (result.Refused && completedTask == written)
-                 {
-                     try
-                     {
-                         await read.WaitAsync(ReadSideEndTimeout);
-                     }
-                     catch (TimeoutException)
-                     {
-                         _config.Logger.LogDebug("The hub had not ended the read stream of Transfer={TransferId} after refusing its write stream", _transferId);
-                     }
-                 }
+        while (tasks.Count > 0)
+        {
+            var completedTask = await Task.WhenAny(tasks);
+            tasks.Remove(completedTask);
 
-                 // Cancels this attempt's other stream, never whatever attempt the manager is on
-                 // now: an attempt that has already been replaced is still unwinding, and reaching
-                 // for the shared field made it cancel the streams that succeeded it — every
-                 // reopened stream then died within a fraction of a millisecond.
-                 attempt.Cancel();
-                 return result;
-             }
-         }
-         
-         return new StreamResult(StreamOutcome.Ended);
+            var result = await completedTask;
+            if (!result.IsSuccess)
+            {
+                // What the hub relayed to the read side before refusing the write side may still be on
+                // its way: a receiver's acknowledgement, refused because the sender's Abort ended the
+                // transfer, comes back ahead of that Abort. Cancelling the read side now loses it, and
+                // the session fails on the refusal instead of the Abort's reason. A cut is not waited
+                // on: nothing says the hub is done with the read side, and the reconnection has to be quick.
+                if (result.Refused && completedTask == written)
+                {
+                    try
+                    {
+                        await read.WaitAsync(ReadSideEndTimeout);
+                    }
+                    catch (TimeoutException)
+                    {
+                        _config.Logger.LogDebug("The hub had not ended the read stream of Transfer={TransferId} after refusing its write stream", _transferId);
+                    }
+                }
+
+                // Cancels this attempt's other stream, never whatever attempt the manager is on
+                // now: an attempt that has already been replaced is still unwinding, and reaching
+                // for the shared field made it cancel the streams that succeeded it — every
+                // reopened stream then died within a fraction of a millisecond.
+                attempt.Cancel();
+                return result;
+            }
+        }
+
+        return new StreamResult(StreamOutcome.Ended);
     }
 
     public void CancelStreams()
@@ -479,13 +479,13 @@ internal class HttpStreamManager : IAsyncDisposable
                 }
 
                 using var response = await _transport.HttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
-                
+
                 // 1. Handle Gone/NotFound (Fatal)
                 if (response.StatusCode == HttpStatusCode.Gone || response.StatusCode == HttpStatusCode.NotFound)
                 {
                     return new StreamResult(StreamOutcome.Gone, $"Transfer Gone ({response.StatusCode})");
                 }
-                
+
                 // 2. Handle Unauthorized (401) - Token expired
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
@@ -494,12 +494,12 @@ internal class HttpStreamManager : IAsyncDisposable
                         // Retry once with forced refresh
                         _config.Logger.LogWarning("Stream Unauthorized (401). Refreshing token and retrying...");
                         forceRefresh = true;
-                        continue; 
+                        continue;
                     }
                     else
                     {
-                         // Second failure -> Retryable (force Session reconnect)
-                         return new StreamResult(StreamOutcome.Retryable, "Unauthorized (401) - Check credentials");
+                        // Second failure -> Retryable (force Session reconnect)
+                        return new StreamResult(StreamOutcome.Retryable, "Unauthorized (401) - Check credentials");
                     }
                 }
 
@@ -511,27 +511,27 @@ internal class HttpStreamManager : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
-                 return new StreamResult(StreamOutcome.Cancelled);
+                return new StreamResult(StreamOutcome.Cancelled);
             }
             catch (WireProtocolViolationException ex)
             {
-                 // The peer sent something this version cannot interpret; reconnecting would only
-                 // repeat the violation, so this is fatal rather than retryable.
-                 _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
-                 return new StreamResult(StreamOutcome.Fatal, ex.Message);
+                // The peer sent something this version cannot interpret; reconnecting would only
+                // repeat the violation, so this is fatal rather than retryable.
+                _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
+                return new StreamResult(StreamOutcome.Fatal, ex.Message);
             }
             catch (Exception ex)
             {
-                 // Network errors allow retry
-                 _config.Logger.LogWarning("Stream failed, returning Retryable: {Message}", ex.Message);
-                 return new StreamResult(StreamOutcome.Retryable, ex.Message);
+                // Network errors allow retry
+                _config.Logger.LogWarning("Stream failed, returning Retryable: {Message}", ex.Message);
+                return new StreamResult(StreamOutcome.Retryable, ex.Message);
             }
-            
+
             // Only a 401 loops here, to retry once with a refreshed token. Every other path
             // returns, including an exception: restarting a broken stream is DataSession's, so
             // that the decision to retry is taken where the session state is known.
         }
-        
+
         return new StreamResult(StreamOutcome.Cancelled);
     }
 

@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
@@ -6,7 +7,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
-using System.Security.Claims;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace TransportR.Auth.SimpleIdp;
@@ -51,7 +51,7 @@ public static class SimpleIdpExtensions
             {
                 opt.SetTokenEndpointUris("connect/token");
                 opt.AllowClientCredentialsFlow();
-                
+
                 // Register all scopes from configured clients
                 var allScopes = options.Clients
                     .SelectMany(c => c.GetEffectiveScopes())
@@ -62,11 +62,11 @@ public static class SimpleIdpExtensions
                 opt.AddDevelopmentEncryptionCertificate()
                    .AddDevelopmentSigningCertificate()
                    .DisableAccessTokenEncryption(); // Produce signed JWS tokens for standard JWT validation
-                   
+
                 opt.UseAspNetCore()
                    .EnableTokenEndpointPassthrough()
                    .DisableTransportSecurityRequirement(); // Allow HTTP for development
-                   
+
                 // Set token lifetime
                 opt.SetAccessTokenLifetime(options.TokenLifetime);
             })
@@ -117,7 +117,7 @@ public class SimpleIdpTokenController : ControllerBase
     [HttpPost("~/connect/token")]
     public async Task<IActionResult> Exchange()
     {
-        var request = Microsoft.AspNetCore.OpenIddictServerAspNetCoreHelpers.GetOpenIddictServerRequest(HttpContext) 
+        var request = Microsoft.AspNetCore.OpenIddictServerAspNetCoreHelpers.GetOpenIddictServerRequest(HttpContext)
             ?? throw new InvalidOperationException("The OpenID Connect request cannot be retrieved.");
 
         if (request.IsClientCredentialsGrantType())

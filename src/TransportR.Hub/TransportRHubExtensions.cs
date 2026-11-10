@@ -1,13 +1,13 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Configuration;
 using TransportR.Hub.Access;
-using TransportR.Hub.Controllers;
 using TransportR.Hub.Configuration;
+using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Identity;
@@ -41,7 +41,7 @@ public class DataHubBuilder
         configure?.Invoke(DevOptions);
         return this;
     }
-    
+
     /// <summary>
     /// Enables affinity handoff for HA deployment with multiple hub instances.
     /// Requires sticky sessions on the load balancer and a shared IStateStore.
@@ -72,16 +72,16 @@ public static class TransportRHubExtensions
         // Default state store (in-memory). TryAdd, so a store the host registered before this call is
         // kept; UseRedisStore and the other store extensions replace it.
         services.TryAddSingleton<IStateStore, InMemoryStateStore>();
-        
+
         // TransferManager
         services.AddSingleton<ITransferManager, TransferManager>();
-        
+
         // BridgeManager (manages HTTP stream bridges)
         services.AddSingleton<IBridgeManager, BridgeManager>();
-        
+
         // Affinity options (disabled by default)
         services.Configure<AffinityOptions>(options => options.Enabled = false);
-        
+
         // A timeout of zero or less would end every transfer on the first check, and a stalled-progress
         // bound at or below the bridge timeout reads a reconnection as a stall and kills transfers that
         // would have recovered. Both are refused when the host starts rather than found in production.
@@ -112,7 +112,7 @@ public static class TransportRHubExtensions
         // the host calls it.
         services.AddSingleton<IAccessReconciler, AccessReconciler>();
         services.AddHostedService<AccessSweepService>();
-        
+
         // Bridge cleanup service
         services.AddHostedService<BridgeCleanupService>();
 
@@ -125,7 +125,7 @@ public static class TransportRHubExtensions
 
         // Transfer cleanup service (Timeouts)
         services.AddHostedService<TransferCleanupService>();
-        
+
         services.AddSingleton<ITransferNotifier, ClientStreamNotifier>();
 
         // Registered as itself too: the control route drives the same handshake through members the
@@ -140,7 +140,7 @@ public static class TransportRHubExtensions
         // TransportRServer requires an IHubProgressMonitor; TryAdd so a host that registers its
         // own before Build() keeps seeing it used, whichever order that registration happens in.
         services.TryAddSingleton<IHubProgressMonitor, NoopHubProgressMonitor>();
-        
+
         // The data plane (StreamController) and the control plane (ClientController).
         services.AddControllers()
                 .AddApplicationPart(typeof(TransportRHubExtensions).Assembly)

@@ -137,7 +137,12 @@ public class HostRevocationTests
             var store = host.Services.GetRequiredService<IStateStore>();
             return new Node
             {
-                Host = host, Rights = rights, Sender = sender, Receiver = receiver, Send = send, Receive = receive,
+                Host = host,
+                Rights = rights,
+                Sender = sender,
+                Receiver = receiver,
+                Send = send,
+                Receive = receive,
                 ConnectionId = (await store.GetClientAsync(sender.ClientId))!.ConnectionId,
             };
         }

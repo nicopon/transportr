@@ -12,10 +12,10 @@ public static class ChunkIO
     /// Writes a batch chunk (header + payload) to the stream.
     /// </summary>
     public static async Task WriteBatchAsync(
-        Stream stream, 
-        Guid transferId, 
-        int batchId, 
-        int count, 
+        Stream stream,
+        Guid transferId,
+        int batchId,
+        int count,
         ReadOnlyMemory<byte> payload,
         CancellationToken ct = default)
     {
@@ -80,9 +80,9 @@ public static class ChunkIO
     /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.
     /// </summary>
     public static async Task WriteControlAsync(
-        Stream stream, 
-        Guid transferId, 
-        int batchId, 
+        Stream stream,
+        Guid transferId,
+        int batchId,
         ChunkType type,
         CancellationToken ct = default)
     {
@@ -142,23 +142,23 @@ public static class ChunkIO
     }
 
     private static async Task WriteChunkAsync(
-        Stream stream, 
-        ChunkHeader header, 
+        Stream stream,
+        ChunkHeader header,
         ReadOnlyMemory<byte> payload,
         CancellationToken ct)
     {
         // Rent buffer for header + payload
         int totalSize = ChunkHeader.Size + payload.Length;
         byte[] buffer = ArrayPool<byte>.Shared.Rent(totalSize);
-        
+
         try
         {
             // Write header to buffer
             header.WriteTo(buffer.AsSpan());
-            
+
             // Copy payload to buffer
             payload.Span.CopyTo(buffer.AsSpan(ChunkHeader.Size));
-            
+
             // Write entire buffer to stream
             await stream.WriteAsync(buffer.AsMemory(0, totalSize), ct).ConfigureAwait(false);
         }
@@ -169,12 +169,12 @@ public static class ChunkIO
     }
 
     private static async Task WriteHeaderOnlyAsync(
-        Stream stream, 
+        Stream stream,
         ChunkHeader header,
         CancellationToken ct)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(ChunkHeader.Size);
-        
+
         try
         {
             header.WriteTo(buffer.AsSpan());
@@ -194,10 +194,10 @@ public readonly struct ChunkData : IDisposable
 {
     /// <summary>Chunk header.</summary>
     public ChunkHeader Header { get; }
-    
+
     /// <summary>Payload memory owner (null for control messages).</summary>
     private readonly IMemoryOwner<byte>? _payloadOwner;
-    
+
     /// <summary>Actual payload length.</summary>
     private readonly int _payloadLength;
 

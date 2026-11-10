@@ -39,7 +39,7 @@ internal class ReconnectionHandler : IDisposable
             return false;
         }
     }
-    
+
     /// <summary>
     /// Called when Stream Pong is received (handshake on new stream).
     /// </summary>

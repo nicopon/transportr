@@ -41,7 +41,7 @@ public class SenderOptions
     public string OutputDirectory { get; set; } = "output";
     public string Group { get; set; } = "senders";
     public string? AccessToken { get; set; } = null;
-    
+
     /// <summary>
     /// Auth configuration for automatic token acquisition.
     /// </summary>
@@ -54,9 +54,9 @@ public class AuthOptions
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecret { get; set; } = string.Empty;
     public string? Scope { get; set; }
-    
-    public bool IsConfigured => 
-        !string.IsNullOrEmpty(TokenEndpoint) && 
-        !string.IsNullOrEmpty(ClientId) && 
+
+    public bool IsConfigured =>
+        !string.IsNullOrEmpty(TokenEndpoint) &&
+        !string.IsNullOrEmpty(ClientId) &&
         !string.IsNullOrEmpty(ClientSecret);
 }

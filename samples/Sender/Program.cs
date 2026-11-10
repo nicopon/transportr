@@ -1,18 +1,18 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using Shared.Models;
-using Serilog;
+using Microsoft.Extensions.Logging;
 using Sender.Configuration;
 using Sender.Services;
+using Serilog;
+using Shared.Models;
 using TransportR.Abstractions;
+using TransportR.Auth.ClientCredentials; // Extension
+using TransportR.Client;
 using TransportR.Client.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
-using TransportR.Client;
-using TransportR.Auth.ClientCredentials; // Extension
+using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension
-using TransportR.Serialization.Json; // Extension
 
 // Configuration builder
 var configuration = new ConfigurationBuilder()
@@ -85,7 +85,7 @@ var hubBaseUrl = hubUrl;
 // Token provider setup
 if (senderOptions.Auth?.IsConfigured == true)
 {
-     logger.LogInformation("Auth: Client Credentials enabled (ClientId={ClientId})", senderOptions.Auth.ClientId);
+    logger.LogInformation("Auth: Client Credentials enabled (ClientId={ClientId})", senderOptions.Auth.ClientId);
 }
 else if (!string.IsNullOrEmpty(senderOptions.AccessToken))
 {
@@ -168,77 +168,77 @@ try
 
     // 2. Discover Receivers (GetReceiversAsync returns only authorized receivers)
     List<ClientInfo> receivers = new();
-    
+
     logger.LogInformation("Searching for authorized receivers...");
     int retry = 0;
-    while(receivers.Count == 0 && retry < 10)
+    while (receivers.Count == 0 && retry < 10)
     {
-            receivers = await broker.GetReceiversAsync();
-            if (receivers.Count == 0) 
-            {
-                logger.LogWarning("No authorized receiver found. Waiting...");
-                await Task.Delay(2000);
-                retry++;
-            }
+        receivers = await broker.GetReceiversAsync();
+        if (receivers.Count == 0)
+        {
+            logger.LogWarning("No authorized receiver found. Waiting...");
+            await Task.Delay(2000);
+            retry++;
+        }
     }
-    
+
     if (receivers.Count == 0) throw new Exception("Timeout: No authorized receiver found.");
     logger.LogInformation("Found {Count} authorized receivers.", receivers.Count);
-    
+
     // 3. Start Parallel Sending Tasks
     var tasks = new List<Task>();
-    
+
     for (int i = 0; i < parallelism; i++)
     {
         var target = receivers[i % receivers.Count]; // Round robin
 
         // A transfer opened later finds the earlier ones already flowing.
         var openDelay = TimeSpan.FromSeconds(senderOptions.TransferStaggerSeconds) * i;
-        
+
         // We need a separate scope/service for each stream to be safe
         var service = new OrderFileReader(sourceFilePath, loggerFactory.CreateLogger<OrderFileReader>());
 
-        tasks.Add(Task.Run(async () => 
+        tasks.Add(Task.Run(async () =>
         {
-                Send<Order>? transfer = null;
-                try 
-                {
-                    if (openDelay > TimeSpan.Zero) await Task.Delay(openDelay);
-                    transfer = await broker.InitTransferAsync(target.ClientId, batchSize);
-                    logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
-                    
-                    var (count, startTime) = await SendOrdersAsync(transfer, service, broker, showProgress, senderOptions.MaxItems, logger, CancellationToken.None);
+            Send<Order>? transfer = null;
+            try
+            {
+                if (openDelay > TimeSpan.Zero) await Task.Delay(openDelay);
+                transfer = await broker.InitTransferAsync(target.ClientId, batchSize);
+                logger.LogInformation("Sender -> Receiver {ReceiverId} [Transfer: {TransferId}]", target.ClientId, transfer.TransferId);
 
-                    // CompleteAsync returning is the receiver's word that it has everything; the
-                    // counters below are stats, not the verdict. It throws when it is not.
-                    await transfer.CompleteAsync();
-                    
-                    var totalDuration = (DateTime.UtcNow - startTime).TotalSeconds;
-                    var finalThroughput = totalDuration > 0 ? count / totalDuration : 0;
-                    var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
-                    
-                    var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {count:N0} items | {finalInfo?.AcksReceived ?? 0} ACKs received | {finalThroughput:N0} items/s";
-                    logger.LogInformation(statsMsg);
+                var (count, startTime) = await SendOrdersAsync(transfer, service, broker, showProgress, senderOptions.MaxItems, logger, CancellationToken.None);
 
-                    if (showProgress)
-                        Console.WriteLine(statsMsg);
-                }
-                catch (TransferFailedException ex)
-                {
-                    logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
-                    Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
-                }
-                catch(Exception ex)
-                {
-                    logger.LogError(ex, "Error in send task");
-                }
-                finally
-                {
-                    if (transfer != null) await transfer.DisposeAsync();
-                }
+                // CompleteAsync returning is the receiver's word that it has everything; the
+                // counters below are stats, not the verdict. It throws when it is not.
+                await transfer.CompleteAsync();
+
+                var totalDuration = (DateTime.UtcNow - startTime).TotalSeconds;
+                var finalThroughput = totalDuration > 0 ? count / totalDuration : 0;
+                var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
+
+                var statsMsg = $"[SENDER][STATS] Transfer {transfer.TransferId[..8]} complete: {count:N0} items | {finalInfo?.AcksReceived ?? 0} ACKs received | {finalThroughput:N0} items/s";
+                logger.LogInformation(statsMsg);
+
+                if (showProgress)
+                    Console.WriteLine(statsMsg);
+            }
+            catch (TransferFailedException ex)
+            {
+                logger.LogError(ex, "Transfer {TransferId} failed", ex.TransferId);
+                Console.Error.WriteLine($"[SENDER] TRANSFER FAILED: {ex.Message}");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in send task");
+            }
+            finally
+            {
+                if (transfer != null) await transfer.DisposeAsync();
+            }
         }));
     }
-    
+
     await Task.WhenAll(tasks);
 
     ReportLiveSessions("SENDER", broker, logger);
@@ -420,7 +420,7 @@ static async Task SendFileAsync(
 }
 
 static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
-    Send<Order> transfer, 
+    Send<Order> transfer,
     OrderFileReader dataService,
     TransportRClient<Order> broker,
     bool showProgress,
@@ -449,7 +449,7 @@ static async Task<(int Count, DateTime StartTime)> SendOrdersAsync(
                 logger.LogInformation("[Transfer {TransferId}] Stopping after {Count} items (MaxItems)", transfer.TransferId, count);
                 break;
             }
-            
+
             // Periodic stats every 5 seconds
             if (showProgress && (DateTime.UtcNow - lastStatsTime).TotalSeconds >= 5)
             {

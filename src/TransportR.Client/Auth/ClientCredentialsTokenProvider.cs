@@ -15,7 +15,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
     private readonly HttpClient _httpClient;
     private readonly ILogger<ClientCredentialsTokenProvider>? _logger;
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
-    
+
     private string? _cachedToken;
     private DateTime? _tokenExpiry;
     private bool _disposed;
@@ -32,10 +32,10 @@ internal class ClientCredentialsTokenProvider : IDisposable
         HttpClient? httpClient = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        
+
         if (!options.IsConfigured)
             throw new ArgumentException("ClientCredentialsOptions is not fully configured", nameof(options));
-        
+
         _logger = logger;
         _httpClient = httpClient ?? new HttpClient();
     }
@@ -47,7 +47,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
     public async Task<string> GetTokenAsync(CancellationToken cancellationToken = default)
     {
         // Fast path: return cached token if still valid
-        if (_cachedToken != null && _tokenExpiry.HasValue && 
+        if (_cachedToken != null && _tokenExpiry.HasValue &&
             DateTime.UtcNow < _tokenExpiry.Value - _options.RefreshThreshold)
         {
             return _cachedToken;
@@ -58,21 +58,21 @@ internal class ClientCredentialsTokenProvider : IDisposable
         try
         {
             // Double-check after acquiring lock
-            if (_cachedToken != null && _tokenExpiry.HasValue && 
+            if (_cachedToken != null && _tokenExpiry.HasValue &&
                 DateTime.UtcNow < _tokenExpiry.Value - _options.RefreshThreshold)
             {
                 return _cachedToken;
             }
 
             _logger?.LogInformation("Acquiring token from {TokenEndpoint}...", _options.TokenEndpoint);
-            
+
             var token = await AcquireTokenAsync(cancellationToken);
             _cachedToken = token;
             _tokenExpiry = JwtHelper.ExtractExpiry(token);
-            
-            _logger?.LogInformation("Token acquired, expires at {Expiry}", 
+
+            _logger?.LogInformation("Token acquired, expires at {Expiry}",
                 _tokenExpiry?.ToString("u") ?? "unknown");
-            
+
             return token;
         }
         finally
@@ -97,7 +97,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
         });
 
         var response = await _httpClient.PostAsync(_options.TokenEndpoint, content, cancellationToken);
-        
+
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -107,13 +107,13 @@ internal class ClientCredentialsTokenProvider : IDisposable
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         using var doc = JsonDocument.Parse(json);
-        
+
         if (!doc.RootElement.TryGetProperty("access_token", out var tokenElement))
         {
             throw new InvalidOperationException("Token response did not contain access_token");
         }
 
-        return tokenElement.GetString() 
+        return tokenElement.GetString()
             ?? throw new InvalidOperationException("access_token was null");
     }
 

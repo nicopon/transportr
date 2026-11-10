@@ -1,7 +1,6 @@
-using TransportR.Models;
-
 // Re-export abstract classes from Abstractions namespace for backward compatibility
 using TransportR.Abstractions;
+using TransportR.Models;
 
 namespace TransportR.Interfaces;
 
@@ -31,7 +30,7 @@ public interface IDataClient
     /// afterwards: a host that needs the hub again builds another one.
     /// </summary>
     Task DisconnectAsync();
-    
+
     /// <summary>
     /// Gets information about all active transfers.
     /// </summary>

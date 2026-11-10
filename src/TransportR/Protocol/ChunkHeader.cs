@@ -11,25 +11,25 @@ public readonly struct ChunkHeader
 {
     /// <summary>Fixed header size in bytes.</summary>
     public const int Size = 30;
-    
+
     /// <summary>Current protocol version.</summary>
     public const byte CurrentVersion = 2;
 
     /// <summary>Protocol version (1 byte).</summary>
     public byte Version { get; init; }
-    
+
     /// <summary>Chunk type (1 byte).</summary>
     public ChunkType Type { get; init; }
-    
+
     /// <summary>Payload length in bytes (4 bytes). 0 for control messages.</summary>
     public int PayloadLength { get; init; }
-    
+
     /// <summary>Batch identifier (4 bytes).</summary>
     public int BatchId { get; init; }
-    
+
     /// <summary>Item count in batch (4 bytes). 0 for control messages.</summary>
     public int Count { get; init; }
-    
+
     /// <summary>Transfer identifier (16 bytes).</summary>
     public Guid TransferId { get; init; }
 

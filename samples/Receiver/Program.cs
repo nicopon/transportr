@@ -1,15 +1,15 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
-using TransportR.Abstractions;
-using Shared.Models;
-using Serilog;
+using Microsoft.Extensions.Logging;
 using Receiver.Configuration;
-using TransportR.Interfaces;
-using TransportR.Client;
+using Serilog;
+using Shared.Models;
+using TransportR.Abstractions;
 using TransportR.Auth.ClientCredentials; // Extension
+using TransportR.Client;
+using TransportR.Interfaces;
+using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension
-using TransportR.Serialization.Json; // Extension
 
 // Note: BatchTimeoutMs is not used by the Receiver, but required by constructor.
 var batchTimeoutMs = 1000; // Default value, as it's not used by the receiver.
@@ -70,7 +70,7 @@ var hubBaseUrl = receiverOptions.HubUrl;
 // Token provider setup
 if (receiverOptions.Auth?.IsConfigured == true)
 {
-     logger.LogInformation("Auth: Automatic token acquisition enabled (ClientId={ClientId})", receiverOptions.Auth.ClientId);
+    logger.LogInformation("Auth: Automatic token acquisition enabled (ClientId={ClientId})", receiverOptions.Auth.ClientId);
 }
 else if (!string.IsNullOrEmpty(receiverOptions.AccessToken))
 {
@@ -120,7 +120,7 @@ if (receiverOptions.ConsumeItemsPerSecond > 0)
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 
- if (serializerType.Equals("Protobuf", StringComparison.OrdinalIgnoreCase))
+if (serializerType.Equals("Protobuf", StringComparison.OrdinalIgnoreCase))
 {
     var levelStr = configuration["PROTOBUF_COMPRESSION_LEVEL"] ?? "-1";
     int.TryParse(levelStr, out int compressionLevel);
@@ -141,7 +141,7 @@ else
     logger.LogInformation("Serializer: MessagePack + Lz4 (Default)");
     clientBuilder.WithMessagePackSerialization(useAnnotations: true);
 }
-    
+
 if (receiverOptions.Auth?.IsConfigured == true)
 {
     clientBuilder.WithClientCredentials(
@@ -175,10 +175,10 @@ try
     await broker.ConnectAsync(new[] { group }, cts.Token);
     logger.LogInformation("Client registered (ID={ClientId}, Group={Group}). Waiting for {Count} streams...", broker.ClientId, group, expectedTransfers);
 
-    broker.OnTransferStarted += async (Receive<Order> transfer) => 
+    broker.OnTransferStarted += async (Receive<Order> transfer) =>
     {
         // Run specific transfer logic in background
-        _ = Task.Run(async () => 
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -202,8 +202,8 @@ try
             {
                 logger.LogCritical(ex, "[Transfer {TransferId}] Critical error", transfer.TransferId);
             }
-                try { completionSignal.Signal(); } catch (Exception ex) { logger.LogError(ex, "Error signalling"); }
-                logger.LogInformation("[Transfer {TransferId}] Signalled.", transfer.TransferId);
+            try { completionSignal.Signal(); } catch (Exception ex) { logger.LogError(ex, "Error signalling"); }
+            logger.LogInformation("[Transfer {TransferId}] Signalled.", transfer.TransferId);
 
         });
         await Task.CompletedTask;
@@ -221,7 +221,7 @@ catch (Exception ex)
     logger.LogCritical(ex, "Fatal error");
     Console.Error.WriteLine($"[RECEIVER] FATAL ERROR: {ex}");
 }
-finally 
+finally
 {
     await broker.DisposeAsync();
     Console.WriteLine("[RECEIVER] !!! TERMINATED !!!");
@@ -383,7 +383,7 @@ static async Task<long> WriteByteStreamAsync(ByteReceive transfer, string output
 
 static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient broker, string outputDirectory, bool showProgress, int consumeItemsPerSecond, CancellationToken cancellationToken, Microsoft.Extensions.Logging.ILogger logger)
 {
-    var csvFile = Path.Combine(outputDirectory, $"orders_{transfer.TransferId}.csv"); 
+    var csvFile = Path.Combine(outputDirectory, $"orders_{transfer.TransferId}.csv");
     using var writer = new StreamWriter(csvFile, false);
 
     int itemsReceived = 0;
@@ -397,7 +397,7 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
     try
     {
         var stream = transfer.ReceiveAsync(cancellationToken);
-        
+
         await foreach (var order in stream.WithCancellation(cancellationToken))
         {
             itemsReceived++;
@@ -418,7 +418,7 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
             }
 
             await writer.WriteLineAsync($"{order.OrderId},{order.OrderDate:O},{order.CustomerName},{order.CustomerEmail},{order.ShippingAddress},{order.BillingAddress},{order.TotalAmount},{order.TaxAmount},{order.DiscountAmount},{order.Currency},{order.PaymentMethod},{order.Status},{order.ShippingPriority},{order.TrackingNumber},{order.Notes}");
-            
+
             if (itemsReceived % 20000 == 0 && !showProgress)
             {
                 logger.LogInformation("[Transfer {TransferId}] Received {ItemsReceived} items...", transfer.TransferId, itemsReceived);
@@ -430,10 +430,10 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
                 var duration = (now - lastStatsTime).TotalSeconds;
                 var deltaItems = itemsReceived - lastItemsReceived;
                 var throughput = deltaItems / duration;
-                
+
                 var transfers = broker.GetTransfers();
                 var currentTransfer = transfers.FirstOrDefault(t => t.TransferId == transfer.TransferId);
-                
+
                 var statsMsg = $"[RECEIVER][STATS] Transfer {transfer.TransferId[..8]}: {itemsReceived:N0} items | {currentTransfer?.AcksSent ?? 0} ACKs sent | {throughput:N0} items/s";
                 if (showProgress)
                     Console.WriteLine(statsMsg);
@@ -449,7 +449,7 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
         if (!cancellationToken.IsCancellationRequested)
             logger.LogError(ex, "[Transfer {TransferId}] Error during stream", transfer.TransferId);
     }
-    
+
     var totalDuration = (DateTime.UtcNow - startTime).TotalSeconds;
     var finalThroughput = totalDuration > 0 ? itemsReceived / totalDuration : 0;
     var finalInfo = broker.GetTransfers().FirstOrDefault(t => t.TransferId == transfer.TransferId);
@@ -458,6 +458,6 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
     if (showProgress)
         Console.WriteLine(finalStatsMsg);
     logger.LogInformation(finalStatsMsg);
-    
+
     return itemsReceived;
 }

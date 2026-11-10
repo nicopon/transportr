@@ -40,13 +40,13 @@ internal class BatchProcessor : IAsyncDisposable
     private SemaphoreSlim? _inFlightSlots;
 
     private int _pendingBatches = 0;
-    
+
     // Receiver State
     private ReceiverState? _receiverState;
-    
+
     // Synchronization
     private TaskCompletionSource? _completeAckReceived;
-    
+
     // Stats
     private long _itemsSent;
     private long _itemsReceived;
@@ -144,7 +144,7 @@ internal class BatchProcessor : IAsyncDisposable
         source.Detach();
         _source = null;
     }
-    
+
     /// <summary>
     /// Ends delivery to the consumer. The outgoing channel is deliberately left open: the
     /// acknowledgement the receiver still owes its sender may have to be written again on a
@@ -154,7 +154,7 @@ internal class BatchProcessor : IAsyncDisposable
     {
         _sink?.Complete();
     }
-    
+
     public void CompleteSenderChannel()
     {
         _sendChannel.Writer.TryComplete();
@@ -168,12 +168,12 @@ internal class BatchProcessor : IAsyncDisposable
     {
         _source?.Abandon();
     }
-    
+
     public Task WaitForCompleteAckAsync(CancellationToken token)
     {
         return _completeAckReceived?.Task.WaitAsync(token) ?? Task.CompletedTask;
     }
-    
+
     /// <summary>
     /// Handles one chunk read off the data stream.
     /// </summary>
@@ -323,7 +323,7 @@ internal class BatchProcessor : IAsyncDisposable
 
         Interlocked.Increment(ref _pendingBatches);
         Interlocked.Add(ref _itemsSent, count);
-        
+
         UpdateMaxBatchIdSent(batchId);
 
         try
@@ -337,7 +337,7 @@ internal class BatchProcessor : IAsyncDisposable
             throw;
         }
     }
-    
+
     /// <param name="payload">
     /// Returned by this method until the receiver state takes it, which it does on every path that
     /// reaches it.
@@ -384,12 +384,12 @@ internal class BatchProcessor : IAsyncDisposable
 
     private void HandleBatchAck(int batchId)
     {
-        if (_unackedBatches.TryRemove(batchId, out var entry)) 
+        if (_unackedBatches.TryRemove(batchId, out var entry))
         {
-             // Release the reference held by the Dictionary
-             entry.Release(); 
-             Interlocked.Decrement(ref _pendingBatches);
-             ReleaseInFlightSlot();
+            // Release the reference held by the Dictionary
+            entry.Release();
+            Interlocked.Decrement(ref _pendingBatches);
+            ReleaseInFlightSlot();
         }
         CountAck();
     }
@@ -433,14 +433,14 @@ internal class BatchProcessor : IAsyncDisposable
             // Session torn down while an ack was in flight; nothing left to bound.
         }
     }
-    
+
     private async Task HandlePingAsync()
     {
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Pong, nextExpected));
         _context.Logger.LogDebug("Received Ping, sent Pong(nextExpected={NextExpected}) for Transfer={TransferId}", nextExpected, _transferId);
     }
-    
+
     public event Action<int>? OnPongReceived;
     public event Action? OnCompleteAckReceived;
     public event Func<Task>? OnCompleteReceived;
@@ -456,7 +456,7 @@ internal class BatchProcessor : IAsyncDisposable
     {
         OnPongReceived?.Invoke(nextExpectedBatchId);
     }
-    
+
     public async Task SendCompleteSignalAsync()
     {
         // One for the whole closing sequence: the receiver acknowledges once, so a retry that replaced
@@ -465,25 +465,25 @@ internal class BatchProcessor : IAsyncDisposable
         // Send the Last Batch ID so receiver can verify if it missed anything
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Complete, _maxBatchIdSent));
     }
-    
+
     private async Task HandleCompleteAsync(ChunkHeader header)
     {
         int lastBatchIdFromSender = header.BatchId;
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
-        
+
         // Validation: every batch up to lastBatchId must already be in.
         // If lastBatchIdFromSender is -1, it means 0 batches sent. NextExpected should be 0.
         // If lastBatchIdFromSender is 10. We expect to have processed 0..10. So NextExpected should be 11.
         // So condition is: NextExpected <= lastBatchIdFromSender.
-        
+
         if (nextExpected <= lastBatchIdFromSender)
         {
-            _context.Logger.LogWarning("Ignored Premature Complete. Missing batches. NextExpected={Next}, LastSent={Last} (Transfer={TransferId})", 
+            _context.Logger.LogWarning("Ignored Premature Complete. Missing batches. NextExpected={Next}, LastSent={Last} (Transfer={TransferId})",
                 nextExpected, lastBatchIdFromSender, _transferId);
             return; // Ignore complete signal. Sender will retry.
         }
 
-        _context.Logger.LogInformation("Received Valid Complete (LastBatch={Last}). NextExpected={Next}. Sending CompleteAck (Transfer={TransferId})", 
+        _context.Logger.LogInformation("Received Valid Complete (LastBatch={Last}). NextExpected={Next}. Sending CompleteAck (Transfer={TransferId})",
             lastBatchIdFromSender, nextExpected, _transferId);
 
         // The session enters its closing phase before the acknowledgement can be written: it reads the
@@ -491,7 +491,7 @@ internal class BatchProcessor : IAsyncDisposable
         if (OnCompleteReceived != null) await OnCompleteReceived.Invoke();
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }
-    
+
     private void HandleCompleteAck()
     {
         _completeAckReceived?.TrySetResult();
@@ -535,7 +535,7 @@ internal class BatchProcessor : IAsyncDisposable
         _context.Logger.LogInformation("Resending CompleteAck for Transfer={TransferId}", _transferId);
         await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }
-    
+
     /// <summary>
     /// Resends unacked batches directly to the stream (bypass channel).
     /// </summary>
@@ -546,7 +546,7 @@ internal class BatchProcessor : IAsyncDisposable
         foreach (var kvp in _unackedBatches.ToArray().OrderBy(x => x.Key))
         {
             if (token.IsCancellationRequested) return;
-            
+
             // Skip batches the receiver already has
             if (didPingPong && kvp.Key < nextExpectedFromPong)
             {
@@ -559,12 +559,12 @@ internal class BatchProcessor : IAsyncDisposable
                     // Same as an explicit ack: the batch is done, give the slot back. Without this
                     // the window shrinks by one on every resumed batch and never reopens.
                     ReleaseInFlightSlot();
-                    
+
                     _context.Logger.LogDebug("Skipped resend of batch {BatchId} (receiver has it) for Transfer={TransferId}", kvp.Key, _transferId);
                 }
                 continue;
             }
-            
+
             try
             {
                 if (!await WriteBatchAsync(outputStream, transferGuid, kvp.Key, kvp.Value, token))

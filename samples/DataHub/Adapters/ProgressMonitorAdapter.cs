@@ -1,5 +1,5 @@
-using TransportR.Interfaces;
 using DataHub.Services;
+using TransportR.Interfaces;
 
 namespace DataHub.Adapters;
 

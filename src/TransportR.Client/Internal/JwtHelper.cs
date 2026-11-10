@@ -15,13 +15,13 @@ internal static partial class JwtHelper
     public static DateTime? ExtractExpiry(string? token)
     {
         if (string.IsNullOrEmpty(token)) return null;
-        
+
         try
         {
             // JWT format: header.payload.signature
             var parts = token.Split('.');
             if (parts.Length != 3) return null;
-            
+
             // Decode payload (base64url)
             var payload = parts[1];
             // Pad base64 if needed
@@ -31,9 +31,9 @@ internal static partial class JwtHelper
                 case 3: payload += "="; break;
             }
             payload = payload.Replace('-', '+').Replace('_', '/');
-            
+
             var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(payload));
-            
+
             // Extract exp claim using regex
             var match = ExpClaimRegex().Match(json);
             if (match.Success && long.TryParse(match.Groups[1].Value, out var exp))
@@ -45,7 +45,7 @@ internal static partial class JwtHelper
         {
             // Ignore parsing errors - token may be malformed
         }
-        
+
         return null;
     }
 

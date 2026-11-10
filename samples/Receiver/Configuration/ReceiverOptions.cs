@@ -10,7 +10,7 @@ public class ReceiverOptions
     public int BatchSize { get; set; } = 5000;
     public string Group { get; set; } = "receivers";
     public string? AccessToken { get; set; } = null;
-    
+
     /// <summary>
     /// Overrides the receive buffer's item bound. Null keeps the client default.
     /// </summary>
@@ -55,9 +55,9 @@ public class AuthOptions
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecret { get; set; } = string.Empty;
     public string? Scope { get; set; }
-    
-    public bool IsConfigured => 
-        !string.IsNullOrEmpty(TokenEndpoint) && 
-        !string.IsNullOrEmpty(ClientId) && 
+
+    public bool IsConfigured =>
+        !string.IsNullOrEmpty(TokenEndpoint) &&
+        !string.IsNullOrEmpty(ClientId) &&
         !string.IsNullOrEmpty(ClientSecret);
 }

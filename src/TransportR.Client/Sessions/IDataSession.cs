@@ -13,22 +13,22 @@ internal interface IDataSession : IAsyncDisposable
     /// The unique transfer identifier.
     /// </summary>
     string TransferId { get; }
-    
+
     /// <summary>
     /// The batch size for this session.
     /// </summary>
     int BatchSize { get; }
-    
+
     /// <summary>
     /// The data plane URL for HTTP streams.
     /// </summary>
     string DataUrl { get; }
-    
+
     /// <summary>
     /// True if this session is sending data, false if receiving.
     /// </summary>
     bool IsSender { get; }
-    
+
     /// <summary>
     /// Where the session currently stands. Terminal states are
     /// <see cref="SessionState.Completed"/> and <see cref="SessionState.Failed"/>; anything else
@@ -47,37 +47,37 @@ internal interface IDataSession : IAsyncDisposable
     /// Number of items processed (sent or received).
     /// </summary>
     long ItemsProcessed { get; }
-    
+
     /// <summary>
     /// Serialized payload bytes that crossed the wire, resends included.
     /// </summary>
     long BytesTransferred { get; }
-    
+
     /// <summary>
     /// Number of ACKs received (sender) or sent (receiver).
     /// </summary>
     long AcksReceived { get; }
-    
+
     /// <summary>
     /// Number of ACKs sent by the receiver.
     /// </summary>
     long AcksSent { get; }
-    
+
     /// <summary>
     /// When the session was started.
     /// </summary>
     DateTime StartedAt { get; }
-    
+
     /// <summary>
     /// Start the session as a sender.
     /// </summary>
     Task StartSenderAsync();
-    
+
     /// <summary>
     /// Start the session as a receiver.
     /// </summary>
     Task StartReceiverAsync();
-    
+
     /// <summary>
     /// What a send made once <see cref="CompleteAsync"/> has begun is answered with, or null when the
     /// send may go on. Asked before the send reaches the source, which would drop it without a word.
@@ -100,7 +100,7 @@ internal interface IDataSession : IAsyncDisposable
     /// Trigger a reconnection attempt.
     /// </summary>
     void TriggerReconnect();
-    
+
 
     /// <summary>
     /// Waits for the transfer to be fully completed (including shutdown handshake).

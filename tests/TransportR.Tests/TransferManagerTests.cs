@@ -26,13 +26,13 @@ public class TransferManagerTests
 
         // Act
         await manager.RegisterParticipantsAsync("transfer-1", senderId, receiverId);
-        
+
         // Assert - Check Manager Memory
         var result = await manager.GetParticipantsAsync("transfer-1");
         Assert.NotNull(result);
         Assert.Equal(senderId, result.SenderId);
         Assert.Equal(receiverId, result.ReceiverId);
-        
+
         // Assert - Check State Store (Persistence)
         var session = await stateStore.GetSessionAsync("transfer-1");
         Assert.NotNull(session);
@@ -45,7 +45,7 @@ public class TransferManagerTests
         var manager = new TransferManager(new InMemoryStateStore());
         Assert.Null(await manager.GetParticipantsAsync("non-existent"));
     }
-    
+
     [Fact]
     public async Task Track_OfATransferRegisteredElsewhere_HoldsItFromTheStore()
     {
@@ -114,7 +114,7 @@ public class TransferManagerTests
         var stateStore = new InMemoryStateStore();
         var manager = new TransferManager(stateStore);
         var id = "transfer-del";
-        
+
         await manager.RegisterParticipantsAsync(id, Guid.NewGuid(), Guid.NewGuid());
         await manager.UpdateSenderStatsAsync(id, 100, 1);
 
@@ -126,7 +126,7 @@ public class TransferManagerTests
         Assert.Null(manager.GetTransfer(id));
         Assert.Null(await stateStore.GetSessionAsync(id));
     }
-    
+
     [Fact]
     public async Task RemoveTransfer_OfATransferThatNeverReported_ClearsMemoryAndStore()
     {

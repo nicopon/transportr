@@ -1,14 +1,14 @@
 using System.Buffers;
 using System.Buffers.Binary;
-using System.Threading.Channels;
 using System.Text;
-using TransportR.Client.Batching;
-using TransportR.Client.Sessions;
-using TransportR.Client.Configuration;
-using TransportR.Interfaces;
-using TransportR.Protocol;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
+using TransportR.Client.Batching;
+using TransportR.Client.Configuration;
+using TransportR.Client.Sessions;
+using TransportR.Interfaces;
+using TransportR.Protocol;
 
 namespace TransportR.Tests;
 
@@ -66,7 +66,7 @@ public class BatchProcessorTests
         // Wait for batch to appear in OutgoingMessages
         await processor.OutgoingMessages.WaitToReadAsync();
         processor.OutgoingMessages.TryRead(out var msg);
-        
+
         // Assert Initial State
         Assert.True(processor.HasUnackedBatches);
         Assert.Equal(1, processor.UnackedCount);
@@ -74,7 +74,7 @@ public class BatchProcessorTests
         // Act: Simulate receiving ACK for Batch 0
         var ackHeader = ChunkHeader.CreateControl(_transferId, 0, ChunkType.BatchAck);
         var ackChunk = new ChunkData(ackHeader, null, 0);
-        
+
         await processor.ProcessChunkAsync(ackChunk);
 
         // Assert Final State
@@ -96,42 +96,42 @@ public class BatchProcessorTests
 
         // Wait for all 3 batches to be serialized and put in Unacked
         // We read from channel to ensure they are processed
-        for(int i=0; i<3; i++)
+        for (int i = 0; i < 3; i++)
         {
-             await processor.OutgoingMessages.WaitToReadAsync();
-             processor.OutgoingMessages.TryRead(out _);
+            await processor.OutgoingMessages.WaitToReadAsync();
+            processor.OutgoingMessages.TryRead(out _);
         }
-        
+
         // Ensure we have 3 unacked
         Assert.Equal(3, processor.UnackedCount);
 
         using var outputStream = new MemoryStream();
-        
+
         // Act: Resend unacked batches, claiming Receiver NextExpected=1
         // Sender has 0, 1, 2. Receiver wants 1. So send 1, 2.
         await processor.ResendUnackedBatchesAsync(
-            outputStream, 
-            _transferId, 
-            didPingPong: true, 
-            nextExpectedFromPong: 1, 
+            outputStream,
+            _transferId,
+            didPingPong: true,
+            nextExpectedFromPong: 1,
             token: CancellationToken.None);
 
         // Assert
         Assert.Equal(2, processor.UnackedCount); // 0 removed
         Assert.True(outputStream.Length > 0);
-        
+
         outputStream.Position = 0;
-        
+
         // Read Chunk 1
         var chunk1 = await ChunkIO.ReadChunkAsync(outputStream);
         Assert.NotNull(chunk1);
         Assert.Equal(1, chunk1.Value.Header.BatchId);
-        
+
         // Read Chunk 2
         var chunk2 = await ChunkIO.ReadChunkAsync(outputStream);
         Assert.NotNull(chunk2);
         Assert.Equal(2, chunk2.Value.Header.BatchId);
-        
+
         // Should be end of stream
         var chunk3 = await ChunkIO.ReadChunkAsync(outputStream);
         Assert.Null(chunk3);
@@ -143,18 +143,18 @@ public class BatchProcessorTests
         // Arrange
         await using var processor = CreateProcessor();
         await processor.SendCompleteSignalAsync();
-        
+
         var completeTask = processor.WaitForCompleteAckAsync(CancellationToken.None);
-        
+
         // Assert: Task should not be completed yet
         Assert.False(completeTask.IsCompleted);
-        
+
         // Act: Simulate CompleteAck reception
         var ackHeader = ChunkHeader.CreateControl(_transferId, 0, ChunkType.CompleteAck);
         var ackChunk = new ChunkData(ackHeader, null, 0);
-        
+
         await processor.ProcessChunkAsync(ackChunk);
-        
+
         // Assert: Task should complete
         await completeTask;
         Assert.True(completeTask.IsCompletedSuccessfully);
@@ -385,7 +385,7 @@ public class BatchProcessorTests
             using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
             writer.Write(batch.Count);
             // Just write dummy bytes for content
-            writer.Write(new byte[10 * batch.Count]); 
+            writer.Write(new byte[10 * batch.Count]);
             return Task.CompletedTask;
         }
 
@@ -394,9 +394,9 @@ public class BatchProcessorTests
             using var reader = new BinaryReader(source, Encoding.UTF8, leaveOpen: true);
             var count = reader.ReadInt32();
             var bytes = reader.ReadBytes(10 * count);
-            var list = new List<string>(); 
+            var list = new List<string>();
             // Return empty items just to match count
-            for(int i=0; i<count; i++) list.Add(default!);
+            for (int i = 0; i < count; i++) list.Add(default!);
             return Task.FromResult<List<string>?>(list);
         }
     }

@@ -20,7 +20,7 @@ public class DefaultFlowControlService : IFlowControlService
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger;
-        
+
         // Log warning if wildcards are detected
         foreach (var (group, access) in _options.Groups)
         {
@@ -45,21 +45,21 @@ public class DefaultFlowControlService : IFlowControlService
             {
                 if (!_options.Groups.TryGetValue(sourceGroup, out var access))
                     return false;
-                
+
                 // Wildcard covers any target
                 if (access.CanSendTo.Contains("*"))
                     return true;
-                    
+
                 return access.CanSendTo.Contains(targetGroup, StringComparer.OrdinalIgnoreCase);
             });
-            
+
             if (!canReachThisTarget)
             {
                 _logger?.LogDebug("FlowControl denied: No source group can reach target group '{TargetGroup}'", targetGroup);
                 return false; // At least one target group is not reachable
             }
         }
-        
+
         return true; // All target groups are reachable
     }
 }

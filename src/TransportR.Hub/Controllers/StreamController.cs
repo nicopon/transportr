@@ -1,14 +1,14 @@
+using System.Globalization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
+using Microsoft.Extensions.Logging;
+using TransportR.Hub.Access;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
-using TransportR.Hub.Access;
-using TransportR.Hub.Streams;
-using System.Globalization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.Logging;
-using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
 
 namespace TransportR.Hub.Controllers;
@@ -416,7 +416,7 @@ internal class StreamController : ControllerBase
             _logger.LogError(ex, "Error in StreamController.Receive (Transfer: {TransferId})", transferId);
         }
     }
-    
+
     private bool DataStreamFinished(string transferId) =>
         _bridgeManager.Bridges.TryGetValue(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
         && bridge.State == BridgeState.Completed;

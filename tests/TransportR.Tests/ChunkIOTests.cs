@@ -108,13 +108,13 @@ public class ChunkIOTests
         var batchId = 42;
         var count = 10;
         var payload = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-        
+
         using var ms = new MemoryStream();
 
         // Act - Write
         await ChunkIO.WriteBatchAsync(ms, transferId, batchId, count, payload);
         ms.Position = 0;
-        
+
         // Act - Read
         using var chunk = await ChunkIO.ReadChunkAsync(ms);
 
@@ -133,13 +133,13 @@ public class ChunkIOTests
         // Arrange
         var transferId = Guid.NewGuid();
         var batchId = 99;
-        
+
         using var ms = new MemoryStream();
 
         // Act - Write
         await ChunkIO.WriteControlAsync(ms, transferId, batchId, ChunkType.BatchAck);
         ms.Position = 0;
-        
+
         // Act - Read
         using var chunk = await ChunkIO.ReadChunkAsync(ms);
 
@@ -156,13 +156,13 @@ public class ChunkIOTests
     {
         // Arrange
         var transferId = Guid.NewGuid();
-        
+
         using var ms = new MemoryStream();
 
         // Act - Write Complete (control chunk)
         await ChunkIO.WriteControlAsync(ms, transferId, 0, ChunkType.Complete);
         ms.Position = 0;
-        
+
         // Act - Read
         using var chunk = await ChunkIO.ReadChunkAsync(ms);
 
@@ -192,7 +192,7 @@ public class ChunkIOTests
         // Arrange
         var transferId = Guid.NewGuid();
         var payload1 = new byte[] { 1, 2, 3 };
-        
+
         using var ms = new MemoryStream();
 
         // Act - Write all (batch, ack, complete sequence)
@@ -200,7 +200,7 @@ public class ChunkIOTests
         await ChunkIO.WriteControlAsync(ms, transferId, 0, ChunkType.BatchAck);
         await ChunkIO.WriteControlAsync(ms, transferId, 0, ChunkType.Complete);
         await ChunkIO.WriteControlAsync(ms, transferId, 0, ChunkType.CompleteAck);
-        
+
         ms.Position = 0;
 
         // Read all

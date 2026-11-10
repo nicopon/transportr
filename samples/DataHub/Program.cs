@@ -1,15 +1,15 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using DataHub.Services;
-using DataHub.Middleware;
 using DataHub.Adapters;
+using DataHub.Middleware;
+using DataHub.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.IdentityModel.Tokens;
 using OpenTelemetry.Metrics;
-using TransportR.Hub;
-using TransportR.FlowControl;
-using TransportR.Interfaces;
-using TransportR.Auth.SimpleIdp;
 using Serilog;
+using TransportR.Auth.SimpleIdp;
+using TransportR.FlowControl;
+using TransportR.Hub;
+using TransportR.Interfaces;
 using TransportR.Storage.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -49,7 +49,7 @@ if (enableAuth)
         {
             options.Authority = idpUrl;
             options.RequireHttpsMetadata = false; // Allow HTTP for development (samples only)
-            
+
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
@@ -141,7 +141,7 @@ if (flowControlMode.Equals("none", StringComparison.OrdinalIgnoreCase))
 else
 {
     FlowControlOptions flowControlOptions;
-    
+
     if (flowControlMode.Equals("wildcard", StringComparison.OrdinalIgnoreCase))
     {
         // Wildcard mode - test group can send to everyone
@@ -169,7 +169,7 @@ else
         };
         Console.WriteLine("FlowControl: DEFAULT (senders -> receivers)");
     }
-    
+
     builder.Services.AddSingleton(flowControlOptions);
     builder.Services.AddSingleton<IFlowControlService, DefaultFlowControlService>();
 }

@@ -29,7 +29,7 @@ public class BatchAccumulatorTests
     {
         // Arrange & Act
         using var accumulator = new BatchAccumulator<int>(100, 1000);
-        
+
         // Assert
         Assert.NotNull(accumulator);
         Assert.NotNull(accumulator.BatchReader);
@@ -50,7 +50,7 @@ public class BatchAccumulatorTests
         // Arrange
         const int batchSize = 3;
         using var accumulator = new BatchAccumulator<int>(batchSize, 60000);
-        
+
         // Act
         await accumulator.AddAsync(1);
         await accumulator.AddAsync(2);
@@ -63,7 +63,7 @@ public class BatchAccumulatorTests
         {
             batches.Add(batch);
         }
-        
+
         Assert.Single(batches);
         Assert.Equal(3, batches[0].Items.Count);
         Assert.Equal(0, batches[0].BatchId);
@@ -76,7 +76,7 @@ public class BatchAccumulatorTests
         // Arrange
         const int batchSize = 2;
         using var accumulator = new BatchAccumulator<int>(batchSize, 60000);
-        
+
         // Act
         await accumulator.AddAsync(1);
         await accumulator.AddAsync(2); // Batch 0
@@ -90,7 +90,7 @@ public class BatchAccumulatorTests
         {
             batchIds.Add(batchId);
         }
-        
+
         Assert.Equal(2, batchIds.Count);
         Assert.Equal(0, batchIds[0]);
         Assert.Equal(1, batchIds[1]);
@@ -102,11 +102,11 @@ public class BatchAccumulatorTests
         // Arrange
         const int batchSize = 10; // Large batch size
         using var accumulator = new BatchAccumulator<int>(batchSize, 60000);
-        
+
         await accumulator.AddAsync(1);
         await accumulator.AddAsync(2);
         await accumulator.AddAsync(3);
-        
+
         // No batch yet since batch size not reached
         Assert.False(accumulator.BatchReader.TryRead(out _));
 
@@ -119,7 +119,7 @@ public class BatchAccumulatorTests
         {
             flushedItems.AddRange(items);
         }
-        
+
         Assert.Equal(3, flushedItems.Count);
         Assert.Equal(new[] { 1, 2, 3 }, flushedItems);
     }
@@ -139,7 +139,7 @@ public class BatchAccumulatorTests
         {
             batches.Add(batch);
         }
-        
+
         Assert.Empty(batches);
     }
 
@@ -160,7 +160,7 @@ public class BatchAccumulatorTests
         {
             flushedBatches.Add(items);
         }
-        
+
         Assert.Equal(2, flushedBatches.Count);
         Assert.Equal(3, flushedBatches[0].Count);
         Assert.Equal(2, flushedBatches[1].Count);
@@ -189,10 +189,10 @@ public class BatchAccumulatorTests
     {
         // Arrange
         var accumulator = new BatchAccumulator<int>(100, 1000);
-        
+
         // Act
         accumulator.Dispose();
-        
+
         // Assert - No exception thrown, disposed successfully
         // Channel should be completed after dispose
         Assert.True(accumulator.BatchReader.Completion.IsCompleted);

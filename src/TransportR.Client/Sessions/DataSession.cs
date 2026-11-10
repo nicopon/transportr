@@ -1,12 +1,11 @@
 using System.Net;
 using System.Threading.Channels;
-using TransportR.Abstractions;
-using TransportR.Protocol;
 using Microsoft.Extensions.Logging;
-
+using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Models;
+using TransportR.Protocol;
 using TransportR.Services;
 
 namespace TransportR.Client.Sessions;
@@ -43,11 +42,11 @@ internal class DataSession : IDataSession
     public string TransferId { get; }
     public int BatchSize { get; }
     public string DataUrl { get; }
-    
+
     private readonly IControlPlane _control;
     private readonly string? _affinity;
     private readonly ISessionConfig _config;
-    
+
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
     private readonly BatchProcessor _batchProcessor;
@@ -75,7 +74,7 @@ internal class DataSession : IDataSession
 
     // Session Statistics
     public DateTime StartedAt { get; } = DateTime.UtcNow;
-    
+
     // Public properties for GetTransfers()
     public bool IsSender => _isSender;
     public SessionState State => _fsm.CurrentState;
@@ -100,7 +99,7 @@ internal class DataSession : IDataSession
     public long BytesTransferred => _batchProcessor.PayloadBytes;
     public long AcksReceived => _batchProcessor.AcksReceived;
     public long AcksSent => _batchProcessor.AcksSent;
-    
+
     /// <param name="affinity">
     /// The cookies that reach the hub instance holding the transfer's bridge, which every request of
     /// the session carries: its streams, its heartbeats, its probe and its abort.
@@ -119,31 +118,34 @@ internal class DataSession : IDataSession
         _control = context;
         _affinity = affinity;
         _config = context; // ISessionContext implements ISessionConfig
-        
+
         TransferId = transferId;
         BatchSize = batchSize;
         DataUrl = dataUrl.TrimEnd('/');
-        
+
         _cts = new CancellationTokenSource();
         _batchProcessor = new BatchProcessor(context, transferId, batches, openSink);
         _fsm = new DataSessionStateMachine(transferId, context.Logger);
-        
+
         // Pass segregated interfaces to HttpStreamManager
         _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl, affinity); // IStreamTransport, ISessionConfig
-        
+
         _reconnectionHandler = new ReconnectionHandler(context, transferId, affinity);
-            
+
         // Hook up events
-        _batchProcessor.OnPongReceived += (id) => {
+        _batchProcessor.OnPongReceived += (id) =>
+        {
             _reconnectionHandler.HandleStreamPong(id);
         };
-        _batchProcessor.OnCompleteReceived += () => {
+        _batchProcessor.OnCompleteReceived += () =>
+        {
             // Not Completed yet: the acknowledgement is only queued, and the session has to stay up
             // until the hub has read it.
             _fsm.TransitionTo(SessionState.ReceiverCompleteReceived);
             return Task.CompletedTask;
         };
-        _batchProcessor.OnAbortReceived += (reason) => {
+        _batchProcessor.OnAbortReceived += (reason) =>
+        {
             _failureReason = reason.Describe();
             if (_fsm.OnAborted())
             {
@@ -151,8 +153,9 @@ internal class DataSession : IDataSession
                     "Received Abort ({Reason}) - transfer failed (Transfer={TransferId})", reason, TransferId);
             }
         };
-        
-        _batchProcessor.OnSerializationFailed += (ex) => {
+
+        _batchProcessor.OnSerializationFailed += (ex) =>
+        {
             if (IsStopped) return;
 
             FailTransfer($"A batch could not be serialized: {ex.Message}");
@@ -172,10 +175,10 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Sender Session {TransferId}...", TransferId);
         _isSender = true;
-        
+
         _batchProcessor.StartSenderAsync(_cts.Token);
         _config.Logger.LogInformation("Started serialization worker for {TransferId}", TransferId);
-        
+
         _fsm.TransitionTo(SessionState.Starting);
         _ = RunSessionLoop(_cts.Token);
         return Task.CompletedTask;
@@ -185,9 +188,9 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Receiver Session {TransferId}...", TransferId);
         _isSender = false;
-        
+
         await _batchProcessor.StartReceiverAsync();
-        
+
         _fsm.TransitionTo(SessionState.Starting);
         _ = RunSessionLoop(_cts.Token);
     }
@@ -324,9 +327,9 @@ internal class DataSession : IDataSession
         // it while one is missing, and the loop below sends it again until the tail is in.
         if (_batchProcessor.PendingBatches > 0)
         {
-             _config.Logger.LogInformation("CompleteAsync entered with {Pending} pending batches. Proceeding to SendComplete to flush...", _batchProcessor.PendingBatches);
+            _config.Logger.LogInformation("CompleteAsync entered with {Pending} pending batches. Proceeding to SendComplete to flush...", _batchProcessor.PendingBatches);
         }
-        
+
         // Send Complete and wait for CompleteAck (with retry)
         _config.Logger.LogInformation("Sending Complete message (Transfer={TransferId})", TransferId);
 
@@ -342,13 +345,13 @@ internal class DataSession : IDataSession
         while (!IsStopped)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            
+
             await _batchProcessor.SendCompleteSignalAsync();
-            
+
             // Wait for CompleteAck
             var ackTask = _batchProcessor.WaitForCompleteAckAsync(cancellationToken);
             var delayTask = Task.Delay(retryInterval, cancellationToken);
-            
+
             var finished = await Task.WhenAny(ackTask, delayTask, _fsm.Stopped);
 
             // Both tasks carry the caller's token, so cancelling completes them rather than leaving
@@ -360,7 +363,7 @@ internal class DataSession : IDataSession
             {
                 _config.Logger.LogInformation("CompleteAck received - transfer complete (Transfer={TransferId})", TransferId);
                 _fsm.TransitionTo(SessionState.Completed);
-                
+
                 // Allow WriteLoop to exit
                 _batchProcessor.CompleteSenderChannel();
 
@@ -399,11 +402,11 @@ internal class DataSession : IDataSession
         // Only reachable when something else stopped the session under us.
         throw new TransferFailedException(TransferId, FailureMessage);
     }
-    
+
     public void TriggerReconnect()
     {
         _config.Logger.LogInformation("TriggerReconnect called externally.");
-        
+
         if (_fsm.CurrentState == SessionState.Streaming)
         {
             _fsm.TransitionTo(SessionState.Reconnecting);
@@ -412,9 +415,9 @@ internal class DataSession : IDataSession
         }
         else if (IsInCompletingPhase)
         {
-             _config.Logger.LogInformation("The control stream was lost while in completing phase. Cancelling streams to force verification.");
-             // Do NOT transition to Reconnecting (preserve completing state logic)
-             _httpStreamManager.CancelStreams();
+            _config.Logger.LogInformation("The control stream was lost while in completing phase. Cancelling streams to force verification.");
+            // Do NOT transition to Reconnecting (preserve completing state logic)
+            _httpStreamManager.CancelStreams();
         }
     }
 
@@ -623,38 +626,38 @@ internal class DataSession : IDataSession
                         break;
 
                     case SessionState.Reconnecting:
-                         // Execute Handshake
-                         var online = await _reconnectionHandler.ProbeConnectivityAsync(token);
-                         if (online)
-                         {
-                             // The hub answers. The handshake rides the new data stream rather
-                             // than the control plane, so there is nothing to do here but arm it
-                             // and let Streaming open that stream. A receiver that accepted Complete
-                             // in the meantime stays closing, and reopens its streams from there.
-                             _reconnectionHandler.PrepareForHandshake();
-                             _fsm.TransitionTo(SessionState.Streaming);
-                         }
-                         else
-                         {
-                             // Wait before retrying probe
-                             await Task.Delay(2000, token);
-                         }
-                         break;
+                        // Execute Handshake
+                        var online = await _reconnectionHandler.ProbeConnectivityAsync(token);
+                        if (online)
+                        {
+                            // The hub answers. The handshake rides the new data stream rather
+                            // than the control plane, so there is nothing to do here but arm it
+                            // and let Streaming open that stream. A receiver that accepted Complete
+                            // in the meantime stays closing, and reopens its streams from there.
+                            _reconnectionHandler.PrepareForHandshake();
+                            _fsm.TransitionTo(SessionState.Streaming);
+                        }
+                        else
+                        {
+                            // Wait before retrying probe
+                            await Task.Delay(2000, token);
+                        }
+                        break;
 
                     case SessionState.ReceiverCompleteReceived:
-                         // The closing phase is not a resting place: what ends a transfer is the
-                         // hub reading the acknowledgement, so the streams have to stay open until
-                         // it does. A receiver whose control stream failed just after it accepted
-                         // Complete would otherwise sit on an acknowledgement it never re-sends, and
-                         // its sender retry a transfer that was in fact delivered.
-                         await RunStreamsUntilOneEndsAsync(token);
-                         break;
+                        // The closing phase is not a resting place: what ends a transfer is the
+                        // hub reading the acknowledgement, so the streams have to stay open until
+                        // it does. A receiver whose control stream failed just after it accepted
+                        // Complete would otherwise sit on an acknowledgement it never re-sends, and
+                        // its sender retry a transfer that was in fact delivered.
+                        await RunStreamsUntilOneEndsAsync(token);
+                        break;
 
                     default:
-                         // Idle, which the session leaves before this loop starts: there is nothing
-                         // to run, and waiting beats spinning.
-                         await _fsm.Stopped.WaitAsync(token);
-                         break;
+                        // Idle, which the session leaves before this loop starts: there is nothing
+                        // to run, and waiting beats spinning.
+                        await _fsm.Stopped.WaitAsync(token);
+                        break;
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -663,11 +666,11 @@ internal class DataSession : IDataSession
             }
             catch (Exception ex)
             {
-                 _config.Logger.LogError(ex, "Session Loop Error");
-                 await Task.Delay(1000, token);
+                _config.Logger.LogError(ex, "Session Loop Error");
+                await Task.Delay(1000, token);
             }
         }
-        
+
         _config.Logger.LogInformation("Session Loop ENDED. FinalState={State}", _fsm.CurrentState);
     }
 
@@ -679,16 +682,16 @@ internal class DataSession : IDataSession
     private async Task RunStreamsUntilOneEndsAsync(CancellationToken token)
     {
         _httpStreamManager.StartStreams(IsSender, WriteLoop, ReadLoop, token);
-        
+
         // Wait for ANY stream to finish (returns on failure or completion)
         // If one fails, HttpStreamManager returns result of failing task.
         var senderTask = _httpStreamManager.SenderTask;
         var receiverTask = _httpStreamManager.ReceiverTask;
-        
+
         var activeTasks = new List<Task<HttpStreamManager.StreamResult>>();
-        if(senderTask != null) activeTasks.Add(senderTask);
-        if(receiverTask != null) activeTasks.Add(receiverTask);
-        
+        if (senderTask != null) activeTasks.Add(senderTask);
+        if (receiverTask != null) activeTasks.Add(receiverTask);
+
         if (activeTasks.Count > 0)
         {
             // A receiver's closing phase ends with its control stream, answered once the hub has read the
@@ -744,7 +747,7 @@ internal class DataSession : IDataSession
                 // we reconnect. A 404 does not arrive here at all; it is fatal
                 // and handled in the branch above.
                 _config.Logger.LogInformation("Stream finished successfully. Re-evaluating state.");
-                
+
                 // Already Completed means the domino sequence finished before
                 // this stream unwound; there is nothing left to decide.
                 if (_fsm.CurrentState != SessionState.Completed)
@@ -767,7 +770,7 @@ internal class DataSession : IDataSession
     private async Task WriteLoop(Stream outputStream, CancellationToken token)
     {
         var transferGuid = Guid.Parse(TransferId);
-        
+
         if (IsSender)
         {
             // Every stream starts with the handshake, new or resumed alike. Doing it only on a
@@ -776,7 +779,7 @@ internal class DataSession : IDataSession
             // trusted to know. Returns -1 on timeout, otherwise the receiver's NextExpectedId.
             int nextExpectedFromPong = await _reconnectionHandler.ExecuteHandshakeAsync(outputStream, transferGuid, token);
             bool didPingPong = nextExpectedFromPong >= 0;
-            
+
             // Step 2: Resend unacked batches (targeted if ping/pong succeeded)
             await _batchProcessor.ResendUnackedBatchesAsync(outputStream, transferGuid, didPingPong, nextExpectedFromPong, token);
         }
@@ -791,7 +794,7 @@ internal class DataSession : IDataSession
                 await _batchProcessor.ResendCompleteAckAsync();
             }
         }
-        
+
         // Step 3: Process send channel (normal operation)
         await ProcessSendChannelAsync(outputStream, transferGuid, token);
     }
@@ -849,7 +852,7 @@ internal class DataSession : IDataSession
                     }
                 }
             }
-            
+
             await outputStream.FlushAsync(token);
         }
     }
@@ -914,7 +917,7 @@ internal class DataSession : IDataSession
                     // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).
                     if (_fsm.CurrentState != SessionState.Completed && !IsInCompletingPhase && !token.IsCancellationRequested)
                     {
-                         throw new IOException("Stream ended unexpectedly (Premature EOF)");
+                        throw new IOException("Stream ended unexpectedly (Premature EOF)");
                     }
                     break;
                 }
@@ -933,7 +936,7 @@ internal class DataSession : IDataSession
                     await DeliverWriteSideEndAsync();
                     throw;
                 }
-                
+
                 if (IsTerminal)
                 {
                     _config.Logger.LogInformation("Transfer ended - exiting ReadLoop for Transfer={TransferId}", TransferId);

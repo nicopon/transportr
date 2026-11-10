@@ -227,7 +227,7 @@ public class ReceiverStateTests
         public bool IsDisposed { get; private set; }
 
         public ArrayMemoryOwner(byte[] data) => _data = data;
-        
+
         public Memory<byte> Memory => _data;
 
         public void Dispose()

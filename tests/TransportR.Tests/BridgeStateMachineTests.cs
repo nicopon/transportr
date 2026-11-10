@@ -1,6 +1,6 @@
-using TransportR.Services;
-using TransportR.Models;
 using Microsoft.Extensions.Logging;
+using TransportR.Models;
+using TransportR.Services;
 
 namespace TransportR.Tests;
 
@@ -288,26 +288,26 @@ public class BridgeStateMachineTests
 
         // Four events deep covers every reachable state and every event out of it.
         foreach (var a in events)
-        foreach (var b in events)
-        foreach (var c in events)
-        foreach (var d in events)
-        {
-            var fsm = new BridgeStateMachine("invariant", new StubLogger());
-            foreach (var step in new[] { a, b, c, d })
-            {
-                step.Apply(fsm);
+            foreach (var b in events)
+                foreach (var c in events)
+                    foreach (var d in events)
+                    {
+                        var fsm = new BridgeStateMachine("invariant", new StubLogger());
+                        foreach (var step in new[] { a, b, c, d })
+                        {
+                            step.Apply(fsm);
 
-                var expectedSender = fsm.CurrentState is BridgeState.WaitingForReceiver or BridgeState.Active;
-                var expectedReceiver = fsm.CurrentState is BridgeState.WaitingForSender or BridgeState.Active;
+                            var expectedSender = fsm.CurrentState is BridgeState.WaitingForReceiver or BridgeState.Active;
+                            var expectedReceiver = fsm.CurrentState is BridgeState.WaitingForSender or BridgeState.Active;
 
-                Assert.Equal(expectedSender, fsm.SenderConnected);
-                Assert.Equal(expectedReceiver, fsm.ReceiverConnected);
-                Assert.Equal(fsm.CurrentState is BridgeState.Cancelled or BridgeState.Completed, fsm.IsEnded);
-                Assert.True(
-                    Enum.IsDefined(fsm.CurrentState),
-                    $"{a.Name},{b.Name},{c.Name},{d.Name} reached an undefined state");
-            }
-        }
+                            Assert.Equal(expectedSender, fsm.SenderConnected);
+                            Assert.Equal(expectedReceiver, fsm.ReceiverConnected);
+                            Assert.Equal(fsm.CurrentState is BridgeState.Cancelled or BridgeState.Completed, fsm.IsEnded);
+                            Assert.True(
+                                Enum.IsDefined(fsm.CurrentState),
+                                $"{a.Name},{b.Name},{c.Name},{d.Name} reached an undefined state");
+                        }
+                    }
     }
 
     #endregion

@@ -14,7 +14,7 @@ public class InMemoryStateStore : IStateStore
 {
     private readonly ConcurrentDictionary<Guid, ClientRegistration> _clients = new();
     private readonly ConcurrentDictionary<string, Guid> _connectionIndex = new(); // connectionId -> clientId
-    private readonly ConcurrentDictionary<string, TransferSession> _sessions = new(); 
+    private readonly ConcurrentDictionary<string, TransferSession> _sessions = new();
 
     private readonly TimeSpan _disconnectedGrace;
     private readonly TimeProvider _time;
@@ -146,7 +146,7 @@ public class InMemoryStateStore : IStateStore
         {
             if (session.ExpiresAtUtc > Now)
                 return Task.FromResult<TransferSession?>(session);
-            
+
             // Lazy expiration, of the value read only: an extension that landed since is kept.
             _sessions.TryRemove(new KeyValuePair<string, TransferSession>(transferId, session));
         }

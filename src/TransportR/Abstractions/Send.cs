@@ -29,7 +29,7 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// the item is not sent.
     /// </exception>
     public abstract Task SendAsync(T item, CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Sends multiple items through the transfer.
     /// </summary>
@@ -57,7 +57,7 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// dispose it.
     /// </exception>
     public abstract Task CompleteAsync(CancellationToken cancellationToken = default);
-    
+
     /// <summary>
     /// Releases the transfer and everything the client holds on its behalf. Dispose once
     /// <see cref="CompleteAsync"/> has returned, not before — disposing a transfer that has not
@@ -65,12 +65,12 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// <see cref="TransferFailedException"/> instead of waiting on a session that is gone.
     /// Disposing twice does nothing.
     /// </summary>
-    public ValueTask DisposeAsync() 
+    public ValueTask DisposeAsync()
     {
         GC.SuppressFinalize(this);
         return DisposeAsyncCore();
     }
-    
+
     /// <summary>
     /// Override to provide custom dispose logic.
     /// </summary>

@@ -35,7 +35,7 @@
     }
   },
 
-  "postCreateCommand": "dotnet restore && echo '✅ Ready! Run ./scripts/init.sh to generate test data, then ./scripts/benchmark.sh to test.'",
+  "postCreateCommand": "dotnet restore && echo '✅ Ready! Run ./scripts/init.sh to generate test data, then ./scripts/run-benchmark.sh to test.'",
 
   "remoteUser": "vscode"
 }

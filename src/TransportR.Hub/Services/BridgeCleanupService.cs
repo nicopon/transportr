@@ -38,7 +38,7 @@ internal class BridgeCleanupService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("BridgeCleanupService started. Timeout: {Timeout}s", _config.BridgeTimeoutSeconds);
-        
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -56,7 +56,7 @@ internal class BridgeCleanupService : BackgroundService
                 await Task.Delay(TimeSpan.FromSeconds(10), _time, stoppingToken);
             }
         }
-        
+
         _logger.LogInformation("BridgeCleanupService stopped");
     }
 
@@ -64,23 +64,23 @@ internal class BridgeCleanupService : BackgroundService
     {
         var timeout = TimeSpan.FromSeconds(_config.BridgeTimeoutSeconds);
         var now = _time.GetUtcNow().UtcDateTime;
-        
+
         foreach (var kvp in _bridgeManager.Bridges)
         {
             var bridge = kvp.Value;
-            
+
             // If the bridge is Active, we assume it's healthy (or managed by TCP keepalives)
             // We only cleanup bridges that are stuck waiting for a peer or idle.
             if (bridge.State == BridgeState.Active)
                 continue;
-            
+
             var idleTime = now - bridge.LastActivity;
             if (idleTime < timeout)
                 continue;
-            
-            _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Ending its transfer.", 
+
+            _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Ending its transfer.",
                 bridge.BridgeKey, idleTime.TotalSeconds);
-            
+
             bridge.Cancel();
             await _terminator.TerminateAsync(bridge.TransferId, ct).ConfigureAwait(false);
         }

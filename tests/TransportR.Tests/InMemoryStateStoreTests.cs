@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
-using TransportR.Services;
 using TransportR.Models;
+using TransportR.Services;
 
 namespace TransportR.Tests;
 
@@ -183,7 +183,7 @@ public class InMemoryStateStoreTests
         Assert.NotNull(result);
         Assert.Equal(session.SenderId, result.SenderId);
     }
-    
+
     [Fact]
     public async Task GetSession_Expired_ReturnsNull()
     {
@@ -197,7 +197,7 @@ public class InMemoryStateStoreTests
         // Assert
         Assert.Null(result); // InMemoryStore implements Lazy Expiry
     }
-    
+
     [Fact]
     public async Task ExtendSessionExpiry_UpdatesExpiry()
     {
@@ -205,7 +205,7 @@ public class InMemoryStateStoreTests
         var transferId = "transfer-extend";
         var session = new TransferSession(transferId, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow, DateTime.UtcNow.AddMinutes(1));
         await _store.SaveSessionAsync(session);
-        
+
         var newExpiry = DateTime.UtcNow.AddHours(1);
 
         // Act

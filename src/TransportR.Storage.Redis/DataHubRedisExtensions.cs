@@ -16,7 +16,7 @@ public static class DataHubRedisExtensions
     public static DataHubBuilder UseRedisStore(this DataHubBuilder builder, string connectionString)
     {
         // Register StackExchange.Redis ConnectionMultiplexer
-        builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
+        builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
             ConnectionMultiplexer.Connect(connectionString));
 
         // Replaces the in-memory store AddDataHub registered, so a hub never holds two.

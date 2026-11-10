@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Options;
-using TransportR.Configuration;
 using StackExchange.Redis;
+using TransportR.Configuration;
 using TransportR.Models;
 using TransportR.Storage.Redis;
 
@@ -248,27 +248,27 @@ public class RedisStateStoreTests : IAsyncLifetime
         var session = new TransferSession(transferId, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow.AddMinutes(-10), DateTime.UtcNow.AddMinutes(-5));
 
         await _store.SaveSessionAsync(session);
-        
+
         // Redis should have expired the key immediately or upon access
         var result = await _store.GetSessionAsync(transferId);
 
         Assert.Null(result);
     }
-    
+
     [RedisAvailableFact]
     public async Task ExtendSessionExpiry_UpdatesTTL()
     {
         var transferId = $"transfer-extend-{Guid.NewGuid()}";
         var session = new TransferSession(transferId, Guid.NewGuid(), Guid.NewGuid(), DateTime.UtcNow, DateTime.UtcNow.AddSeconds(2)); // Short TTL
         await _store.SaveSessionAsync(session);
-        
+
         var newExpiry = DateTime.UtcNow.AddHours(1);
 
         await _store.ExtendSessionExpiryAsync(transferId, newExpiry);
 
         var updated = await _store.GetSessionAsync(transferId);
         Assert.NotNull(updated);
-        
+
         // Note: RedisStateStore implementation does NOT update the JSON payload for 'ExpiresAtUtc', only the Redis TTL.
         // So the returned object might still have old ExpiresAtUtc if we check property.
         // But the KEY exists.
@@ -276,9 +276,9 @@ public class RedisStateStoreTests : IAsyncLifetime
         // But ExtendSessionExpiryAsync in RedisStateStore does `EXPIREAT`. It does NOT update the JSON.
         // So checking `updated.ExpiresAtUtc` would fail if we expect it to change.
         // We can check if the key is still there after the original expiry time passed.
-        
+
         await Task.Delay(3000); // Wait longer than original TTL (2s)
-        
+
         var resultAfterOriginalTTL = await _store.GetSessionAsync(transferId);
         Assert.NotNull(resultAfterOriginalTTL); // Should still be alive due to extension
     }

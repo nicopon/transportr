@@ -36,7 +36,7 @@ internal class ReceiverState
         _reorderBuffer = [];
         NextExpectedBatchId = startBatchId;
     }
-    
+
     /// <summary>
     /// Processes an incoming batch, handling reordering.
     /// </summary>
@@ -46,7 +46,7 @@ internal class ReceiverState
     /// <returns>Result indicating what ACK to send.</returns>
     public async Task<ReceiveResult> ProcessBatchAsync(int batchId, IMemoryOwner<byte> owner, ReadOnlyMemory<byte> compressedBody, CancellationToken ct = default)
     {
-        if (batchId < NextExpectedBatchId) 
+        if (batchId < NextExpectedBatchId)
         {
             owner.Dispose();
             return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
@@ -65,7 +65,7 @@ internal class ReceiverState
                 await WriteAsync(bufOwner, bufBody, ct);
                 NextExpectedBatchId++;
             }
-            
+
             return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
         }
         else

@@ -40,7 +40,7 @@ internal interface ITransferManager
     /// <see cref="UpdateSenderStatsAsync"/>.
     /// </summary>
     Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent);
-    
+
     /// <summary>
     /// A snapshot of every transfer this instance knows the participants of, by transfer id.
     /// </summary>
@@ -89,7 +89,7 @@ internal class TransferState
     public string TransferId { get; }
     public DateTime LastActivityUtc { get; private set; }
     public DateTime LastProgressUtc { get; private set; }
-    
+
     // Sender View
     public long ItemsSent { get; private set; }
     public long AcksReceived { get; private set; }
@@ -130,7 +130,7 @@ internal class TransferState
         var now = Now;
         if (items > ItemsReceived || acks > AcksSent)
         {
-             LastProgressUtc = now;
+            LastProgressUtc = now;
         }
         ItemsReceived = items;
         AcksSent = acks;

@@ -13,10 +13,10 @@ public static class TransportRClientBuilderAuthExtensions
     /// Configures the client to acquire tokens using OAuth2 client credentials flow.
     /// </summary>
     public static TransportRClientBuilder<T> WithClientCredentials<T>(
-        this TransportRClientBuilder<T> builder, 
-        string tokenEndpoint, 
-        string clientId, 
-        string clientSecret, 
+        this TransportRClientBuilder<T> builder,
+        string tokenEndpoint,
+        string clientId,
+        string clientSecret,
         string? scope,
         ILoggerFactory? loggerFactory = null)
     {

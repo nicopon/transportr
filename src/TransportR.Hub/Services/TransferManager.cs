@@ -107,7 +107,7 @@ internal class TransferManager : ITransferManager
             await _stateStore.ExtendSessionExpiryAsync(transferId, now.Add(_sessionTtl)).ConfigureAwait(false);
         }
     }
-    
+
     public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants()
     {
         return new Dictionary<string, TransferParticipants>(_participants);

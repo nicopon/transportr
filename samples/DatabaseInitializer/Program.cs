@@ -1,7 +1,7 @@
 using Bogus;
-using Shared.Models;
 using MessagePack;
 using MessagePack.Resolvers;
+using Shared.Models;
 
 namespace DatabaseInitializer;
 
@@ -64,7 +64,7 @@ class Program
                     Console.Write($"\rGenerated: {i}/{orderCount} ({(i / (sw.Elapsed.TotalSeconds + 0.001)):F0} items/s)");
                 }
             }
-            
+
             sw.Stop();
             Console.WriteLine($"\nCompleted in {sw.Elapsed.TotalSeconds:F2}s. Average speed: {(orderCount / sw.Elapsed.TotalSeconds):F0} items/s");
         }

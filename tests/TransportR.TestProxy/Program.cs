@@ -1,5 +1,5 @@
-using System.Net;
 using System.Collections.Concurrent;
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -293,12 +293,12 @@ public class ProxyStateStore : IStateStore
     {
         if (_sessions.TryGetValue(transferId, out var session))
         {
-             if (session.ExpiresAtUtc < DateTime.UtcNow)
-             {
-                 _sessions.TryRemove(transferId, out _);
-                 return Task.FromResult<TransferSession?>(null);
-             }
-             return Task.FromResult<TransferSession?>(session);
+            if (session.ExpiresAtUtc < DateTime.UtcNow)
+            {
+                _sessions.TryRemove(transferId, out _);
+                return Task.FromResult<TransferSession?>(null);
+            }
+            return Task.FromResult<TransferSession?>(session);
         }
         return Task.FromResult<TransferSession?>(null);
     }

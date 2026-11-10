@@ -1,6 +1,6 @@
-using TransportR.Interfaces;
 using MessagePack;
 using MessagePack.Resolvers;
+using TransportR.Interfaces;
 
 namespace TransportR.Serialization.MessagePack.Services;
 
@@ -13,8 +13,8 @@ public class MessagePackBatchSerializer<T> : IBatchSerializer<T>
         // Use Lz4BlockArray compression.
         // If useAnnotations is true, use StandardResolver (which respects [Key] attributes).
         // If false, use ContractlessStandardResolver (for POCOs without attributes or legacy behavior).
-        IFormatterResolver resolver = useAnnotations 
-            ? StandardResolver.Instance 
+        IFormatterResolver resolver = useAnnotations
+            ? StandardResolver.Instance
             : ContractlessStandardResolver.Instance;
 
         _options = MessagePackSerializerOptions.Standard

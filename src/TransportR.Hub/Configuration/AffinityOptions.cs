@@ -19,13 +19,13 @@ public class AffinityOptions
         "SERVERID",            // HAProxy default
         "route",               // Nginx sticky (common)
     };
-    
+
     /// <summary>
     /// Custom cookie name to use instead of auto-detection.
     /// If set, overrides the KnownCookieNames list.
     /// </summary>
     public string? CustomCookieName { get; set; }
-    
+
     /// <summary>
     /// Whether affinity handoff is enabled.
     /// When enabled, InitTransfer will redirect sender to receiver's replica.

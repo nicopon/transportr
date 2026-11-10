@@ -18,7 +18,7 @@ internal static class SecurityFlowControl
         {
             Groups = new()
             {
-                ["senders"]   = new GroupAccess { CanSendTo = ["receivers"] },
+                ["senders"] = new GroupAccess { CanSendTo = ["receivers"] },
                 ["receivers"] = new GroupAccess { CanSendTo = [] },
             }
         });

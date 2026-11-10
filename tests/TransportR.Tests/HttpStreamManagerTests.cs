@@ -1,11 +1,11 @@
 using System.Net;
-using TransportR.Client.Internal;
-using TransportR.Client.Sessions;
-using TransportR.Client.Configuration;
-using TransportR.Protocol;
-using TransportR.Tests.TestHelpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
+using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
+using TransportR.Client.Sessions;
+using TransportR.Protocol;
+using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;
 
@@ -19,7 +19,7 @@ public class HttpStreamManagerTests
     {
         _httpHandler = new StubHttpMessageHandler();
         var httpClient = new HttpClient(_httpHandler) { BaseAddress = new Uri("http://test/") };
-        
+
         _stubContext = new StubSessionContext(httpClient);
     }
 
@@ -32,9 +32,9 @@ public class HttpStreamManagerTests
 
         // Act
         manager.StartStreams(
-            isSender: true, 
-            writeAction: (s, t) => Task.CompletedTask, 
-            readAction: (s, t) => Task.CompletedTask, 
+            isSender: true,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => Task.CompletedTask,
             sessionToken: CancellationToken.None);
 
         var result = await manager.SenderTask!;
@@ -52,9 +52,9 @@ public class HttpStreamManagerTests
 
         // Act
         manager.StartStreams(
-            isSender: true, 
-            writeAction: (s, t) => Task.CompletedTask, 
-            readAction: (s, t) => Task.CompletedTask, 
+            isSender: true,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => Task.CompletedTask,
             sessionToken: CancellationToken.None);
 
         var result = await manager.SenderTask!;
@@ -72,9 +72,9 @@ public class HttpStreamManagerTests
 
         // Act
         manager.StartStreams(
-            isSender: true, 
-            writeAction: (s, t) => Task.CompletedTask, 
-            readAction: (s, t) => Task.CompletedTask, 
+            isSender: true,
+            writeAction: (s, t) => Task.CompletedTask,
+            readAction: (s, t) => Task.CompletedTask,
             sessionToken: CancellationToken.None);
 
         var result = await manager.SenderTask!;
@@ -214,7 +214,7 @@ public class HttpStreamManagerTests
     {
         public ILogger Logger { get; } = new StubLogger();
         public HttpClient HttpClient { get; }
-        
+
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
         public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
@@ -224,14 +224,14 @@ public class HttpStreamManagerTests
         }
 
         public void RemoveSession(string transferId) { }
-        
+
         public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
 
         public Task ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<bool> ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken) => Task.FromResult(false);
     }
-    
+
     // Reuse StubLogger from others or duplicate for isolation
     private class StubLogger : ILogger, IDisposable
     {

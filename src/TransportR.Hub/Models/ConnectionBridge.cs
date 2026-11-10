@@ -1,6 +1,6 @@
+using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
 using TransportR.Services;
-using Microsoft.Extensions.Logging;
 
 namespace TransportR.Models;
 

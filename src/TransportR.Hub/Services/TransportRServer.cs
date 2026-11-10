@@ -1,8 +1,8 @@
-using TransportR.Interfaces;
+using System.Buffers;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub.Streams;
+using TransportR.Interfaces;
 using TransportR.Models;
-using System.Buffers;
 
 namespace TransportR.Hub.Services;
 
@@ -17,7 +17,7 @@ internal class TransportRServer : ITransportRServer
     private readonly ITransferRetirer _retirer;
 
     public TransportRServer(
-        ILogger<TransportRServer> logger, 
+        ILogger<TransportRServer> logger,
         IHubProgressMonitor progressMonitor,
         ITransferManager transferManager,
         IBridgeManager bridgeManager,
@@ -35,7 +35,7 @@ internal class TransportRServer : ITransportRServer
         Guid connectionId = Guid.NewGuid();
         string bridgeKey = IBridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Source Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
-        
+
         var transfer = await _transferManager.TrackAsync(transferId).ConfigureAwait(false);
         if (transfer == null)
         {
@@ -88,17 +88,17 @@ internal class TransportRServer : ITransportRServer
             // parked on an input that stays silent learns of it only through this token.
             var senderToken = bridge.SenderToken;
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, senderToken, receiverToken);
-            
-            try 
+
+            try
             {
                 _logger.LogInformation("BRIDGE: Starting CopyToAsync {BridgeKey}", bridgeKey);
                 // Use custom copy loop with Flush to prevent buffering of small messages (ACKs)
                 var endReason = await CopyAndFlushAsync(inputToCopy, receiverOutput, 256 * 1024, linkedCts.Token).ConfigureAwait(false);
-                
+
                 if (endReason == StreamEndReason.CleanEOF)
                 {
                     _logger.LogInformation("BRIDGE: Sender stream ended with clean EOF {BridgeKey}", bridgeKey);
-                    
+
                     // If this was the Data channel, advance to domino step 5
                     if (type == ConnectionType.Data)
                     {
@@ -151,7 +151,7 @@ internal class TransportRServer : ITransportRServer
                 _logger.LogWarning(copyEx, "BRIDGE: CopyToAsync failed/interrupted for {BridgeKey}", bridgeKey);
                 throw;
             }
-            
+
             _logger.LogInformation("BRIDGE: Completed normally {BridgeKey}", bridgeKey);
         }
         catch (OperationCanceledException)
@@ -210,14 +210,14 @@ internal class TransportRServer : ITransportRServer
                 throw new OperationCanceledException($"Transfer {transferId} was cancelled during connection");
             }
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, bridge.ReceiverToken);
-            
+
             // Wait for completion signal (from Sender finishing) or cancellation
             var completed = await Task.WhenAny(bridge.CompletionTask, Task.Delay(-1, linkedCts.Token))
                                       .ConfigureAwait(false);
-            
+
             if (completed == bridge.CompletionTask)
             {
-                 _logger.LogInformation("BRIDGE: Sink Closing cleanly (Sender finished) {BridgeKey}", bridgeKey);
+                _logger.LogInformation("BRIDGE: Sink Closing cleanly (Sender finished) {BridgeKey}", bridgeKey);
             }
             else
             {

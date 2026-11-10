@@ -1,16 +1,16 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
-using TransportR.Interfaces;
 using TransportR.Client.Batching;
+using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
-using TransportR.Client.Configuration;
+using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Tests.TestHelpers;
 
-internal class StubSessionContext: ISessionContext
+internal class StubSessionContext : ISessionContext
 {
     public Guid ClientId { get; } = Guid.NewGuid();
     public ILogger Logger { get; }
@@ -35,11 +35,11 @@ internal class StubSessionContext: ISessionContext
     }
 
     public int RemoveSessionCount { get; private set; }
-    public void RemoveSession(string transferId) 
+    public void RemoveSession(string transferId)
     {
         RemoveSessionCount++;
     }
-    
+
     public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => Task.FromResult<string?>(null);
 
     /// <summary>Whether the probe of a reconnecting session finds the hub answering; nobody answers by default.</summary>
@@ -66,7 +66,7 @@ public class StubBatchSerializer : IBatchSerializer<string>
         // Simple serialization
         using var writer = new BinaryWriter(destination, Encoding.UTF8, leaveOpen: true);
         writer.Write(batch.Count);
-        writer.Write(new byte[1]); 
+        writer.Write(new byte[1]);
         return Task.CompletedTask;
     }
 
@@ -78,9 +78,9 @@ public class StubBatchSerializer : IBatchSerializer<string>
             var count = reader.ReadInt32();
             var bytes = reader.ReadBytes(1);
             var list = new List<string>();
-            for(int i=0; i<count; i++) list.Add(default!);
+            for (int i = 0; i < count; i++) list.Add(default!);
             return Task.FromResult<List<string>?>(list);
         }
-        catch(EndOfStreamException) { return Task.FromResult<List<string>?>(null); }
+        catch (EndOfStreamException) { return Task.FromResult<List<string>?>(null); }
     }
 }

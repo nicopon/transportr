@@ -1,7 +1,7 @@
-using Microsoft.Extensions.Logging;
-using TransportR.Models;
-using TransportR.Interfaces;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using TransportR.Interfaces;
+using TransportR.Models;
 
 namespace TransportR.Services;
 

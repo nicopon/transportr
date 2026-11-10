@@ -7,7 +7,7 @@ public enum TransferDirection
 {
     /// <summary>Client is sending data.</summary>
     Sending,
-    
+
     /// <summary>Client is receiving data.</summary>
     Receiving
 }
@@ -19,13 +19,13 @@ public enum TransferStatus
 {
     /// <summary>Transfer is actively processing data.</summary>
     Active,
-    
+
     /// <summary>A receiver holds every batch and the hub has yet to read its acknowledgement. A sender never reports it.</summary>
     Completing,
-    
+
     /// <summary>Transfer completed successfully.</summary>
     Completed,
-    
+
     /// <summary>Transfer failed or was cancelled.</summary>
     Failed
 }

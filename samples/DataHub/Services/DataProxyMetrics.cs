@@ -14,19 +14,19 @@ public class DataProxyMetrics
     public DataProxyMetrics(IMeterFactory meterFactory)
     {
         _meter = meterFactory.Create(MeterName);
-        
+
         ItemsProcessed = _meter.CreateCounter<long>(
-            "dataproxy.items.processed", 
+            "dataproxy.items.processed",
             description: "Total number of items processed");
-            
+
         BytesTransferred = _meter.CreateCounter<long>(
-            "dataproxy.bytes.transferred", 
-            unit: "By", 
+            "dataproxy.bytes.transferred",
+            unit: "By",
             description: "Total bytes transferred");
-            
+
         BatchThroughput = _meter.CreateHistogram<double>(
-            "dataproxy.batch.throughput", 
-            unit: "items/s", 
+            "dataproxy.batch.throughput",
+            unit: "items/s",
             description: "Throughput of processed batches");
     }
 }

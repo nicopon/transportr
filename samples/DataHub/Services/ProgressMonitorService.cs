@@ -26,10 +26,10 @@ public class ProgressMonitorService
         });
 
         Interlocked.Add(ref tracker.TotalCompressedBytes, bytes);
-        
+
         // OpenTelemetry Metrics
         _metrics.BytesTransferred.Add(bytes);
-        
+
         var now = DateTime.UtcNow;
         if ((now - tracker.LastLogTime).TotalMilliseconds >= 1000)
         {
@@ -49,9 +49,9 @@ public class ProgressMonitorService
         var duration = (DateTime.UtcNow - tracker.StartTime).TotalSeconds;
         var totalMb = tracker.TotalCompressedBytes / 1024.0 / 1024.0;
         var throughputMb = duration > 0 ? totalMb / duration : 0;
-        
+
         var msg = string.Format("HUB THROUGHPUT: {0:F2} MB total ({1:F2} MB/s)", totalMb, throughputMb);
-            
+
         if (_showProgress)
         {
             Console.WriteLine(msg);

@@ -33,8 +33,8 @@ internal class ClientCredentialsOptions
     /// <summary>
     /// Validates that required options are configured.
     /// </summary>
-    public bool IsConfigured => 
-        !string.IsNullOrEmpty(TokenEndpoint) && 
-        !string.IsNullOrEmpty(ClientId) && 
+    public bool IsConfigured =>
+        !string.IsNullOrEmpty(TokenEndpoint) &&
+        !string.IsNullOrEmpty(ClientId) &&
         !string.IsNullOrEmpty(ClientSecret);
 }

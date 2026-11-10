@@ -28,7 +28,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     private readonly IBatchSerializer<T> _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
-    
+
     // Configuration
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
@@ -61,9 +61,9 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         _defaultBatchSize = defaultBatchSize;
         _options = options;
         _dataUrl = dataUrl;
-        
+
         _streamManager = streamManager;
-        
+
         // SRP: Extract signaling logic
         _signaling = new TransferSignaling<TransferSession<T>, Send<T>, Receive<T>>(
             channel,
@@ -175,7 +175,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         await _connection.DisposeAsync();
         GC.SuppressFinalize(this);
     }
-    
+
     // --- Internal Logic ---
 
     /// <summary>

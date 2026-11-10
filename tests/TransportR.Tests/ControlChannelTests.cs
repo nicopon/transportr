@@ -3,14 +3,14 @@ using System.IO.Pipelines;
 using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
-using TransportR.Client.Internal;
 using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 using TransportR.Tests.TestHelpers;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace TransportR.Tests;
 
@@ -162,7 +162,8 @@ public class ControlChannelTests
         // Arrange
         var options = new ClientOptions();
         int callCount = 0;
-        Func<Task<string>> provider = () => {
+        Func<Task<string>> provider = () =>
+        {
             callCount++;
             return Task.FromResult($"token_{callCount}");
         };
@@ -190,7 +191,8 @@ public class ControlChannelTests
         // Arrange
         var options = new ClientOptions();
         int callCount = 0;
-        Func<Task<string>> provider = () => {
+        Func<Task<string>> provider = () =>
+        {
             callCount++;
             return Task.FromResult($"token_{callCount}");
         };

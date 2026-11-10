@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
 using TransportR.Hub.Services;
+using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Hub.Access;

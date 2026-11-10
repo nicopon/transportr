@@ -1,9 +1,8 @@
-using System.Threading.Channels;
-using TransportR.Protocol;
-using Microsoft.Extensions.DependencyInjection;
 using System.Net;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Hub.Controllers;
@@ -11,6 +10,7 @@ using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
+using TransportR.Protocol;
 using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 

@@ -1,5 +1,5 @@
-using TransportR.Interfaces;
 using ProtoBuf;
+using TransportR.Interfaces;
 using ZstdSharp;
 
 namespace TransportR.Serialization.Protobuf.Services;
@@ -27,7 +27,7 @@ public class ProtobufBatchSerializer<T> : IBatchSerializer<T>
         using var compressionStream = new CompressionStream(destination, level: _compressionLevel, leaveOpen: true);
 
         await Task.Run(() => Serializer.Serialize(compressionStream, batch));
-        
+
         // Implicit Dispose flushes the Zstd frame.
     }
 

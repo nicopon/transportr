@@ -19,13 +19,13 @@ public abstract class Receive<T> : Transfer, IAsyncDisposable
     /// Gets the batch size for this transfer.
     /// </summary>
     public int BatchSize { get; }
-    
+
     /// <summary>
     /// Creates a new receive handle.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier.</param>
     /// <param name="batchSize">The batch size for this transfer.</param>
-    protected Receive(string transferId, int batchSize) : base(transferId) 
+    protected Receive(string transferId, int batchSize) : base(transferId)
     {
         BatchSize = batchSize;
     }

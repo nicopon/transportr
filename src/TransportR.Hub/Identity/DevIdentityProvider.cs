@@ -40,7 +40,7 @@ internal class DevIdentityProvider : IClientIdentityProvider
         }
 
         var groups = providedGroups?.ToHashSet() ?? new HashSet<string>();
-        
+
         // Use default groups if none provided
         if (groups.Count == 0)
         {

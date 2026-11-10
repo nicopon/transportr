@@ -1,5 +1,6 @@
 # TransportR
 
+[![Build Status](https://github.com/nicopon/TransportR/actions/workflows/dotnet.yml/badge.svg)](https://github.com/nicopon/TransportR/actions/workflows/dotnet.yml)
 [![NuGet](https://img.shields.io/nuget/v/TransportR.svg)](https://www.nuget.org/packages/TransportR/)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)

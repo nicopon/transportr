@@ -54,14 +54,14 @@ public class RedisStateStore : IStateStore
         var key = $"{KeyPrefix}sessions:{session.TransferId}";
         var json = JsonSerializer.Serialize(session);
         var ttl = session.ExpiresAtUtc - _time.GetUtcNow().UtcDateTime;
-        
+
         if (ttl <= TimeSpan.Zero)
         {
-             // Already expired - do not save, and ensure it is removed if it existed
-             await _db.KeyDeleteAsync(key);
-             return;
-        } 
-        
+            // Already expired - do not save, and ensure it is removed if it existed
+            await _db.KeyDeleteAsync(key);
+            return;
+        }
+
         await _db.StringSetAsync(key, json, ttl);
     }
 
@@ -79,17 +79,17 @@ public class RedisStateStore : IStateStore
     {
         var key = $"{KeyPrefix}sessions:{transferId}";
         var ttl = newExpiry - _time.GetUtcNow().UtcDateTime;
-        
+
         if (ttl <= TimeSpan.Zero)
         {
-             // If expired, ensure it's deleted
-             await _db.KeyDeleteAsync(key);
-             return;
+            // If expired, ensure it's deleted
+            await _db.KeyDeleteAsync(key);
+            return;
         }
 
         // 1. Update TTL
         await _db.KeyExpireAsync(key, ttl);
-        
+
         // 2. The payload's ExpiresAtUtc is left as written: rewriting it would fetch, deserialize
         // and save the session on every heartbeat. Nothing reads it back from this store; the
         // key's TTL is what decides whether the session is alive.
@@ -111,10 +111,10 @@ public class RedisStateStore : IStateStore
         var ttl = TtlFor(client);
 
         await _db.StringSetAsync(key, json, ttl);
-        
+
         // Secondary index: connectionId -> clientId (for O(1) lookup)
         await _db.StringSetAsync(connKey, client.ClientId.ToString(), ttl);
-        
+
         // Also add to a set for GetAllClients enumeration
         await _db.SetAddAsync($"{KeyPrefix}client_ids", client.ClientId.ToString());
     }
@@ -167,10 +167,10 @@ public class RedisStateStore : IStateStore
         // 1. Lookup clientId from connectionId index
         var connKey = $"{KeyPrefix}conn:{connectionId}";
         var clientIdStr = await _db.StringGetAsync(connKey);
-        
+
         if (clientIdStr.IsNullOrEmpty) return null;
         if (!Guid.TryParse(clientIdStr.ToString(), out var clientId)) return null;
-        
+
         // 2. Get client by ID
         var client = await GetClientAsync(clientId);
         if (client == null) return null;
@@ -195,7 +195,7 @@ public class RedisStateStore : IStateStore
         if (ids.Length == 0) return Array.Empty<ClientRegistration>();
 
         var keys = new RedisKey[ids.Length];
-        
+
         for (int i = 0; i < ids.Length; i++)
         {
             keys[i] = $"{KeyPrefix}clients:{ids[i]}";
@@ -203,7 +203,7 @@ public class RedisStateStore : IStateStore
 
         // 2. MGET all clients efficiently
         var values = await _db.StringGetAsync(keys);
-        
+
         var clients = new List<ClientRegistration>();
         var missingIds = new List<RedisValue>();
 
@@ -234,11 +234,11 @@ public class RedisStateStore : IStateStore
     {
         // Get client first to cleanup connection index
         var client = await GetClientAsync(clientId);
-        
+
         var key = $"{KeyPrefix}clients:{clientId}";
         await _db.KeyDeleteAsync(key);
         await _db.SetRemoveAsync($"{KeyPrefix}client_ids", clientId.ToString());
-        
+
         // Cleanup connection index
         if (client != null)
         {

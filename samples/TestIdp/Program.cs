@@ -15,7 +15,7 @@ builder.Services.AddSimpleIdp(options =>
         var secret = clientSection["Secret"] ?? "";
         var displayName = clientSection["DisplayName"];
         var scopes = clientSection.GetSection("Scopes").Get<string[]>() ?? Array.Empty<string>();
-        
+
         options.AddClientWithScopes(clientId, secret, scopes, displayName);
     }
 });
@@ -31,12 +31,12 @@ app.MapSimpleIdp();
 app.MapGet("/health", () => new { status = "healthy", service = "TestIdp" });
 
 // Info endpoint
-app.MapGet("/", (SimpleIdpOptions options) => new 
+app.MapGet("/", (SimpleIdpOptions options) => new
 {
     service = "TransportR Test Identity Provider (using SimpleIdp)",
     tokenEndpoint = "/connect/token",
     grantTypes = new[] { "client_credentials" },
-    clients = options.Clients.Select(c => new 
+    clients = options.Clients.Select(c => new
     {
         clientId = c.ClientId,
         scopes = c.GetEffectiveScopes()
