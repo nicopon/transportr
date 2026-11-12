@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using TransportR.Models;
 
 namespace TransportR.Interfaces;
@@ -32,6 +33,7 @@ internal interface IBridgeManager
     /// Attempts to remove a bridge.
     /// </summary>
     /// <param name="bridgeKey">The bridge key to remove.</param>
+    /// <param name="bridge">The bridge removed. Its streams run on until it is cancelled.</param>
     /// <returns>True if removed, false if not found.</returns>
-    bool TryRemove(string bridgeKey);
+    bool TryRemove(string bridgeKey, [NotNullWhen(true)] out ConnectionBridge? bridge);
 }

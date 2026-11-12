@@ -44,7 +44,7 @@ public class BridgeManagerTests
         manager.GetOrCreate("transfer-1", ConnectionType.Data);
 
         // Act
-        var removed = manager.TryRemove("transfer-1:Data");
+        var removed = manager.TryRemove("transfer-1:Data", out _);
 
         // Assert
         Assert.True(removed);
@@ -58,7 +58,7 @@ public class BridgeManagerTests
         var manager = new BridgeManager(Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
         // Act
-        var removed = manager.TryRemove("non-existent");
+        var removed = manager.TryRemove("non-existent", out _);
 
         // Assert
         Assert.False(removed);

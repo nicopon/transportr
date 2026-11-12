@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
@@ -11,13 +12,14 @@ public class TransferTerminatorTests
     private readonly TransferManager _transferManager;
     private readonly BridgeManager _bridgeManager = new(NullLoggerFactory.Instance);
     private readonly RecordingNotifier _notifier = new();
+    private readonly UploadEpochs _epochs = new(TimeProvider.System, NullLogger<UploadEpochs>.Instance);
     private readonly TransferTerminator _terminator;
 
     public TransferTerminatorTests()
     {
         _transferManager = new TransferManager(_stateStore);
         _terminator = new TransferTerminator(
-            _transferManager, _bridgeManager, _stateStore, _notifier, NullLogger<TransferTerminator>.Instance);
+            _transferManager, _bridgeManager, _stateStore, _notifier, _epochs, NullLogger<TransferTerminator>.Instance);
     }
 
     [Fact]
@@ -88,7 +90,7 @@ public class TransferTerminatorTests
         var transfers = new TransferManagerSpy(_transferManager, () =>
             bridgesWhenTheStateWasRemoved.AddRange(_bridgeManager.Bridges.Keys));
         var terminator = new TransferTerminator(
-            transfers, _bridgeManager, _stateStore, _notifier, NullLogger<TransferTerminator>.Instance);
+            transfers, _bridgeManager, _stateStore, _notifier, _epochs, NullLogger<TransferTerminator>.Instance);
         await _transferManager.RegisterParticipantsAsync(transferId, Guid.NewGuid(), Guid.NewGuid());
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
 
@@ -107,7 +109,7 @@ public class TransferTerminatorTests
         var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
         var transfers = new TransferManagerSpy(_transferManager, () => throw new IOException("the store is down"));
         var terminator = new TransferTerminator(
-            transfers, _bridgeManager, _stateStore, _notifier, NullLogger<TransferTerminator>.Instance);
+            transfers, _bridgeManager, _stateStore, _notifier, _epochs, NullLogger<TransferTerminator>.Instance);
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
 
         await terminator.RetireAsync(transferId);

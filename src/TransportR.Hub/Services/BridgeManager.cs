@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using TransportR.Interfaces;
 using TransportR.Models;
@@ -31,8 +32,8 @@ internal class BridgeManager : IBridgeManager
             _ => new ConnectionBridge(transferId, type, _loggerFactory.CreateLogger<ConnectionBridge>(), _time));
     }
 
-    public bool TryRemove(string bridgeKey)
+    public bool TryRemove(string bridgeKey, [NotNullWhen(true)] out ConnectionBridge? bridge)
     {
-        return _bridges.TryRemove(bridgeKey, out _);
+        return _bridges.TryRemove(bridgeKey, out bridge);
     }
 }

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
+using TransportR.Models;
 
 namespace TransportR.Services;
 
@@ -9,6 +11,7 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     private readonly IBridgeManager _bridgeManager;
     private readonly IStateStore _stateStore;
     private readonly ITransferNotifier _notifier;
+    private readonly UploadEpochs _epochs;
     private readonly ILogger<TransferTerminator> _logger;
 
     public TransferTerminator(
@@ -16,12 +19,14 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
         IBridgeManager bridgeManager,
         IStateStore stateStore,
         ITransferNotifier notifier,
+        UploadEpochs epochs,
         ILogger<TransferTerminator> logger)
     {
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
         _stateStore = stateStore;
         _notifier = notifier;
+        _epochs = epochs;
         _logger = logger;
     }
 
@@ -32,12 +37,22 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
             // Participants are read first: removing the transfer takes them with it.
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
-            await RemoveAsync(transferId);
+            var bridges = await RemoveAsync(transferId);
 
             if (participants != null)
             {
                 await NotifyClientAsync(participants.SenderId, transferId, cancellationToken);
                 await NotifyClientAsync(participants.ReceiverId, transferId, cancellationToken);
+            }
+
+            // A participant is free to ignore the event: the streams it holds open are cut here, or
+            // they go on carrying data through bridges nothing tracks any more. The event goes out
+            // first, so that a client reading it before its streams break says the hub ended the
+            // transfer rather than that a stream failed.
+            foreach (var bridge in bridges)
+            {
+                bridge.Cancel();
+                _epochs.Abandon(bridge.BridgeKey);
             }
         }
         catch (Exception ex)
@@ -60,13 +75,16 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
 
     // The state goes before the bridges: a stream that reopens in between then meets a transfer that
     // is gone (404, which a client in its closing phase reads as the end) instead of a fresh bridge
-    // that waits for a peer that will not come.
-    private async Task RemoveAsync(string transferId)
+    // that waits for a peer that will not come. The bridges removed are left running: after a clean
+    // end, the receiver's data GET is still on its way out, and cutting it would cut the end.
+    private async Task<List<ConnectionBridge>> RemoveAsync(string transferId)
     {
         await _transferManager.RemoveTransferAsync(transferId);
 
-        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data));
-        _bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control));
+        var removed = new List<ConnectionBridge>(2);
+        if (_bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var data)) removed.Add(data);
+        if (_bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control), out var control)) removed.Add(control);
+        return removed;
     }
 
     private async Task NotifyClientAsync(Guid clientId, string transferId, CancellationToken ct)
@@ -76,7 +94,6 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
             var client = await _stateStore.GetClientAsync(clientId);
             if (client != null)
             {
-                // Use CancelTransfer for timeout - dataplane handles graceful shutdown
                 await _notifier.NotifyCancelTransferAsync(client.ConnectionId, transferId, ct);
             }
         }

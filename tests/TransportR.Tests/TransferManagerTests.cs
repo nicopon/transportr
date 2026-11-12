@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Configuration;
+using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Services;
@@ -203,7 +204,8 @@ public class TransferManagerTests
         var replicaA = new TransferManager(store, clock);
         var replicaB = new TransferManager(store, clock);
         var terminator = new SignallingTerminator(new TransferTerminator(
-            replicaB, new BridgeManager(NullLoggerFactory.Instance), store, new SilentNotifier(), NullLogger<TransferTerminator>.Instance));
+            replicaB, new BridgeManager(NullLoggerFactory.Instance), store, new SilentNotifier(),
+            new UploadEpochs(clock, NullLogger<UploadEpochs>.Instance), NullLogger<TransferTerminator>.Instance));
         var config = new DataPlaneConfiguration();
         using var cleanup = new TransferCleanupService(
             replicaB, terminator, Options.Create(config), NullLogger<TransferCleanupService>.Instance, clock);
