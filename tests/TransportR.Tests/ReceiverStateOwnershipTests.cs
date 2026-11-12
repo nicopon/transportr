@@ -131,75 +131,17 @@ public class ReceiverStateOwnershipTests
     }
 
     [Fact]
-    public async Task OutOfOrder_IsHeldWithoutBeingReturned_ThenHandedOnWhenTheGapIsFilled()
+    public async Task ABatchAheadOfTheExpectedOne_IsAProtocolViolation_ReturnedOnceAndNeverHandedOn()
     {
         var sink = new ScriptedSink((_, _) => true);
         var state = StateOver(sink);
-        var later = new CountingOwner(Payload(2));
-        var gap = new CountingOwner(Payload(1));
+        var ahead = new CountingOwner(Payload(2));
 
-        await state.ProcessBatchAsync(1, later, later.Memory);
-        Assert.Equal(0, later.Disposals);
-        Assert.Equal(1, state.ReorderedChunks);
+        await Assert.ThrowsAsync<WireProtocolViolationException>(() => state.ProcessBatchAsync(1, ahead, ahead.Memory));
+
+        Assert.Equal(1, ahead.Disposals);
         Assert.Equal(0, sink.Calls);
-
-        await state.ProcessBatchAsync(0, gap, gap.Memory);
-
-        Assert.Equal(2, sink.Calls);
-        Assert.Equal(0, state.ReorderedChunks);
-        Assert.Equal(2, state.NextExpectedBatchId);
-        Assert.Equal(0, later.Disposals);
-        Assert.Equal(0, gap.Disposals);
-    }
-
-    [Fact]
-    public async Task OutOfOrder_WhenTheSinkDeclinesBoth_EachIsReturnedOnce()
-    {
-        var state = StateOver(new ScriptedSink((_, _) => false));
-        var later = new CountingOwner(Payload(2));
-        var gap = new CountingOwner(Payload(1));
-
-        await state.ProcessBatchAsync(1, later, later.Memory);
-        await state.ProcessBatchAsync(0, gap, gap.Memory);
-
-        Assert.Equal(1, later.Disposals);
-        Assert.Equal(1, gap.Disposals);
-    }
-
-    [Fact]
-    public async Task OutOfOrder_WhenTheSinkThrowsOnTheHeldChunk_ItIsReturnedOnceAndNotKept()
-    {
-        // Arrange: the first write succeeds (taken), the second, of the chunk held out of order, throws.
-        var state = StateOver(new ScriptedSink((call, _) => call == 1 ? true : throw new InvalidOperationException()));
-        var later = new CountingOwner(Payload(2));
-        var gap = new CountingOwner(Payload(1));
-        await state.ProcessBatchAsync(1, later, later.Memory);
-
-        // Act
-        await Assert.ThrowsAsync<InvalidOperationException>(() => state.ProcessBatchAsync(0, gap, gap.Memory));
-
-        // Assert
-        Assert.Equal(1, later.Disposals);
-        Assert.Equal(0, gap.Disposals);
-        Assert.Equal(0, state.ReorderedChunks);
-        state.DiscardReordered();
-        Assert.Equal(1, later.Disposals);
-    }
-
-    [Fact]
-    public async Task DiscardReordered_ReturnsEachHeldChunkOnce_EvenCalledTwice()
-    {
-        var state = StateOver(new ScriptedSink((_, _) => true));
-        var second = new CountingOwner(Payload(2));
-        var third = new CountingOwner(Payload(3));
-        await state.ProcessBatchAsync(2, second, second.Memory);
-        await state.ProcessBatchAsync(3, third, third.Memory);
-
-        state.DiscardReordered();
-        state.DiscardReordered();
-
-        Assert.Equal(1, second.Disposals);
-        Assert.Equal(1, third.Disposals);
+        Assert.Equal(0, state.NextExpectedBatchId);
     }
 
     [Fact]

@@ -1,11 +1,16 @@
 using System.Buffers;
+using TransportR.Protocol;
 
 namespace TransportR.Client.Batching;
 
 /// <summary>
-/// Manages receiver-side batch reordering.
-/// Handles out-of-order batch arrival and ensures in-order delivery to the consumer channel.
+/// Hands the batches of a transfer to the consumer's sink in order, once each.
 /// </summary>
+/// <remarks>
+/// A stream carries them in order, a resend included: the sender resends from the batch the receiver
+/// expects next, so a batch already in is a duplicate and one ahead of the expected one is a
+/// protocol violation, refused rather than held.
+/// </remarks>
 internal class ReceiverState
 {
     /// <summary>
@@ -18,32 +23,25 @@ internal class ReceiverState
     }
 
     private readonly IChunkSink _sink;
-    private readonly Dictionary<int, (IMemoryOwner<byte> Owner, ReadOnlyMemory<byte> Body)> _reorderBuffer;
 
     public int NextExpectedBatchId { get; private set; } = 0;
-
-    /// <summary>
-    /// Chunks currently held out of order, waiting for the one before them. Counted rather than
-    /// bounded: these hold serialized bytes outside the receive buffer's budget, and over a single
-    /// ordered stream the count should stay at zero. A bound built before a measurement showed
-    /// otherwise would be a second budget guarding nothing.
-    /// </summary>
-    public int ReorderedChunks => _reorderBuffer.Count;
 
     public ReceiverState(IChunkSink sink, int startBatchId = 0)
     {
         _sink = sink;
-        _reorderBuffer = [];
         NextExpectedBatchId = startBatchId;
     }
 
     /// <summary>
-    /// Processes an incoming batch, handling reordering.
+    /// Processes an incoming batch.
     /// </summary>
     /// <param name="batchId">The batch identifier.</param>
     /// <param name="owner">Memory owner for the batch payload (will be disposed after processing).</param>
     /// <param name="compressedBody">The compressed batch payload.</param>
     /// <returns>Result indicating what ACK to send.</returns>
+    /// <exception cref="WireProtocolViolationException">
+    /// The batch is ahead of <see cref="NextExpectedBatchId"/>. Its memory has been returned.
+    /// </exception>
     public async Task<ReceiveResult> ProcessBatchAsync(int batchId, IMemoryOwner<byte> owner, ReadOnlyMemory<byte> compressedBody, CancellationToken ct = default)
     {
         if (batchId < NextExpectedBatchId)
@@ -58,22 +56,12 @@ internal class ReceiverState
 
             NextExpectedBatchId++;
 
-            while (_reorderBuffer.ContainsKey(NextExpectedBatchId))
-            {
-                var (bufOwner, bufBody) = _reorderBuffer[NextExpectedBatchId];
-                _reorderBuffer.Remove(NextExpectedBatchId);
-                await WriteAsync(bufOwner, bufBody, ct);
-                NextExpectedBatchId++;
-            }
+            return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
+        }
 
-            return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
-        }
-        else
-        {
-            // Out-of-order batch: buffer it and ACK (TCP guarantees eventual delivery)
-            _reorderBuffer[batchId] = (owner, compressedBody);
-            return new ReceiveResult { IsProcessed = true, BatchIdToAck = batchId };
-        }
+        owner.Dispose();
+        throw new WireProtocolViolationException(
+            $"Batch {batchId} arrived while batch {NextExpectedBatchId} was expected.");
     }
 
     /// <summary>
@@ -90,21 +78,6 @@ internal class ReceiverState
         {
             if (!taken) owner.Dispose();
         }
-    }
-
-    /// <summary>
-    /// Drops the chunks held out of order, returning their pooled memory.
-    /// </summary>
-    /// <remarks>
-    /// Called when a reconnection replaces this state. Dropping them is correct — the sender
-    /// resends everything from <see cref="NextExpectedBatchId"/>, which is below every id held
-    /// here — but the buffers they sit in come from a pool, and abandoning them with the
-    /// instance would leak one set per reconnection that had chunks in hand.
-    /// </remarks>
-    public void DiscardReordered()
-    {
-        foreach (var (owner, _) in _reorderBuffer.Values) owner.Dispose();
-        _reorderBuffer.Clear();
     }
 
     /// <summary>

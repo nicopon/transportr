@@ -12,10 +12,10 @@ namespace TransportR.Serialization.Arrow.Services;
 /// <remarks>
 /// <para>
 /// <b>Every chunk is a complete IPC stream</b> — schema, batches, end-of-stream marker — not a
-/// fragment of one. The protocol deserializes chunks independently, buffers them when they arrive
-/// out of order and replays them after a cut, so a chunk that depended on a schema sent once at
-/// the start would decode into nothing the moment any of that happened. Repeating the schema is
-/// the price of that independence, and it is small next to a batch.
+/// fragment of one. The protocol deserializes chunks independently and replays them after a cut,
+/// so a chunk that depended on a schema sent once at the start would decode into nothing after the
+/// first cut. Repeating the schema is the price of that independence, and it is small next to a
+/// batch.
 /// </para>
 ///
 /// <para>

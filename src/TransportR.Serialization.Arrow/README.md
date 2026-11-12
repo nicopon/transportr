@@ -26,10 +26,9 @@ its first batch.
 ## Two things this package decides for you
 
 **Every chunk is a complete IPC stream** — schema, batches, end-of-stream marker. The protocol
-decodes chunks independently, buffers them when they arrive out of order and replays them after a
-cut, so a chunk depending on a schema sent once at the start would decode into nothing the moment
-any of that happened. Repeating the schema is the price of that independence, and it is small
-next to a batch.
+decodes chunks independently and replays them after a cut, so a chunk depending on a schema sent
+once at the start would decode into nothing after the first cut. Repeating the schema is the price
+of that independence, and it is small next to a batch.
 
 **This serializer owns the batches it is given and disposes them once written.** A `RecordBatch`
 holds off-heap memory that something has to release, and this is the only place that knows the

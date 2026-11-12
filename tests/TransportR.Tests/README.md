@@ -40,7 +40,7 @@ test. They are skipped only when neither exists (`RedisServer.cs`).
 | Component | Covers |
 |-----------|--------|
 | `BatchAccumulator` | Validation, flush by size and by timeout, batch IDs |
-| `ReceiverState` | In-order, out-of-order and duplicate batches |
+| `ReceiverState` | In-order and duplicate batches; one ahead of the expected one is a protocol violation |
 | `ChunkIO` | Binary header read and write, buffer management |
 | `FlowControlService` | Group permissions, wildcards |
 | `InMemoryStateStore` | Clients, connection index, disconnection grace, renewal, sessions |

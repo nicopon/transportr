@@ -70,10 +70,9 @@ public class ArrowBatchSerializerTests
     /// Every chunk carries its own schema, so any chunk decodes on its own.
     /// </summary>
     /// <remarks>
-    /// The protocol buffers chunks that arrive out of order and replays them after a cut. A
-    /// serializer that sent the schema once, in the first chunk, would decode into nothing the
-    /// first time either of those happened — and the failure would look like an empty transfer,
-    /// not like a bug.
+    /// The protocol replays chunks after a cut. A serializer that sent the schema once, in the
+    /// first chunk, would decode into nothing the first time that happened — and the failure would
+    /// look like an empty transfer, not like a bug.
     /// </remarks>
     [Fact]
     public async Task Any_Chunk_Decodes_Without_The_Ones_Before_It()

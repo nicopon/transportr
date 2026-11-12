@@ -162,19 +162,4 @@ public class ReceivedChunkOwnershipTests
 
         Assert.Equal(1, owner.Disposals);
     }
-
-    [Fact]
-    public async Task ABatchHeldOutOfOrder_IsReturnedOnceWhenTheProcessorIsDisposed()
-    {
-        var processor = ByteProcessor();
-        await processor.StartReceiverAsync();
-        var owner = new CountingOwner([1, 2, 3, 4]);
-
-        await processor.ProcessChunkAsync(Batch(1, ChunkType.StreamBatch, 4), owner);
-        Assert.Equal(0, owner.Disposals);
-
-        await processor.DisposeAsync();
-
-        Assert.Equal(1, owner.Disposals);
-    }
 }

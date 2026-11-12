@@ -56,22 +56,6 @@ public class BatchProcessorByteStreamTests
     }
 
     [Fact]
-    public async Task ReceiveAsync_DeliversInOrderABatchThatArrivedEarly()
-    {
-        await using var processor = CreateProcessor();
-        await processor.StartReceiverAsync();
-
-        await processor.ProcessChunkAsync(CreateChunk(1, Bytes(2, 4)));
-        await processor.ProcessChunkAsync(CreateChunk(0, Bytes(1, 4)));
-        processor.CompleteReceiver();
-
-        var received = new List<byte[]>();
-        await foreach (var batch in processor.ReceiveAsync(CancellationToken.None)) received.Add(batch);
-
-        Assert.Equal([Bytes(1, 4), Bytes(2, 4)], received);
-    }
-
-    [Fact]
     public async Task ReceiveChunksAsync_GivesTheChunksThemselves_ValidUntilTheConsumerDisposesThem()
     {
         await using var processor = CreateProcessor();

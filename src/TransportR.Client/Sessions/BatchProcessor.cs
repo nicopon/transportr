@@ -120,11 +120,6 @@ internal class BatchProcessor : IAsyncDisposable
         _sink ??= _openSink();
 
         int startBatchId = _receiverState?.NextExpectedBatchId ?? 0;
-
-        // A reconnection replaces the state; the chunks it held out of order go back to the pool
-        // rather than away with the instance. The sender resends them from startBatchId.
-        _receiverState?.DiscardReordered();
-
         _receiverState = new ReceiverState(_sink, startBatchId);
         return Task.CompletedTask;
     }
@@ -367,16 +362,6 @@ internal class BatchProcessor : IAsyncDisposable
 
         // The count of a batch of bytes is its length, not items.
         if (header.Type == ChunkType.Batch) Interlocked.Add(ref _itemsReceived, header.Count);
-
-        // Chunks held out of order carry serialized bytes that no budget counts. Over an ordered
-        // stream this should never fire; it is here so that "should never" is something a run can
-        // contradict, rather than a second budget built against an intuition.
-        if (_receiverState.ReorderedChunks > 0)
-        {
-            _context.Logger.LogDebug(
-                "Holding {Count} out-of-order chunk(s) for Transfer={TransferId}, outside the receive budget",
-                _receiverState.ReorderedChunks, _transferId);
-        }
 
         if (rxResult.BatchIdToAck.HasValue)
         {
@@ -633,7 +618,6 @@ internal class BatchProcessor : IAsyncDisposable
         // parked loop cannot reach the finally that would otherwise complete the buffer.
         _sink?.Complete();
         _sink?.DiscardUnread();
-        _receiverState?.DiscardReordered();
 
         // A queued batch holds a reference of its own, which only the write loop gives back once it
         // has read the message. The channel hands each message out once, to that loop or here.
