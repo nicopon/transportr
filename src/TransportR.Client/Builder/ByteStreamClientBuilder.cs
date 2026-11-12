@@ -26,7 +26,8 @@ public sealed class ByteStreamClientBuilder
     /// is no default: the right figure depends on the use. For continuous streaming on WAN or cloud
     /// links, 256 KB or 512 KB is recommended to align with <c>ClientOptions.StreamBufferSize</c> and
     /// minimize framing overhead.
-    /// At most <c>int.MaxValue - 4</c>, a batch and its 4-byte length being held in one <c>int</c>.
+    /// At most <c>int.MaxValue - 4</c>, a batch and its 4-byte length being held in one <c>int</c>, and
+    /// at most <see cref="WithMaxBatchBytes"/> (256 MiB by default) once <see cref="Build"/> runs.
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="batchBytes"/> is zero or less, or more than <c>int.MaxValue - 4</c>.
@@ -75,6 +76,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithMaxBatchBytes"/>
+    public ByteStreamClientBuilder WithMaxBatchBytes(int maxBytes)
+    {
+        _state.SetMaxBatchBytes(maxBytes);
+        return this;
+    }
+
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithLoggerFactory"/>
     public ByteStreamClientBuilder WithLoggerFactory(ILoggerFactory loggerFactory)
     {
@@ -113,8 +121,16 @@ public sealed class ByteStreamClientBuilder
     /// <summary>
     /// Builds the <see cref="ByteStreamClient"/>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// The batch size given to the constructor is above <see cref="WithMaxBatchBytes"/>.
+    /// </exception>
     public ByteStreamClient Build()
     {
+        // A receiver at the same bound would refuse every full batch: refused here, before the first.
+        if (_batchBytes > _state.MaxBatchBytes)
+            throw new InvalidOperationException(
+                $"The batch size ({_batchBytes} bytes) is over WithMaxBatchBytes ({_state.MaxBatchBytes} bytes).");
+
         var logger = _state.CreateLogger<ByteStreamClient>();
         var wiring = _state.Assemble(logger);
 

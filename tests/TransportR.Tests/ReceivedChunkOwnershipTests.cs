@@ -41,7 +41,7 @@ public class ReceivedChunkOwnershipTests
         await ChunkIO.WriteBatchAsync(stream, _transferId, ChunkType.StreamBatch, batchId: 3, count: payload.Length, payload);
         stream.Position = 0;
 
-        var read = await ChunkIO.ReadOwnedChunkAsync(stream, CancellationToken.None);
+        var read = await ChunkIO.ReadOwnedChunkAsync(stream, int.MaxValue, "a chunk carries", CancellationToken.None);
 
         Assert.True(read.HasValue);
         var (header, owner) = read.Value;
@@ -68,7 +68,7 @@ public class ReceivedChunkOwnershipTests
         ArrayPool<byte>.Shared.Return(probe);
 
         // Act: a memory stream completes every read at once, so nothing leaves this thread.
-        var read = ChunkIO.ReadOwnedChunkAsync(stream, CancellationToken.None);
+        var read = ChunkIO.ReadOwnedChunkAsync(stream, int.MaxValue, "a chunk carries", CancellationToken.None);
 
         // Assert
         Assert.True(read.IsCompleted);

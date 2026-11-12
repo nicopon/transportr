@@ -266,9 +266,12 @@ internal class BatchProcessor : IAsyncDisposable
         var registered = false;
         try
         {
-            // A chunk gives the length of its payload as an int.
-            if (batch.Body.Length > int.MaxValue)
-                throw new InvalidOperationException("The batch is larger than a chunk can carry.");
+            // Refused here rather than by a receiver at the same bound, after the whole batch has crossed.
+            // The payload on the wire is the body less its 4-byte count.
+            var payloadLength = batch.Body.Length - sizeof(int);
+            if (payloadLength > _context.Options.MaxBatchBytes)
+                throw new InvalidOperationException(
+                    $"A batch of {payloadLength} bytes is over WithMaxBatchBytes ({_context.Options.MaxBatchBytes} bytes).");
 
             entry = new BatchEntry(batch.Body, batch.Body.GetReadOnlySequence());
             await RegisterBatchAsync(entry, batch.BatchId, batch.Count, () => registered = true, ct);

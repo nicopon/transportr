@@ -96,7 +96,7 @@ public static class ChunkIO
     /// <returns>Header and payload (payload is empty for control messages), or null if stream ended.</returns>
     public static async Task<ChunkData?> ReadChunkAsync(Stream stream, CancellationToken ct = default)
     {
-        if (await ReadOwnedChunkAsync(stream, ct).ConfigureAwait(false) is not { } chunk) return null;
+        if (await ReadOwnedChunkAsync(stream, int.MaxValue, "a chunk carries", ct).ConfigureAwait(false) is not { } chunk) return null;
 
         return new ChunkData(chunk.Header, chunk.Payload, chunk.Payload is null ? 0 : chunk.Header.PayloadLength);
     }
@@ -105,17 +105,27 @@ public static class ChunkIO
     /// Reads a chunk as <see cref="ReadChunkAsync"/> does, and hands the memory its payload was read
     /// into to the caller, as the caller's own.
     /// </summary>
+    /// <param name="maxPayloadLength">
+    /// The largest payload accepted. The length comes off the wire, so it is checked before any memory
+    /// is rented for it: a larger one is a <see cref="WireProtocolViolationException"/>.
+    /// </param>
+    /// <param name="allowedBy">What sets that bound, as the refusal names it.</param>
     /// <returns>
     /// The header, and the payload's memory, exactly its length, or <c>null</c> when it has none; or
     /// <c>null</c> if the stream ended. Not disposable, unlike <see cref="ChunkData"/>, so that no copy
     /// of it can return that memory: whoever the caller hands the owner to returns it, once.
     /// </returns>
     internal static async ValueTask<(ChunkHeader Header, IMemoryOwner<byte>? Payload)?> ReadOwnedChunkAsync(
-        Stream stream, CancellationToken ct)
+        Stream stream, int maxPayloadLength, string allowedBy, CancellationToken ct)
     {
         var read = await ChunkHeader.ReadFromStreamAsync(stream, ct).ConfigureAwait(false);
         if (read is not { } header) return null;
         if (header.PayloadLength <= 0) return (header, null);
+        if (header.PayloadLength > maxPayloadLength)
+        {
+            throw new WireProtocolViolationException(
+                $"A chunk announced a payload of {header.PayloadLength} bytes, over the {maxPayloadLength} bytes {allowedBy}.");
+        }
 
         var payload = new PooledPayload(header.PayloadLength);
         try

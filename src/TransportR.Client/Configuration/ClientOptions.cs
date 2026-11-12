@@ -173,4 +173,17 @@ internal class ClientOptions
     /// </para>
     /// </remarks>
     public BufferCapacity? ReceiveBufferCapacity { get; set; }
+
+    /// <summary>
+    /// The largest batch payload, in bytes, this client receives or sends. Default: 256 MiB.
+    /// </summary>
+    /// <remarks>
+    /// A receiver checks the length a chunk announces before it rents memory for it, and refuses one
+    /// above this as a protocol violation that fails the transfer. A sender fails its transfer on a
+    /// serialized batch above it, and a byte client refuses at <c>Build</c> a batch size above it.
+    /// Closed by default on purpose: the length comes off the wire, from a peer that may lie.
+    /// </remarks>
+    public int MaxBatchBytes { get; set; } = DefaultMaxBatchBytes;
+
+    public const int DefaultMaxBatchBytes = 256 * 1024 * 1024;
 }

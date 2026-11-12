@@ -886,6 +886,12 @@ internal class DataSession : IDataSession
         }
     }
 
+    /// <summary>
+    /// What a chunk read off a sender's control stream may carry: acknowledgements, Pongs and Aborts are
+    /// a header and nothing more.
+    /// </summary>
+    private const int MaxControlPayloadBytes = 0;
+
     private async Task ReadLoop(Stream inputStream, CancellationToken token)
     {
         // If we already received Complete, do not restart reading (prevents hanging on retry)
@@ -911,7 +917,10 @@ internal class DataSession : IDataSession
                     break;
                 }
 
-                if (await ChunkIO.ReadOwnedChunkAsync(inputStream, token) is not { } chunk)
+                var chunkRead = IsSender
+                    ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", token)
+                    : ChunkIO.ReadOwnedChunkAsync(inputStream, _config.Options.MaxBatchBytes, "WithMaxBatchBytes allows", token);
+                if (await chunkRead is not { } chunk)
                 {
                     // If stream ends but we haven't received Complete, it's an error (premature disconnect)
                     // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).

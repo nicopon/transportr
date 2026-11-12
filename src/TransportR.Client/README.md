@@ -90,7 +90,8 @@ await receiver.ConnectAsync(new[] { "receivers" });
 The builder has the options of the item builder that mean something for bytes (`WithClientCredentials`, `WithAccessToken`,
 `WithTokenProvider`, `WithWriteTransport`, `WithLoggerFactory`, among others). One that means something only for items (`WithSerializer`, `WithBatchSize`, a bound in items) is not an overload that exists. Both ends
 of a transfer must be `ByteStreamClient`s, or both item clients. `TransferInfo.ItemsProcessed` is 0 for a byte transfer, which has
-no items; `BytesTransferred` carries the count.
+no items; `BytesTransferred` carries the count. `WithMaxBatchBytes`, on both builders, bounds one batch on the wire,
+256 MiB by default: a receiver fails the transfer on a larger chunk, and `Build()` refuses a `batchBytes` above it.
 
 ### Sizing for WAN and high-throughput streaming
 

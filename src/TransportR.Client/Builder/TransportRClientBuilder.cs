@@ -104,6 +104,28 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Bounds the size of one batch on the wire, in bytes. Default: 256 MiB.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A receiver refuses a chunk that announces a larger payload before it reserves any memory for
+    /// it: the transfer fails as a protocol violation, and the error names this setting. A sender
+    /// refuses a larger batch before it is sent: an item client fails the transfer on a serialized
+    /// batch above its own bound, and a byte client's <c>Build</c> refuses a batch size above it.
+    /// </para>
+    /// <para>
+    /// Both ends of a transfer need a bound at least as large as the largest batch the sender cuts.
+    /// The bound can be raised, not removed.
+    /// </para>
+    /// </remarks>
+    /// <param name="maxBytes">The largest batch payload accepted, in bytes.</param>
+    public TransportRClientBuilder<T> WithMaxBatchBytes(int maxBytes)
+    {
+        _state.SetMaxBatchBytes(maxBytes);
+        return this;
+    }
+
+    /// <summary>
     /// Sets the logger factory.
     /// </summary>
     public TransportRClientBuilder<T> WithLoggerFactory(ILoggerFactory loggerFactory)

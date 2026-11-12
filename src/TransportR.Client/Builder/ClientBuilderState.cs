@@ -36,6 +36,8 @@ internal sealed class ClientBuilderState
 
     public BufferCapacity? ReceiveCapacity { get; private set; }
 
+    public int MaxBatchBytes { get; private set; } = ClientOptions.DefaultMaxBatchBytes;
+
     public void SetUrl(string url) => _url = url;
 
     public void SetBatchTimeout(int timeoutMs) => _batchFlushIntervalMs = timeoutMs;
@@ -44,6 +46,12 @@ internal sealed class ClientBuilderState
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(max, 0, nameof(max));
         _maxInFlightBatches = max;
+    }
+
+    public void SetMaxBatchBytes(int maxBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxBytes, 0, nameof(maxBytes));
+        MaxBatchBytes = maxBytes;
     }
 
     public void SetReceiveCapacity(BufferCapacity capacity)
@@ -102,6 +110,7 @@ internal sealed class ClientBuilderState
         };
 
         options.ReceiveBufferCapacity = ReceiveCapacity;
+        options.MaxBatchBytes = MaxBatchBytes;
         if (_tokenRefreshThreshold is { } threshold) options.TokenRefreshThreshold = threshold;
 
         // Neither end bounded is a supported configuration and the right one for a consumer that
