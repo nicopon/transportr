@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using TransportR.Configuration;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
@@ -171,25 +172,42 @@ public static class TransportRHubExtensions
     /// Maps the StreamController and ClientController endpoints: the data plane and the control plane.
     /// </summary>
     /// <param name="requireAuth">
-    /// Arms authorization on both planes. The host must have called <c>UseAuthentication()</c> and
-    /// <c>UseAuthorization()</c>; leaving it false leaves the data plane open to anyone who knows a
-    /// transfer id, which is the documented meaning of dev mode.
+    /// Whether authorization is armed on both planes. Left null, it follows the mode <c>Build()</c>
+    /// chose: armed for a hub that validates tokens, not for one in dev mode. Armed, the host must have
+    /// called <c>UseAuthentication()</c> and <c>UseAuthorization()</c>. Not armed, the data plane is open
+    /// to anyone who knows a transfer id, which is the documented meaning of dev mode; a hub that
+    /// validates tokens and is mapped that way logs a warning when it starts, as a hub in dev mode does.
     /// </param>
-    public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool requireAuth = false)
+    public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool? requireAuth = null)
     {
         // AddDataHub() registers everything except the identity provider, which only Build() knows
         // how to choose. Skipping Build() therefore yields a hub that starts, accepts connections
         // and fails on the first one — at the far end of a scenario, in a resolution error naming a
         // type the host never mentioned. Refusing here names the missing call instead.
-        if (endpoints.ServiceProvider.GetService<IClientIdentityProvider>() is null)
-        {
-            throw new InvalidOperationException(
+        var identityProvider = endpoints.ServiceProvider.GetService<IClientIdentityProvider>()
+            ?? throw new InvalidOperationException(
                 "TransportR is not fully configured: AddDataHub() must be followed by Build().");
+
+        // Read from the provider Build() registered rather than from the requests: a request without a
+        // token looks the same on a hub in dev mode and on one that validates tokens.
+        var devMode = identityProvider is DevIdentityProvider;
+        var armed = requireAuth ?? !devMode;
+
+        var logger = endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(TransportRHubExtensions));
+        if (devMode)
+        {
+            logger.LogWarning(
+                "TransportR hub in dev mode: it trusts the identity and groups a client claims, and unless authorization is armed its data plane serves anyone who knows a transfer id. Not for production.");
+        }
+        else if (!armed)
+        {
+            logger.LogWarning(
+                "TransportR hub validates tokens but is mapped with requireAuth: false: its data plane serves anyone who knows a transfer id, without a token.");
         }
 
         var controllers = endpoints.MapControllers();
 
-        if (requireAuth)
+        if (armed)
         {
             // MapControllers hands back one convention builder for every controller the host has
             // registered — including the embedded IdP's token endpoint, which must stay anonymous

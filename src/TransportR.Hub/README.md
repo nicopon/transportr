@@ -63,8 +63,8 @@ builder.Services.AddDataHub().Build();
 
 var app = builder.Build();
 
-// With the JWT default the host also configures JwtBearer authentication, calls UseAuthentication()
-// and UseAuthorization(), and maps with requireAuth: true (see SecurityArchitecture.md).
+// With the JWT default the host also configures JwtBearer authentication and calls UseAuthentication()
+// and UseAuthorization(); MapDataHub() then arms authorization on both planes (see SecurityArchitecture.md).
 app.MapDataHub();
 
 app.Run();

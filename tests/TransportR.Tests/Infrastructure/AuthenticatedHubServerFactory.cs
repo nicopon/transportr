@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -36,12 +37,16 @@ public static class AuthenticatedHubServerFactory
     /// <summary>
     /// An in-memory host.
     /// <paramref name="configureServices"/> runs once the hub is built, so what it registers replaces
-    /// the hub's own (the identity provider, the state store).
+    /// the hub's own (the identity provider, the state store). <paramref name="mapHub"/> maps the hub
+    /// in place of <c>MapDataHub(requireAuth: true)</c>.
     /// </summary>
-    public static IHost CreateHost(Action<DataHubBuilder>? configureHub = null, Action<IServiceCollection>? configureServices = null)
+    public static IHost CreateHost(
+        Action<DataHubBuilder>? configureHub = null,
+        Action<IServiceCollection>? configureServices = null,
+        Action<IEndpointRouteBuilder>? mapHub = null)
     {
         return new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub, configureServices))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub, configureServices, mapHub))
             .Start();
     }
 
@@ -63,7 +68,11 @@ public static class AuthenticatedHubServerFactory
         return new LoopbackHost(host, baseUrl);
     }
 
-    private static void Configure(IWebHostBuilder webBuilder, Action<DataHubBuilder>? configureHub, Action<IServiceCollection>? configureServices = null)
+    private static void Configure(
+        IWebHostBuilder webBuilder,
+        Action<DataHubBuilder>? configureHub,
+        Action<IServiceCollection>? configureServices = null,
+        Action<IEndpointRouteBuilder>? mapHub = null)
     {
         webBuilder
             .ConfigureServices(services =>
@@ -84,7 +93,7 @@ public static class AuthenticatedHubServerFactory
                 app.UseRouting();
                 app.UseAuthentication();
                 app.UseAuthorization();
-                app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: true));
+                app.UseEndpoints(mapHub ?? (endpoints => endpoints.MapDataHub(requireAuth: true)));
             });
     }
 
