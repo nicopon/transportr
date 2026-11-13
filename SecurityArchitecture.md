@@ -82,8 +82,9 @@ The participant check is only as fine-grained as the subject the IdP attests. Tw
 one set of client credentials share one subject, and so can take each other's place in a transfer;
 they cannot take the other role's place. Issue one IdP client per participant to separate them.
 
-`POST /api/stream/{id}/abort` is armed as the two stream routes are. `MapDataHub(requireAuth: true)` puts
-the default authorization policy on `StreamController`, so a caller without a valid token gets a 401. Past
+`POST /api/stream/{id}/abort` is armed as the two stream routes are. `MapDataHub()` puts the default
+authorization policy on `StreamController` of a hub that validates tokens, so a caller without a valid token
+gets a 401; only an explicit `requireAuth: false` leaves it off, with a warning when the hub starts. Past
 that the route admits either participant of the transfer, by the checks the streams use, and answers 404 to
 anyone else: a transfer the hub does not know, a subject that is not a participant's, and a token that
 grants no `transportr:group:*` scope, even when its subject is a participant's. A host that lists its
