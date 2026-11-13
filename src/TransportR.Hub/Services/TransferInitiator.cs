@@ -72,6 +72,8 @@ internal class TransferInitiator : ITransferInitiator
             throw new HubRequestFailedException($"Source client {senderClientId} not found.");
         }
 
+        ValidateSource(sender);
+
         var receiver = await _stateStore.GetClientAsync(receiverClientId);
         if (receiver == null)
         {
@@ -94,6 +96,23 @@ internal class TransferInitiator : ITransferInitiator
         return await HandshakeAsync(sender, receiver, timeoutMs, requestSender: true, cancellationToken);
     }
 
+    /// <summary>
+    /// Refuses a source whose own token or groups let it open no transfer at all. Called before its
+    /// target is looked up, so that what it is told says nothing of the target.
+    /// </summary>
+    internal void ValidateSource(ClientRegistration sourceClient)
+    {
+        var verdict = _policy.Evaluate(sourceClient);
+        if (verdict == AccessVerdict.Allowed) return;
+
+        _logger.LogWarning("InitTransfer denied ({Verdict}): Source {SourceClientId} [{SourceGroups}]",
+            verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups));
+
+        throw new HubRequestFailedException(verdict == AccessVerdict.TokenExpired
+            ? "Source client token has expired. Please reconnect with a fresh token."
+            : "Client groups not found.");
+    }
+
     internal void ValidateTransferRequest(ClientRegistration sourceClient, ClientRegistration targetClient)
     {
         var verdict = _policy.Evaluate(sourceClient, targetClient);
@@ -104,20 +123,15 @@ internal class TransferInitiator : ITransferInitiator
             return;
         }
 
-        // Only a fault of the caller's own is told to it. Whatever the target's is, in its token, its
-        // groups or the rules between them, is the one answer for a target out of reach.
-        var sourceAtFault = _policy.Evaluate(sourceClient) != AccessVerdict.Allowed;
+        // The source's own faults were told to it by ValidateSource. Whatever is left is the target's,
+        // in its token, its groups or the rules between them, and has the one answer for a target out
+        // of reach.
         _logger.LogWarning(
             "InitTransfer denied ({Verdict}): Source {SourceClientId} [{SourceGroups}], Target {TargetClientId} [{TargetGroups}]",
             verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups),
             targetClient.ClientId, string.Join(", ", targetClient.Groups));
 
-        throw new HubRequestFailedException(verdict switch
-        {
-            AccessVerdict.TokenExpired when sourceAtFault => "Source client token has expired. Please reconnect with a fresh token.",
-            AccessVerdict.NoGroups when sourceAtFault => "Client groups not found.",
-            _ => TargetUnavailable
-        });
+        throw new HubRequestFailedException(TargetUnavailable);
     }
 
     /// <summary>

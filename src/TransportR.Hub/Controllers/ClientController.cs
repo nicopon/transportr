@@ -263,15 +263,17 @@ internal class ClientController : ControllerBase
             return BadRequest(new HubError("The transfer request is not acceptable."));
         }
 
-        var target = await _stateStore.GetClientAsync(request.TargetClientId);
-        if (target == null)
-        {
-            _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
-            return Conflict(new HubError(TransferInitiator.TargetUnavailable));
-        }
-
         try
         {
+            _initiator.ValidateSource(source);
+
+            var target = await _stateStore.GetClientAsync(request.TargetClientId);
+            if (target == null)
+            {
+                _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
+                return Conflict(new HubError(TransferInitiator.TargetUnavailable));
+            }
+
             _initiator.ValidateTransferRequest(source, target);
 
             if (Redirect(target) is { } redirect) return StatusCode(StatusCodes.Status421MisdirectedRequest, redirect);

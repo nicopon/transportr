@@ -62,6 +62,33 @@ public class TargetRefusalTests
         }
     }
 
+    [Theory]
+    [InlineData("token expired")]
+    [InlineData("holds no group")]
+    public async Task ASourceAtFault_IsToldTheSameWhetherItsTargetExistsOrNot(string fault)
+    {
+        // A source whose request still attests its subject passes admission with a registration
+        // that no longer grants it anything; what it is told must say nothing of its target.
+        using var host = TestHubServerFactory.CreateHost();
+        var sourceId = fault == "token expired"
+            ? await RegisterAsync(host, [OpenGroup], DateTime.UtcNow.AddMinutes(-1))
+            : await RegisterAsync(host, []);
+        var present = await RegisterAsync(host, [OpenGroup]);
+
+        var toPresent = await AnswerAsync(host, sourceId, present);
+        var toAbsent = await AnswerAsync(host, sourceId, Guid.NewGuid());
+
+        Assert.Equal(HttpStatusCode.Conflict, toPresent.Status);
+        Assert.Equal(toPresent, toAbsent);
+    }
+
+    private static async Task<(HttpStatusCode Status, string Body)> AnswerAsync(IHost host, Guid sourceId, Guid targetId)
+    {
+        using var response = await RawHub.SendAsync(host, HttpMethod.Post, sourceId, WireRoutes.TransfersSegment, token: null,
+            new InitTransferRequest(targetId, 1000)).WaitAsync(TimeSpan.FromSeconds(30));
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
     private static async Task<Guid> RegisterAsync(IHost host, string[] groups, DateTime? tokenExpiry = null)
     {
         var clientId = Guid.NewGuid();
