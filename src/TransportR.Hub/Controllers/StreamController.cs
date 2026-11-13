@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using TransportR.Configuration;
 using TransportR.Hub.Access;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;
@@ -25,6 +27,7 @@ internal class StreamController : ControllerBase
     private readonly AccessPolicy _policy;
     private readonly ITransferTerminator _terminator;
     private readonly UploadEpochs _epochs;
+    private readonly TimeSpan _inactivityTimeout;
     private readonly TimeProvider _time;
     private readonly ILogger<StreamController> _logger;
 
@@ -37,6 +40,7 @@ internal class StreamController : ControllerBase
         AccessPolicy policy,
         ITransferTerminator terminator,
         UploadEpochs epochs,
+        IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider time,
         ILogger<StreamController> logger)
     {
@@ -48,6 +52,7 @@ internal class StreamController : ControllerBase
         _policy = policy;
         _terminator = terminator;
         _epochs = epochs;
+        _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
         _time = time;
         _logger = logger;
     }
@@ -236,14 +241,14 @@ internal class StreamController : ControllerBase
         }
 
         var bridgeKey = IBridgeManager.KeyFor(transferId, type);
-        if (heartbeatMs is not > 0)
+        if (!AnnouncedHeartbeat.TryAccept(heartbeatMs, _inactivityTimeout, out var heartbeat))
         {
-            _logger.LogWarning("WebSocket of {BridgeKey} refused: its opening announces no heartbeat interval", bridgeKey);
+            _logger.LogWarning("WebSocket of {BridgeKey} refused: its opening announces no heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
+                bridgeKey, heartbeatMs);
             Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        var heartbeat = TimeSpan.FromMilliseconds(heartbeatMs.Value);
         using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext { KeepAliveInterval = heartbeat });
 
         // Only the sender's silence is judged, for the reason given when an epoch opens.
@@ -316,14 +321,15 @@ internal class StreamController : ControllerBase
         TimeSpan? heartbeat = null;
         if (type == ConnectionType.Data)
         {
-            if (heartbeatMs is not > 0)
+            if (!AnnouncedHeartbeat.TryAccept(heartbeatMs, _inactivityTimeout, out var announced))
             {
-                _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval", bridgeKey);
+                _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
+                    bridgeKey, heartbeatMs);
                 Response.StatusCode = StatusCodes.Status400BadRequest;
                 return null;
             }
 
-            heartbeat = TimeSpan.FromMilliseconds(heartbeatMs.Value);
+            heartbeat = announced;
         }
 
         return _epochs.Open(

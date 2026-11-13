@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Abstractions;
+using TransportR.Configuration;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
 using TransportR.Hub.Services;
@@ -42,6 +43,7 @@ internal class ClientController : ControllerBase
     private readonly TransferInitiator _initiator;
     private readonly ITransferManager _transferManager;
     private readonly AffinityOptions _affinityOptions;
+    private readonly TimeSpan _inactivityTimeout;
     private readonly TimeProvider _time;
     private readonly ILogger<ClientController> _logger;
 
@@ -54,6 +56,7 @@ internal class ClientController : ControllerBase
         TransferInitiator initiator,
         ITransferManager transferManager,
         IOptions<AffinityOptions> affinityOptions,
+        IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider timeProvider,
         ILogger<ClientController> logger)
     {
@@ -65,6 +68,7 @@ internal class ClientController : ControllerBase
         _initiator = initiator;
         _transferManager = transferManager;
         _affinityOptions = affinityOptions.Value;
+        _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
         _time = timeProvider;
         _logger = logger;
     }
@@ -85,9 +89,10 @@ internal class ClientController : ControllerBase
         [FromQuery(Name = ControlPlane.GroupsParameter)] string[]? groups,
         [FromQuery(Name = ControlPlane.HeartbeatParameter)] int? heartbeatMs)
     {
-        if (heartbeatMs is not > 0)
+        if (!AnnouncedHeartbeat.TryAccept(heartbeatMs, _inactivityTimeout, out var presenceInterval))
         {
-            _logger.LogWarning("Registration of {ClientId} refused: the stream announces no presence heartbeat interval", clientId);
+            _logger.LogWarning("Registration of {ClientId} refused: the stream announces no presence heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
+                clientId, heartbeatMs);
             Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
@@ -127,7 +132,7 @@ internal class ClientController : ControllerBase
         // Held before the registration is written, and for as long as the stream is: this is what lets
         // a token that is not renewed close it. An expired principal is no reason to refuse it here;
         // the next sweep closes it like any other.
-        var stream = _streams.Open(clientId, TimeSpan.FromMilliseconds(heartbeatMs.Value));
+        var stream = _streams.Open(clientId, presenceInterval);
         try
         {
             await _stateStore.SaveClientAsync(new ClientRegistration(

@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using TransportR.Configuration;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
@@ -510,6 +512,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
             NullLogger<StreamController>.Instance)
         {
@@ -537,6 +540,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
             NullLogger<StreamController>.Instance)
         {

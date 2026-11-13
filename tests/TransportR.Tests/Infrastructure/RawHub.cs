@@ -23,7 +23,7 @@ public static class RawHub
     /// </summary>
     public static async Task<RawStream> OpenAsync(IHost host, Guid clientId, string? token, params string[] groups)
     {
-        var query = $"{ControlPlane.HeartbeatParameter}=60000"
+        var query = $"{ControlPlane.HeartbeatParameter}=15000"
             + string.Concat(groups.Select(g => $"&{ControlPlane.GroupsParameter}={Uri.EscapeDataString(g)}"));
         var request = Request(HttpMethod.Get, clientId, $"{WireRoutes.EventsSegment}?{query}", token);
 

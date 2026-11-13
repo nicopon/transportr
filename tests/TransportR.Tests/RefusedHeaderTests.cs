@@ -55,7 +55,7 @@ public class RefusedHeaderTests
         var token = StubJwt.Create("withdrawn-subject", DateTime.UtcNow.AddHours(1));
 
         using var response = await RawHub.SendAsync(host, HttpMethod.Get, Guid.NewGuid(),
-            $"{WireRoutes.EventsSegment}?{ControlPlane.HeartbeatParameter}=60000", token);
+            $"{WireRoutes.EventsSegment}?{ControlPlane.HeartbeatParameter}=15000", token);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         AssertMarked(response);

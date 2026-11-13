@@ -383,7 +383,7 @@ public class RegistrationRefreshTests
         var shorter = DateTime.UtcNow.AddMinutes(10);
         using var http = new HttpClient();
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            $"{node.Host.BaseUrl}{WireRoutes.ClientBase}/{node.Client.ClientId}/{WireRoutes.EventsSegment}?{ControlPlane.HeartbeatParameter}=60000");
+            $"{node.Host.BaseUrl}{WireRoutes.ClientBase}/{node.Client.ClientId}/{WireRoutes.EventsSegment}?{ControlPlane.HeartbeatParameter}=15000");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", StubJwt.Create(Sender, shorter, "token-group"));
 
         using var other = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
