@@ -69,6 +69,8 @@ says: a builder method on the client, an options class on the hub.
 
 - `StalledProgressTimeoutSeconds`, when set, is greater than `BridgeTimeoutSeconds`: a reconnection looks like a stall from the hub. Refused when the
   hub starts (`AddDataHub`).
+- `TransferInactivityTimeoutSeconds` is more than twice the shortest heartbeat interval a stream may announce (1 s), or no interval is
+  accepted and every stream is refused. Refused when the hub starts (`AddDataHub`).
 - `DisconnectedGraceSeconds` equals `BridgeTimeoutSeconds` (300 s) on purpose: a registration is not kept longer than the transfer it would resume.
   Nothing checks it (`ClientRegistryConfiguration`).
 - The per-transfer heartbeat (1 s, fixed) is far below `TransferInactivityTimeoutSeconds` (60 s) (`ClientOptions.HeartbeatInterval`). The hub

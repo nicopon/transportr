@@ -14,6 +14,12 @@ internal static class AnnouncedHeartbeat
     public static readonly TimeSpan Shortest = TimeSpan.FromSeconds(1);
 
     /// <summary>
+    /// Whether <see cref="TryAccept"/> accepts any interval under <paramref name="inactivityTimeout"/>.
+    /// When it does not, every stream that announces one is refused.
+    /// </summary>
+    public static bool LeavesARange(TimeSpan inactivityTimeout) => Shortest < inactivityTimeout / 2;
+
+    /// <summary>
     /// Whether <paramref name="heartbeatMs"/> is an interval the hub accepts. The longest is below
     /// half of <paramref name="inactivityTimeout"/>, so that two silent intervals, which is what cuts
     /// a stream, still end before the inactivity sweep ends the transfer.
