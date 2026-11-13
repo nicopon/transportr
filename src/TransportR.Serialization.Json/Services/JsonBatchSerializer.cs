@@ -16,8 +16,10 @@ namespace TransportR.Serialization.Json.Services;
 /// </para>
 /// <para>
 /// A compressed batch that expands to more than the bound given at construction is refused after at
-/// most one read past it, without decompressing the rest. A serializer built through the public
-/// constructor, which is the one a host passes to <c>WithSerializer</c>, keeps the 256 MiB default
+/// most one read past it, without decompressing the rest, and one that is more than that bound
+/// before compression is refused at serialization, so a receiver at the same bound takes whatever
+/// this sends. A serializer built through the public constructor, which is the one a host passes
+/// to <c>WithSerializer</c>, keeps the 256 MiB default
 /// and not the figure of <c>WithMaxBatchBytes</c>: <c>WithJsonSerialization</c> is the one that
 /// carries that figure.
 /// </para>
@@ -61,7 +63,8 @@ public class JsonBatchSerializer<T> : IBatchSerializer<T>
         }
 
         using var compressionStream = new CompressionStream(destination, level: _compressionLevel, leaveOpen: true);
-        await JsonSerializer.SerializeAsync(compressionStream, batch, _options);
+        using var bounded = new BoundedWriteStream(compressionStream, _maxDecompressedBytes);
+        await JsonSerializer.SerializeAsync(bounded, batch, _options);
         // Implicit Dispose flushes the Zstd frame
     }
 

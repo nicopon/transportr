@@ -34,9 +34,11 @@ public class DecompressionBoundTests
 
     public static TheoryData<string> ItemSerializers => ["messagepack", "json", "protobuf"];
 
-    private static IBatchSerializer<string> Bounded(string kind)
+    public static TheoryData<string> CheckedBeforeCompression => ["json", "protobuf"];
+
+    private static IBatchSerializer<string> Bounded(string kind, int bound = Bound)
     {
-        var builder = new TransportRClientBuilder<string>().WithMaxBatchBytes(Bound);
+        var builder = new TransportRClientBuilder<string>().WithMaxBatchBytes(bound);
         return (kind switch
         {
             "messagepack" => builder.WithMessagePackSerialization(),
@@ -85,6 +87,34 @@ public class DecompressionBoundTests
         Assert.Contains("WithMaxBatchBytes", failure.Message);
         Assert.True(allocated < Margin,
             $"{allocated} bytes were allocated while a batch of {ExpandedItems} MiB was refused at {Bound}.");
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckedBeforeCompression))]
+    public async Task ABatchTheSenderAccepts_IsOneTheReceiverAtTheSameBoundAccepts(string kind)
+    {
+        // Arrange: a batch whose size before compression is known to the byte.
+        var items = Items(count: 1);
+        var expanded = kind == "json"
+            ? (await WriteAsync(new JsonBatchSerializer<string>(compress: false), items)).Length
+            : ProtobufLength(items);
+
+        // Act: the bound at that size, then one byte under it.
+        var atSize = Bounded(kind, expanded);
+        var received = await ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(atSize, await WriteAsync(atSize, items));
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => WriteAsync(Bounded(kind, expanded - 1), items));
+
+        // Assert
+        Assert.Equal(items, received);
+        Assert.Contains("WithMaxBatchBytes", failure.Message);
+    }
+
+    private static int ProtobufLength(List<string> items)
+    {
+        var buffer = new MemoryStream();
+        ProtoBuf.Serializer.Serialize(buffer, items);
+        return (int)buffer.Length;
     }
 
     [Fact]
