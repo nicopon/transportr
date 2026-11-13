@@ -377,7 +377,7 @@ public class WebSocketTransferTests
 
         await using var transfer = await StartAsync(
             hub,
-            sender: options => options.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(500),
+            sender: options => options.PresenceHeartbeatInterval = TimeSpan.FromSeconds(1),
             receiver: options => options.ReceiveBufferCapacity = BufferCapacity.Items(10),
             consume: async _ =>
             {

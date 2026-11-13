@@ -8,10 +8,10 @@ namespace TransportR.Hub.Controllers;
 internal static class AnnouncedHeartbeat
 {
     /// <summary>
-    /// The shortest interval accepted. No setting backs it: it is well under any interval a client
-    /// runs with, and far above the one that would make a stream a flood of probes.
+    /// The shortest interval accepted. No setting backs it: it is under the interval a client
+    /// announces by default, and above the one that would make a stream a flood of probes.
     /// </summary>
-    public static readonly TimeSpan Shortest = TimeSpan.FromMilliseconds(50);
+    public static readonly TimeSpan Shortest = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Whether <paramref name="heartbeatMs"/> is an interval the hub accepts. The longest is below

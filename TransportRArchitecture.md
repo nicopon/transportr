@@ -120,7 +120,7 @@ epoch and an offset, a WebSocket's probe and `Close` status.
    interval, which every WebSocket announces).
 2. The hub answers `426` to a request that is not an upgrade (a front end did not relay it; logged as a warning), `400`
    to an unreadable `X-Connection-Type`, `404` with `TransportR-Refused` to an unknown transfer or a caller who is not
-   its participant, `400` to a missing `heartbeatMs` or one under 50 ms or from half of `TransferInactivityTimeoutSeconds`
+   its participant, `400` to a missing `heartbeatMs` or one under 1 s or from half of `TransferInactivityTimeoutSeconds`
    up; otherwise it accepts. The route brings `UseWebSockets` with it: the host adds nothing to its pipeline.
 3. **The proof.** The client sends an empty `Text` message, the hub answers with one, and the upgrade and the proof
    together have 5 s. A front end can accept an upgrade and still hold bytes back; this is the one test of the

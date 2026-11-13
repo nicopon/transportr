@@ -1063,7 +1063,7 @@ public class TransferIntegrationTests
 
         await using var sender = CreateClient(handler, "http://localhost");
         await using var receiver = CreateClient(
-            handler, "http://localhost", o => o.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(300));
+            handler, "http://localhost", o => o.PresenceHeartbeatInterval = TimeSpan.FromSeconds(1));
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();

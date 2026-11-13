@@ -61,7 +61,7 @@ public class AnnouncedParameterBoundsTests
         // Two silent intervals have to fit in what the hub allows a transfer to be silent for, so an
         // interval of half of it is already too long.
         var inactivitySeconds = hub.Services.GetRequiredService<IOptions<DataPlaneConfiguration>>().Value.TransferInactivityTimeoutSeconds;
-        foreach (var heartbeatMs in new[] { 1, inactivitySeconds * 500, int.MaxValue })
+        foreach (var heartbeatMs in new[] { 1, 999, inactivitySeconds * 500, int.MaxValue })
         {
             using var events = await OpenEventsAsync(http, hub, heartbeatMs);
             Assert.Equal(HttpStatusCode.BadRequest, events.StatusCode);
@@ -73,16 +73,19 @@ public class AnnouncedParameterBoundsTests
             Assert.Equal(HttpStatusCode.BadRequest, socket.HttpStatusCode);
         }
 
-        // What a client announces by default is inside it, on all three.
+        // The shortest interval itself, and what a client announces by default, are inside it, on all three.
         var presence = (int)new ClientOptions().PresenceHeartbeatInterval.TotalMilliseconds;
-        using var openedEvents = await OpenEventsAsync(http, hub, presence);
-        Assert.Equal(HttpStatusCode.OK, openedEvents.StatusCode);
+        foreach (var heartbeatMs in new[] { 1000, presence })
+        {
+            using var openedEvents = await OpenEventsAsync(http, hub, heartbeatMs);
+            Assert.Equal(HttpStatusCode.OK, openedEvents.StatusCode);
 
-        using var openedSegment = await SendSegmentAsync(http, hub, await RegisterTransferAsync(hub), presence);
-        Assert.Equal(HttpStatusCode.OK, openedSegment.StatusCode);
+            using var openedSegment = await SendSegmentAsync(http, hub, await RegisterTransferAsync(hub), heartbeatMs);
+            Assert.Equal(HttpStatusCode.OK, openedSegment.StatusCode);
 
-        using var openedSocket = await OpenWebSocketAsync(hub, await RegisterTransferAsync(hub), presence);
-        Assert.Equal(WebSocketState.Open, openedSocket.State);
+            using var openedSocket = await OpenWebSocketAsync(hub, await RegisterTransferAsync(hub), heartbeatMs);
+            Assert.Equal(WebSocketState.Open, openedSocket.State);
+        }
     }
 
     private static async Task<string> RegisterTransferAsync(LoopbackHost hub)

@@ -313,8 +313,9 @@ public class RegistrationRefreshTests
     {
         // A beat that read the registration as unknown just before the refresh would register the
         // client a second time over it. While a refresh is under way no beat is sent at all.
-        await using var node = await Node.StartAsync(["alpha"], outlive: false, options => options.PresenceHeartbeatInterval = TimeSpan.FromMilliseconds(50));
-        node.Store.RenewDelay = TimeSpan.FromMilliseconds(600);
+        await using var node = await Node.StartAsync(["alpha"], outlive: false, options => options.PresenceHeartbeatInterval = TimeSpan.FromSeconds(1));
+        // Long enough for two ticks of the interval, so one falls inside the refresh wherever the timer stands.
+        node.Store.RenewDelay = TimeSpan.FromMilliseconds(2500);
         var already = node.Store.Writes.Count;
 
         var refresh = node.Client.RefreshRegistrationAsync();
@@ -325,7 +326,6 @@ public class RegistrationRefreshTests
         Assert.Equal(beats, node.Store.LookupsByConnection);
 
         // And they resume once it is done: at the next tick, however late a loaded runner delivers it.
-        // Six ticks of a 50 ms interval fitted in a fixed 300 ms until a two-core CI runner missed them once.
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (node.Store.LookupsByConnection <= beats && DateTime.UtcNow < deadline) await Task.Delay(20);
         Assert.True(node.Store.LookupsByConnection > beats, "the presence heartbeat never came back");
