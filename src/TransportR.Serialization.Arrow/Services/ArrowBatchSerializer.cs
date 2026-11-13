@@ -2,6 +2,7 @@ using Apache.Arrow;
 using Apache.Arrow.Compression;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Memory;
+using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 
 namespace TransportR.Serialization.Arrow.Services;
@@ -44,6 +45,14 @@ namespace TransportR.Serialization.Arrow.Services;
 /// </para>
 ///
 /// <para>
+/// <b>The buffers a batch announces are bounded.</b> A batch whose buffers add up to more than the
+/// bound given at construction is refused at the request for the buffer that crosses it, before that
+/// buffer is allocated. A serializer built through the public constructor, which is the one a host
+/// passes to <c>WithSerializer</c>, keeps the 256 MiB default and not the figure of
+/// <c>WithMaxBatchBytes</c>: <c>WithArrowSerialization</c> is the one that carries that figure.
+/// </para>
+///
+/// <para>
 /// <b>This closes <see cref="IBatchSerializer{T}"/> over <see cref="RecordBatch"/> rather than
 /// carrying the item type per call.</b> It is the reason the interface is typed at all: this
 /// serializer cannot be generic, so on a per-call generic contract it could only refuse a wrong
@@ -59,6 +68,7 @@ public sealed class ArrowBatchSerializer : IBatchSerializer<RecordBatch>
 
     private readonly MemoryAllocator _allocator;
     private readonly IpcOptions _options;
+    private readonly int _maxDecompressedBytes;
 
     /// <param name="allocator">
     /// Where deserialized buffers come from. Passing one is what makes received batches
@@ -69,7 +79,13 @@ public sealed class ArrowBatchSerializer : IBatchSerializer<RecordBatch>
     /// forwards an opaque payload either way — this is a decision between the two ends.
     /// </param>
     public ArrowBatchSerializer(MemoryAllocator? allocator = null, bool compress = true)
+        : this(allocator, compress, ClientOptions.DefaultMaxBatchBytes)
     {
+    }
+
+    internal ArrowBatchSerializer(MemoryAllocator? allocator, bool compress, int maxDecompressedBytes)
+    {
+        _maxDecompressedBytes = maxDecompressedBytes;
         _allocator = allocator ?? new NativeMemoryAllocator();
         _options = new IpcOptions
         {
@@ -115,7 +131,7 @@ public sealed class ArrowBatchSerializer : IBatchSerializer<RecordBatch>
     {
         var batches = new List<RecordBatch>();
         var probe = new ArrowStreamTerminationProbe(source);
-        var reader = new ArrowStreamReader(probe, _allocator, _codecs, leaveOpen: true);
+        var reader = new ArrowStreamReader(probe, new BoundedAllocator(_allocator, _maxDecompressedBytes), _codecs, leaveOpen: true);
 
         while (await reader.ReadNextRecordBatchAsync().ConfigureAwait(false) is { } recordBatch)
             batches.Add(recordBatch);

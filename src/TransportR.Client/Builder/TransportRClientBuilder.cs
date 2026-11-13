@@ -23,6 +23,7 @@ public class TransportRClientBuilder<T>
     private readonly ClientBuilderState _state = new();
     private int _batchSize = 1000;
     private IBatchSerializer<T>? _serializer;
+    private Func<int, IBatchSerializer<T>>? _serializerFactory;
 
     /// <summary>
     /// Sets the base URL of the TransportR Hub.
@@ -117,6 +118,11 @@ public class TransportRClientBuilder<T>
     /// Both ends of a transfer need a bound at least as large as the largest batch the sender cuts.
     /// The bound can be raised, not removed.
     /// </para>
+    /// <para>
+    /// It also bounds what a compressed batch may expand to on receipt: the serializers of the
+    /// <c>With*Serialization</c> extensions refuse a batch that decompresses to more, without
+    /// decompressing the rest, and the transfer fails as a protocol violation.
+    /// </para>
     /// </remarks>
     /// <param name="maxBytes">The largest batch payload accepted, in bytes.</param>
     public TransportRClientBuilder<T> WithMaxBatchBytes(int maxBytes)
@@ -137,10 +143,35 @@ public class TransportRClientBuilder<T>
     /// <summary>
     /// Sets the batch serializer.
     /// </summary>
+    /// <remarks>
+    /// A serializer built by the caller keeps its own bounds: the size a compressed batch may expand
+    /// to is not the figure given to <see cref="WithMaxBatchBytes"/> but the 256 MiB default of the
+    /// serialization packages' own constructors. The <c>With*Serialization</c> extensions build their
+    /// serializer with the figure of <see cref="WithMaxBatchBytes"/>.
+    /// </remarks>
     public TransportRClientBuilder<T> WithSerializer(IBatchSerializer<T> serializer)
     {
         _serializer = serializer;
+        _serializerFactory = null;
         return this;
+    }
+
+    /// <summary>
+    /// Sets a serializer built at <see cref="Build"/> from the bound of <see cref="WithMaxBatchBytes"/>.
+    /// </summary>
+    internal TransportRClientBuilder<T> WithSerializerFactory(Func<int, IBatchSerializer<T>> factory)
+    {
+        _serializerFactory = factory;
+        _serializer = null;
+        return this;
+    }
+
+    internal IBatchSerializer<T> ResolveSerializer()
+    {
+        // There is no default: picking a serializer for the caller would pick their wire format, and
+        // the serialization packages are separate on purpose.
+        if (_serializerFactory is { } factory) return factory(_state.MaxBatchBytes);
+        return _serializer ?? throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
     }
 
     /// <summary>
@@ -201,19 +232,14 @@ public class TransportRClientBuilder<T>
         _state.RequireUrl();
 
         var logger = _state.CreateLogger<TransportRClient<T>>();
-        // There is no default: picking a serializer for the caller would pick their wire format, and
-        // the serialization packages are separate on purpose.
-        if (_serializer == null)
-        {
-            throw new InvalidOperationException("Serializer must be configured using WithSerializer().");
-        }
+        var serializer = ResolveSerializer();
 
         var wiring = _state.Assemble(logger);
 
         return new TransportRClient<T>(
             wiring.Channel,
             new SessionRegistry<TransferSession<T>>(logger),
-            _serializer,
+            serializer,
             logger,
             _batchSize,
             wiring.Options,

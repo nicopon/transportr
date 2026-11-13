@@ -13,6 +13,6 @@ public static class TransportRClientBuilderProtobufExtensions
     /// <returns>The builder instance.</returns>
     public static TransportRClientBuilder<T> WithProtobufSerialization<T>(this TransportRClientBuilder<T> builder, int compressionLevel = -1)
     {
-        return builder.WithSerializer(new ProtobufBatchSerializer<T>(compressionLevel));
+        return builder.WithSerializerFactory(maxBatchBytes => new ProtobufBatchSerializer<T>(compressionLevel, maxBatchBytes));
     }
 }

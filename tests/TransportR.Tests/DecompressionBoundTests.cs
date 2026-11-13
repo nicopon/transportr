@@ -1,0 +1,137 @@
+using System.Buffers;
+using Apache.Arrow;
+using Apache.Arrow.Memory;
+using TransportR.Client;
+using TransportR.Client.Batching;
+using TransportR.Interfaces;
+using TransportR.Serialization.Arrow;
+using TransportR.Serialization.Arrow.Services;
+using TransportR.Serialization.Json;
+using TransportR.Serialization.Json.Services;
+using TransportR.Serialization.MessagePack;
+using TransportR.Serialization.MessagePack.Services;
+using TransportR.Serialization.Protobuf;
+using TransportR.Serialization.Protobuf.Services;
+
+namespace TransportR.Tests;
+
+/// <summary>
+/// A compressed batch is a few bytes on the wire and as many as its sender claims once decoded: the
+/// bound of <c>WithMaxBatchBytes</c> has to hold on what a batch expands to, and the refusal has to
+/// come before the rest is decompressed, not after.
+/// </summary>
+/// <remarks>
+/// Every serializer is reached through the builder's own resolution, because that is where the
+/// bound reaches it. The process-wide allocation counter is wide on purpose: tests run in parallel,
+/// and decoding the whole batch would cost several times the margin.
+/// </remarks>
+public class DecompressionBoundTests
+{
+    private const int ItemBytes = 1 << 20;
+    private const int Bound = 2 * ItemBytes;
+    private const int ExpandedItems = 64;
+    private const long Margin = 32L << 20;
+
+    public static TheoryData<string> ItemSerializers => ["messagepack", "json", "protobuf"];
+
+    private static IBatchSerializer<string> Bounded(string kind)
+    {
+        var builder = new TransportRClientBuilder<string>().WithMaxBatchBytes(Bound);
+        return (kind switch
+        {
+            "messagepack" => builder.WithMessagePackSerialization(),
+            "json" => builder.WithJsonSerialization(),
+            "protobuf" => builder.WithProtobufSerialization(),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        }).ResolveSerializer();
+    }
+
+    private static IBatchSerializer<string> HostBuilt(string kind) => kind switch
+    {
+        "messagepack" => new MessagePackBatchSerializer<string>(),
+        "json" => new JsonBatchSerializer<string>(),
+        "protobuf" => new ProtobufBatchSerializer<string>(),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    private static async Task<byte[]> WriteAsync<T>(IBatchSerializer<T> serializer, List<T> items)
+    {
+        var buffer = new MemoryStream();
+        await serializer.SerializeBatchAsync(buffer, items);
+        return buffer.ToArray();
+    }
+
+    private static List<string> Items(int count) => [.. Enumerable.Repeat(new string('a', ItemBytes), count)];
+
+    [Theory]
+    [MemberData(nameof(ItemSerializers))]
+    public async Task ABatchExpandingPastTheBound_IsRefused_BeforeItIsDecompressed(string kind)
+    {
+        // Arrange: a batch within the bound is read, then one of a few KB on the wire that
+        // is ExpandedItems MiB once decoded.
+        var serializer = Bounded(kind);
+        var small = Items(count: 1);
+        var inside = await ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(serializer, await WriteAsync(HostBuilt(kind), small));
+        var bytes = await WriteAsync(HostBuilt(kind), Items(ExpandedItems));
+        var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<UndecodableBatchException>(
+            () => ItemChunkSink<string>.ReadBatchBodyFromMemoryAsync(serializer, bytes));
+        var allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+
+        // Assert
+        Assert.Equal(small, inside);
+        Assert.Contains("WithMaxBatchBytes", failure.Message);
+        Assert.True(allocated < Margin,
+            $"{allocated} bytes were allocated while a batch of {ExpandedItems} MiB was refused at {Bound}.");
+    }
+
+    [Fact]
+    public async Task AnArrowBatchExpandingPastTheBound_IsRefused_BeforeItsBuffersAreAllocated()
+    {
+        // Arrange: eight million zeroed longs, which LZ4 reduces to a few KB, and a thousand
+        // that fit.
+        var allocator = new TrackingAllocator();
+        var serializer = new TransportRClientBuilder<RecordBatch>()
+            .WithMaxBatchBytes(Bound)
+            .WithArrowSerialization(allocator)
+            .ResolveSerializer();
+        var inside = await ItemChunkSink<RecordBatch>.ReadBatchBodyFromMemoryAsync(
+            serializer, await WriteAsync(new ArrowBatchSerializer(), [Zeroed(1000)]));
+        var insideAllocated = allocator.Allocated;
+        var bytes = await WriteAsync(new ArrowBatchSerializer(), [Zeroed(8_000_000)]);
+
+        // Act
+        var failure = await Assert.ThrowsAsync<UndecodableBatchException>(
+            () => ItemChunkSink<RecordBatch>.ReadBatchBodyFromMemoryAsync(serializer, bytes));
+
+        // Assert: the allocator of the host served the batch that fit, and was not asked for the other.
+        Assert.NotNull(inside);
+        Assert.Equal(1000, inside.Single().Length);
+        Assert.True(insideAllocated > 0, "The buffers of a received batch bypassed the allocator of the host.");
+        Assert.Contains("WithMaxBatchBytes", failure.Message);
+        Assert.True(allocator.Allocated - insideAllocated < Margin,
+            $"{allocator.Allocated - insideAllocated} bytes were allocated while a batch of 64 MiB was refused at {Bound}.");
+        foreach (var received in inside) received.Dispose();
+    }
+
+    private static RecordBatch Zeroed(int length)
+        => new RecordBatch.Builder().Append("x", false, new Int64Array.Builder().AppendRange(new long[length]).Build()).Build();
+
+    private sealed class TrackingAllocator : MemoryAllocator
+    {
+        private readonly MemoryAllocator _inner = new NativeMemoryAllocator();
+        private long _allocated;
+
+        public long Allocated => Interlocked.Read(ref _allocated);
+
+        protected override IMemoryOwner<byte> AllocateInternal(int length, out int bytesAllocated)
+        {
+            var owner = _inner.Allocate(length);
+            bytesAllocated = owner.Memory.Length;
+            Interlocked.Add(ref _allocated, length);
+            return owner;
+        }
+    }
+}

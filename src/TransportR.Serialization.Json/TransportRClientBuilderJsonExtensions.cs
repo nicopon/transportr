@@ -19,6 +19,6 @@ public static class TransportRClientBuilderJsonExtensions
     /// <returns>The builder instance.</returns>
     public static TransportRClientBuilder<T> WithJsonSerialization<T>(this TransportRClientBuilder<T> builder, JsonSerializerOptions? options = null, int compressionLevel = -1, bool compress = true)
     {
-        return builder.WithSerializer(new JsonBatchSerializer<T>(options, compressionLevel, compress));
+        return builder.WithSerializerFactory(maxBatchBytes => new JsonBatchSerializer<T>(options, compressionLevel, compress, maxBatchBytes));
     }
 }

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
 using TransportR.Interfaces;
 using ZstdSharp;
 
@@ -8,14 +10,24 @@ namespace TransportR.Serialization.Json.Services;
 /// Serializes batches with System.Text.Json, Zstd-compressed unless told otherwise.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Both ends of a transfer must agree on <c>compress</c>: the wire carries no marker saying which
 /// one was used. A mismatch fails the transfer at its first batch, on both ends.
+/// </para>
+/// <para>
+/// A compressed batch that expands to more than the bound given at construction is refused after at
+/// most one read past it, without decompressing the rest. A serializer built through the public
+/// constructor, which is the one a host passes to <c>WithSerializer</c>, keeps the 256 MiB default
+/// and not the figure of <c>WithMaxBatchBytes</c>: <c>WithJsonSerialization</c> is the one that
+/// carries that figure.
+/// </para>
 /// </remarks>
 public class JsonBatchSerializer<T> : IBatchSerializer<T>
 {
     private readonly JsonSerializerOptions _options;
     private readonly int _compressionLevel;
     private readonly bool _compress;
+    private readonly int _maxDecompressedBytes;
 
     /// <param name="options">Serializer options; compact, case-insensitive property names by default.</param>
     /// <param name="compressionLevel">Zstd compression level. Ignored when <paramref name="compress"/> is false.</param>
@@ -24,6 +36,11 @@ public class JsonBatchSerializer<T> : IBatchSerializer<T>
     /// UTF-8 JSON, which is the reason to turn it off: reading the wire while debugging.
     /// </param>
     public JsonBatchSerializer(JsonSerializerOptions? options = null, int compressionLevel = -1, bool compress = true)
+        : this(options, compressionLevel, compress, ClientOptions.DefaultMaxBatchBytes)
+    {
+    }
+
+    internal JsonBatchSerializer(JsonSerializerOptions? options, int compressionLevel, bool compress, int maxDecompressedBytes)
     {
         _options = options ?? new JsonSerializerOptions
         {
@@ -32,6 +49,7 @@ public class JsonBatchSerializer<T> : IBatchSerializer<T>
         };
         _compressionLevel = compressionLevel;
         _compress = compress;
+        _maxDecompressedBytes = maxDecompressedBytes;
     }
 
     public async Task SerializeBatchAsync(Stream destination, List<T> batch)
@@ -57,6 +75,7 @@ public class JsonBatchSerializer<T> : IBatchSerializer<T>
         }
 
         using var decompressionStream = new DecompressionStream(source, leaveOpen: true);
-        return await JsonSerializer.DeserializeAsync<List<T>>(decompressionStream, _options);
+        using var bounded = new BoundedReadStream(decompressionStream, _maxDecompressedBytes);
+        return await JsonSerializer.DeserializeAsync<List<T>>(bounded, _options);
     }
 }

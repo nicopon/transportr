@@ -25,5 +25,5 @@ public static class TransportRClientBuilderArrowExtensions
         this TransportRClientBuilder<RecordBatch> builder,
         MemoryAllocator? allocator = null,
         bool compress = true)
-        => builder.WithSerializer(new ArrowBatchSerializer(allocator, compress));
+        => builder.WithSerializerFactory(maxBatchBytes => new ArrowBatchSerializer(allocator, compress, maxBatchBytes));
 }
