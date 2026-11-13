@@ -121,7 +121,17 @@ public class TransportRClientBuilder<T>
     /// <para>
     /// It also bounds what a compressed batch may expand to on receipt: the serializers of the
     /// <c>With*Serialization</c> extensions refuse a batch that decompresses to more, without
-    /// decompressing the rest, and the transfer fails as a protocol violation.
+    /// decompressing the rest, and the transfer fails as a protocol violation. A serializer passed to
+    /// <c>WithSerializer</c> is not given this figure: see <see cref="WithSerializer"/>.
+    /// </para>
+    /// <para>
+    /// The sender's side of that bound is not the same for every serializer. The Json and Protobuf
+    /// serializers refuse, at serialization, a batch that is more than the bound before compression, so
+    /// a receiver at the same bound takes whatever they send. The MessagePack and Arrow serializers do
+    /// not: they send a batch that expands past the bound, and it is the receiver that refuses it and
+    /// fails the transfer. The sender must therefore size its batches so that they do not. For Arrow, what
+    /// counts against the bound is the compressed body of a batch plus every buffer once decompressed,
+    /// which is more than the size of the record batch.
     /// </para>
     /// </remarks>
     /// <param name="maxBytes">The largest batch payload accepted, in bytes.</param>

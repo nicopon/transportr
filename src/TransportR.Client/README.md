@@ -91,7 +91,9 @@ The builder has the options of the item builder that mean something for bytes (`
 `WithTokenProvider`, `WithWriteTransport`, `WithLoggerFactory`, among others). One that means something only for items (`WithSerializer`, `WithBatchSize`, a bound in items) is not an overload that exists. Both ends
 of a transfer must be `ByteStreamClient`s, or both item clients. `TransferInfo.ItemsProcessed` is 0 for a byte transfer, which has
 no items; `BytesTransferred` carries the count. `WithMaxBatchBytes`, on both builders, bounds one batch on the wire,
-256 MiB by default: a receiver fails the transfer on a larger chunk, and `Build()` refuses a `batchBytes` above it.
+256 MiB by default: a receiver fails the transfer on a larger chunk, and `Build()` refuses a `batchBytes` above it. On an item client the
+bound also covers a batch once decompressed, and a MessagePack or Arrow sender is not stopped by it: it is the receiver that refuses,
+so the sender sizes its batches for it (see the documentation of `WithMaxBatchBytes`).
 
 ### Sizing for WAN and high-throughput streaming
 
