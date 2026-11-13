@@ -133,8 +133,18 @@ public sealed class ArrowBatchSerializer : IBatchSerializer<RecordBatch>
         var probe = new ArrowStreamTerminationProbe(source);
         var reader = new ArrowStreamReader(probe, new BoundedAllocator(_allocator, _maxDecompressedBytes), _codecs, leaveOpen: true);
 
-        while (await reader.ReadNextRecordBatchAsync().ConfigureAwait(false) is { } recordBatch)
-            batches.Add(recordBatch);
+        try
+        {
+            while (await reader.ReadNextRecordBatchAsync().ConfigureAwait(false) is { } recordBatch)
+                batches.Add(recordBatch);
+        }
+        catch
+        {
+            // A batch refused part way through a chunk leaves the ones before it decoded, and their
+            // buffers are nobody else's to release.
+            foreach (var decoded in batches) decoded.Dispose();
+            throw;
+        }
 
         // A chunk that stopped before its end-of-stream marker is NOT a shorter chunk. Without
         // this the rows that arrived are returned and the transfer reports success, which is the

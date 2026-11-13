@@ -146,22 +146,72 @@ public class DecompressionBoundTests
         foreach (var received in inside) received.Dispose();
     }
 
+    [Fact]
+    public async Task AnArrowChunkRefusedAtItsSecondBatch_ReleasesTheBatchDecodedBeforeIt()
+    {
+        // Arrange: one chunk, a batch that expands to most of the bound, then one that LZ4 leaves
+        // as it is and whose body alone takes the chunk past the bound, so it is refused before
+        // anything is allocated for it.
+        var allocator = new TrackingAllocator();
+        var serializer = new TransportRClientBuilder<RecordBatch>()
+            .WithMaxBatchBytes(Bound)
+            .WithArrowSerialization(allocator)
+            .ResolveSerializer();
+        var bytes = await WriteAsync(new ArrowBatchSerializer(), [Zeroed(200_000), Random(100_000)]);
+        Assert.True(bytes.Length < Bound, $"The chunk is {bytes.Length} bytes on the wire, over the bound of {Bound}.");
+
+        // Act
+        await Assert.ThrowsAsync<UndecodableBatchException>(
+            () => ItemChunkSink<RecordBatch>.ReadBatchBodyFromMemoryAsync(serializer, bytes));
+
+        // Assert: nothing the refused chunk was given is still held.
+        Assert.True(allocator.Allocated > 0, "The first batch was not decoded before the second was refused.");
+        Assert.Equal(0, allocator.Outstanding);
+    }
+
     private static RecordBatch Zeroed(int length)
         => new RecordBatch.Builder().Append("x", false, new Int64Array.Builder().AppendRange(new long[length]).Build()).Build();
+
+    private static RecordBatch Random(int length)
+    {
+        var random = new Random(1);
+        var values = new long[length];
+        for (var i = 0; i < length; i++) values[i] = random.NextInt64();
+        return new RecordBatch.Builder().Append("x", false, new Int64Array.Builder().AppendRange(values).Build()).Build();
+    }
 
     private sealed class TrackingAllocator : MemoryAllocator
     {
         private readonly MemoryAllocator _inner = new NativeMemoryAllocator();
         private long _allocated;
+        private long _outstanding;
 
         public long Allocated => Interlocked.Read(ref _allocated);
+
+        /// <summary>What was allocated and has not been released.</summary>
+        public long Outstanding => Interlocked.Read(ref _outstanding);
 
         protected override IMemoryOwner<byte> AllocateInternal(int length, out int bytesAllocated)
         {
             var owner = _inner.Allocate(length);
             bytesAllocated = owner.Memory.Length;
             Interlocked.Add(ref _allocated, length);
-            return owner;
+            Interlocked.Add(ref _outstanding, length);
+            return new Released(owner, () => Interlocked.Add(ref _outstanding, -length));
+        }
+
+        private sealed class Released(IMemoryOwner<byte> inner, Action onRelease) : IMemoryOwner<byte>
+        {
+            private int _disposed;
+
+            public Memory<byte> Memory => inner.Memory;
+
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+                inner.Dispose();
+                onRelease();
+            }
         }
     }
 }
