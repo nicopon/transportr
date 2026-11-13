@@ -9,6 +9,13 @@ namespace TransportR.Interfaces;
 /// participant lost its right to act), the stream route's abort request (a participant whose
 /// in-stream Abort cannot reach the wire) and a host terminating a run it owns. One implementation,
 /// so the sequence cannot drift between them the way a hand-rolled copy in each caller would let it.
+/// <para>
+/// Call it on the instance that carries the transfer, the one that holds its streams. A call on another
+/// instance of a replicated hub removes the transfer's shared session and tells only the event streams
+/// of that instance, so it does not end the transfer on the instance that carries it: that one keeps its
+/// bridges and its local state until the transfer ends on its own or one of its sweeps ends it. The
+/// method does not throw or return anything that tells the two cases apart.
+/// </para>
 /// </remarks>
 public interface ITransferTerminator
 {
