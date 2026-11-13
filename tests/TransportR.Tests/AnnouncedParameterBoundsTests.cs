@@ -34,7 +34,8 @@ public class AnnouncedParameterBoundsTests
         var transfers = host.Services.GetRequiredService<ITransferManager>();
         var ceiling = (int)TransferManager.SessionTtl.TotalMilliseconds;
 
-        foreach (var timeoutMs in new[] { -2, ceiling + 1 })
+        // -1 is an infinite timeout, which would hold the handshake open with no deadline.
+        foreach (var timeoutMs in new[] { -2, -1, ceiling + 1 })
         {
             using var refused = await OpenTransferAsync(host, sender.ClientId, receiver.ClientId, timeoutMs);
             Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
@@ -42,9 +43,9 @@ public class AnnouncedParameterBoundsTests
 
         Assert.Empty(transfers.GetAllParticipants());
 
-        // The client's own default, no delay at all, and the ceiling itself are inside the range.
+        // The client's own default and the ceiling itself are inside the range.
         var clientDefault = (int)new ClientOptions().HandshakeTimeout.TotalMilliseconds;
-        foreach (var timeoutMs in new[] { clientDefault, -1, ceiling })
+        foreach (var timeoutMs in new[] { clientDefault, ceiling })
         {
             using var accepted = await OpenTransferAsync(host, sender.ClientId, receiver.ClientId, timeoutMs);
             Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);

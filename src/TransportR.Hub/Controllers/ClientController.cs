@@ -252,13 +252,13 @@ internal class ClientController : ControllerBase
         var source = await AdmitAsync(clientId);
         if (source == null) return this.Refuse();
 
-        // The handshake is the client's to time, within what the hub keeps a transfer's session for:
-        // -1 is no delay at all, and anything else past that range would hold the handshake open, or
-        // fail after the participants were written.
+        // The handshake is the client's to time, within what the hub keeps a transfer's session for.
+        // Past that range a timeout would hold the handshake open, -1 with no deadline at all, or fail
+        // after the participants were written.
         var longestTimeoutMs = TransferManager.SessionTtl.TotalMilliseconds;
-        if (request.TimeoutMs < Timeout.Infinite || request.TimeoutMs > longestTimeoutMs)
+        if (request.TimeoutMs < 0 || request.TimeoutMs > longestTimeoutMs)
         {
-            _logger.LogWarning("InitTransfer refused for {ClientId}: handshake timeout {TimeoutMs} ms is outside -1..{LongestTimeoutMs} ms",
+            _logger.LogWarning("InitTransfer refused for {ClientId}: handshake timeout {TimeoutMs} ms is outside 0..{LongestTimeoutMs} ms",
                 clientId, request.TimeoutMs, longestTimeoutMs);
             return BadRequest(new HubError("The transfer request is not acceptable."));
         }
