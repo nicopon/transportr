@@ -267,7 +267,7 @@ internal class ClientController : ControllerBase
         if (target == null)
         {
             _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
-            return Conflict(new HubError($"Target client {request.TargetClientId} not found."));
+            return Conflict(new HubError(TransferInitiator.TargetUnavailable));
         }
 
         try

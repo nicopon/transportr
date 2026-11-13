@@ -21,6 +21,13 @@ namespace TransportR.Hub.Services;
 /// </remarks>
 internal class TransferInitiator : ITransferInitiator
 {
+    /// <summary>
+    /// What a client is told when the target of its transfer cannot be had, whichever way: the same
+    /// words for a target that is absent, unreachable or out of reach, so that the answer does not tell
+    /// a caller which clients exist beyond its own rights. The hub's log says which.
+    /// </summary>
+    internal const string TargetUnavailable = "The target client is not reachable or not authorized.";
+
     private readonly ClientStreams _streams;
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
@@ -69,7 +76,7 @@ internal class TransferInitiator : ITransferInitiator
         if (receiver == null)
         {
             _logger.LogWarning("InitTransfer by host failed: Target {TargetClientId} not found.", receiverClientId);
-            throw new HubRequestFailedException($"Target client {receiverClientId} not found.");
+            throw new HubRequestFailedException(TargetUnavailable);
         }
 
         ValidateTransferRequest(sender, receiver);
@@ -97,8 +104,8 @@ internal class TransferInitiator : ITransferInitiator
             return;
         }
 
-        // Who is at fault stays out of the verdict: only an expired token has two possible owners,
-        // and the caller is told which one it is.
+        // Only a fault of the caller's own is told to it. Whatever the target's is, in its token, its
+        // groups or the rules between them, is the one answer for a target out of reach.
         var sourceAtFault = _policy.Evaluate(sourceClient) != AccessVerdict.Allowed;
         _logger.LogWarning(
             "InitTransfer denied ({Verdict}): Source {SourceClientId} [{SourceGroups}], Target {TargetClientId} [{TargetGroups}]",
@@ -108,9 +115,8 @@ internal class TransferInitiator : ITransferInitiator
         throw new HubRequestFailedException(verdict switch
         {
             AccessVerdict.TokenExpired when sourceAtFault => "Source client token has expired. Please reconnect with a fresh token.",
-            AccessVerdict.TokenExpired => "Target client token has expired.",
-            AccessVerdict.NoGroups => "Client groups not found.",
-            _ => "Transfer not authorized."
+            AccessVerdict.NoGroups when sourceAtFault => "Client groups not found.",
+            _ => TargetUnavailable
         });
     }
 
@@ -150,12 +156,11 @@ internal class TransferInitiator : ITransferInitiator
             catch (IOException ex)
             {
                 // The usual cause is a registration that outlived its process: the client is still in
-                // the state store, but no stream of its is open here. Detail stays in the hub log; the
-                // client gets something it can act on.
+                // the state store, but no stream of its is open here. Detail stays in the hub log.
                 _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}, registration likely stale: {Message}",
                     receiver.ClientId, receiver.ConnectionId, transferId, ex.Message);
                 await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubRequestFailedException($"Target client {receiver.ClientId} is not reachable.");
+                throw new HubRequestFailedException(TargetUnavailable);
             }
 
             if (receiverReady != CallbackOutcome.Accepted)
