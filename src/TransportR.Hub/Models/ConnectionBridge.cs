@@ -6,8 +6,9 @@ namespace TransportR.Models;
 
 /// <summary>
 /// Represents a bridge between sender and receiver streams.
-/// A disconnection ends only the stream generation of the side that left; its peer stays registered.
-/// The bridge does not reach across: the copy loop of the source has to notice that its destination
+/// A disconnection ends the stream generation of the side that left; its peer stays registered, except
+/// the receiver of a data stream, whose generation ends with the sender that was writing to it.
+/// The bridge does not reach across to the source: its copy loop has to notice that its destination
 /// is gone, by observing <see cref="ReceiverToken"/>, or it keeps writing to a stream nobody reads.
 /// </summary>
 internal class ConnectionBridge
@@ -21,6 +22,7 @@ internal class ConnectionBridge
 
     private readonly BridgeStateMachine _fsm;
     private readonly TimeProvider _time;
+    private readonly ConnectionType _type;
 
     public string TransferId { get; }
     public string BridgeKey { get; }
@@ -53,6 +55,7 @@ internal class ConnectionBridge
         BridgeKey = IBridgeManager.KeyFor(transferId, type);
         _fsm = new BridgeStateMachine(BridgeKey, logger);
         _time = timeProvider ?? TimeProvider.System;
+        _type = type;
         LastActivity = Now;
     }
 
@@ -152,8 +155,9 @@ internal class ConnectionBridge
     private void ReleaseAbandoned(Guid connectionId) => OnDisconnected(connectionId);
 
     /// <summary>
-    /// Called when either side disconnects. Cancels the stream generation of that side only and resets
-    /// it for reconnection; the peer stays registered on its own generation.
+    /// Called when either side disconnects. Cancels the stream generation of that side and resets it for
+    /// reconnection; the peer stays registered on its own generation, unless it is the receiver of a
+    /// data stream the sender was writing to.
     /// Only resets if the disconnecting party is the CURRENTLY active one.
     /// </summary>
     public void OnDisconnected(Guid connectionId)
@@ -175,6 +179,9 @@ internal class ConnectionBridge
 
     private void ResetSender()
     {
+        // Active is the one state in which the sender's copy holds the receiver's stream.
+        var wasFeedingReceiver = _fsm.CurrentState == BridgeState.Active;
+
         if (_fsm.OnSenderLost())
         {
             LastActivity = Now;
@@ -189,6 +196,15 @@ internal class ConnectionBridge
 
         _senderStreamTcs.TrySetCanceled();
         _senderStreamTcs = NewStreamTcs();
+
+        // A data stream can break inside a chunk, and the hub reads no chunk to tell: the next sender's
+        // bytes would be read on the same stream as the rest of it. Cut, the receiver reopens and resumes
+        // from the last batch it read whole. Taken under the lock that registers the next sender, so that
+        // sender cannot be handed this receiver's stream. A clean end never comes here.
+        if (wasFeedingReceiver && _type == ConnectionType.Data)
+        {
+            ResetReceiver();
+        }
     }
 
     private void ResetReceiver()
@@ -207,6 +223,10 @@ internal class ConnectionBridge
 
         _receiverStreamTcs.TrySetCanceled();
         _receiverStreamTcs = NewStreamTcs();
+
+        // A receiver cut by its sender's loss reports its own end after the fact; by then the generation
+        // it would reset is the one a next sender is waiting on.
+        _currentReceiverId = Guid.Empty;
     }
 
     /// <summary>

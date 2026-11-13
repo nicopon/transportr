@@ -238,6 +238,10 @@ Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new d
 
 This ensures that resumption is based on the **Receiver's actual state**, which is the ultimate source of truth.
 
+The `Ping` reaches the receiver on a data stream of its own. A sender's data stream can break inside a chunk, and the hub, which reads none,
+cuts the receiver's data GET along with it (`ConnectionBridge`), so that the new stream's bytes are never read as the rest of that chunk. A
+clean end cuts nothing. The cost is one reconnection of the receiver for each cut of the sender.
+
 **A batch is the smallest thing this can name**, so the receiver hands one to its consumer whole or not at all: capacity for every item is taken before the first is published, and the hand-off is not cancellable. A batch stopped half way would raise no `NextExpectedBatchId`, be resent whole, and deliver its published prefix to the consumer twice.
 
 ```csharp

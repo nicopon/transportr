@@ -57,17 +57,21 @@ public class ConnectionBridgeTests
         Assert.True(await bridge.RegisterSenderAsync(Stream.Null, Guid.NewGuid()));
         Assert.True(await receiverTask);
 
+        // The receiver the first sender was writing to is cut with it: the new one waits for the next.
         var secondStream = new MemoryStream();
-        Assert.True(await bridge.RegisterSenderAsync(secondStream, Guid.NewGuid()));
+        var reconnect = bridge.RegisterSenderAsync(secondStream, Guid.NewGuid());
+        Assert.Equal(BridgeState.WaitingForReceiver, bridge.State);
+        Assert.True(await bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid()));
+        Assert.True(await reconnect);
 
         Assert.Equal(BridgeState.Active, bridge.State);
         Assert.Same(secondStream, await bridge.WaitForSenderStream());
     }
 
     [Fact]
-    public async Task DisconnectOfTheCurrentSender_CancelsOnlyTheSenderToken()
+    public async Task DisconnectOfTheCurrentSender_OfAControlStream_CancelsOnlyTheSenderToken()
     {
-        var bridge = NewBridge();
+        var bridge = new ConnectionBridge("transfer-1", ConnectionType.Control, NullLogger.Instance);
         var senderId = Guid.NewGuid();
 
         var receiverTask = bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid());
@@ -113,8 +117,11 @@ public class ConnectionBridgeTests
         Assert.True(await bridge.RegisterSenderAsync(Stream.Null, firstSenderId));
         Assert.True(await receiverTask);
 
-        // The first sender is replaced, then its disconnect arrives late.
-        Assert.True(await bridge.RegisterSenderAsync(Stream.Null, Guid.NewGuid()));
+        // The first sender is replaced, a receiver comes back, then the first sender's disconnect
+        // arrives late.
+        var reconnect = bridge.RegisterSenderAsync(Stream.Null, Guid.NewGuid());
+        Assert.True(await bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid()));
+        Assert.True(await reconnect);
         var liveToken = bridge.SenderToken;
 
         bridge.OnDisconnected(firstSenderId);
@@ -260,7 +267,9 @@ public class ConnectionBridgeTests
         {
             while (!stop.IsCancellationRequested)
             {
+                // The receiver is cut with the sender, so each round brings a new one.
                 bridge.OnDisconnected(senderId);
+                _ = bridge.RegisterReceiverAsync(Stream.Null, Guid.NewGuid());
                 await bridge.RegisterSenderAsync(Stream.Null, senderId);
             }
         });

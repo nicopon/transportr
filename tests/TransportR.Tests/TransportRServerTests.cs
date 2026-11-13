@@ -130,6 +130,92 @@ public class TransportRServerTests
     }
 
     [Fact]
+    public async Task SendCutByARupture_OnTheDataStream_CutsTheReceiverItFed()
+    {
+        // The rupture can fall inside a chunk. Bytes of the next stream written behind it would be read
+        // as the rest of that chunk, so the receiver has to start again on a stream of its own.
+        var hub = new Harness();
+        var fed = new MemoryStream();
+        var receive = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, fed, CancellationToken.None);
+
+        var partial = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
+        using var first = new PushedStream();
+        var send = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, first, CancellationToken.None);
+        first.Push(partial);
+        await UntilAsync(() => fed.Length == partial.Length);
+        first.Cut(new IOException("connection reset"));
+        await EndsAsync(send);
+
+        var ping = Enumerable.Repeat((byte)0xEE, 30).ToArray();
+        using var second = new PushedStream();
+        _ = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, second, CancellationToken.None);
+        second.Push(ping);
+        await EndsAsync(receive);
+
+        var next = new MemoryStream();
+        _ = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, next, CancellationToken.None);
+        await UntilAsync(() => next.Length == ping.Length);
+
+        Assert.Equal(partial, fed.ToArray());
+        Assert.Equal(ping, next.ToArray());
+        Assert.Empty(hub.Retirer.Retired);
+    }
+
+    [Fact]
+    public async Task ANewEpochOfTheDataStream_CutsTheReceiverTheEpochItReplacesFed()
+    {
+        var hub = new Harness();
+        var epochs = new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance);
+        var bridgeKey = IBridgeManager.KeyFor(TransferId, ConnectionType.Data);
+        Func<Stream, CancellationToken, Task> handle = (input, token) =>
+            hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, token);
+        var fed = new MemoryStream();
+        var receive = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, fed, CancellationToken.None);
+
+        var partial = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
+        var first = epochs.Open(bridgeKey, Guid.NewGuid(), null, null, handle);
+        var relayed = await first.AcceptAsync(0, new MemoryStream(partial), final: false, CancellationToken.None).WaitAsync(Patience);
+        Assert.Equal(SegmentStatus.Relayed, relayed.Status);
+
+        // The client gave up on the first epoch without the hub seeing it fail: the next one replaces it.
+        var ping = Enumerable.Repeat((byte)0xEE, 30).ToArray();
+        var second = epochs.Open(bridgeKey, Guid.NewGuid(), null, null, handle);
+        var pinged = second.AcceptAsync(0, new MemoryStream(ping), final: false, CancellationToken.None);
+        await EndsAsync(receive);
+
+        var next = new MemoryStream();
+        _ = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, next, CancellationToken.None);
+        Assert.Equal(SegmentStatus.Relayed, (await pinged.WaitAsync(Patience)).Status);
+
+        Assert.Equal(partial, fed.ToArray());
+        Assert.Equal(ping, next.ToArray());
+        Assert.Empty(hub.Retirer.Retired);
+        second.Abandon();
+    }
+
+    [Fact]
+    public async Task TheLastSegmentOfTheDataStream_EndsTheReceiverCleanly()
+    {
+        // The receiver's stream carries the end of the transfer: cut instead of closed, it can lose it.
+        var hub = new Harness();
+        var epochs = new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance);
+        var fed = new MemoryStream();
+        var receive = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, fed, CancellationToken.None);
+
+        var bytes = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
+        var epoch = epochs.Open(IBridgeManager.KeyFor(TransferId, ConnectionType.Data), Guid.NewGuid(), null, null,
+            (input, token) => hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, token));
+        await epoch.AcceptAsync(0, new MemoryStream(bytes[..60]), final: false, CancellationToken.None).WaitAsync(Patience);
+        await epoch.AcceptAsync(60, new MemoryStream(bytes[60..]), final: true, CancellationToken.None).WaitAsync(Patience);
+        await EndsAsync(receive);
+
+        Assert.Equal(bytes, fed.ToArray());
+        Assert.Equal(BridgeState.Completed, hub.BridgeFor(ConnectionType.Data).State);
+        Assert.True(hub.Logs.Has(LogLevel.Information, "Sink Closing cleanly"), "The receiver's stream did not end with the transfer.");
+        Assert.False(hub.Logs.Has(LogLevel.Information, "Sink cancelled"), "The receiver's stream was cut at a clean end.");
+    }
+
+    [Fact]
     public async Task SendCutByARupture_OfATransferTheHubStillCarries_IsAWarning()
     {
         // The warning means a client that should reconnect, and for a live transfer that is what it
@@ -304,11 +390,12 @@ public class TransportRServerTests
 
         // The source's client is gone. Its request ending is an ordinary end for the controller, but
         // the registration it left has to go: kept, the bridge stays Active for a stream nobody is
-        // on, is never judged idle, and the receiver waits on it for good.
+        // on, is never judged idle, and the receiver waits on it for good. The receiver it was writing
+        // to goes with it.
         request.Cancel();
         await EndsAsync(send);
 
-        Assert.Equal(BridgeState.WaitingForSender, bridge.State);
+        Assert.Equal(BridgeState.Idle, bridge.State);
     }
 
     [Fact]
@@ -398,13 +485,14 @@ public class TransportRServerTests
 
         // The reconnected client takes the first source's place. That ends the first one's wait;
         // whatever it does on the way out has to be about its own registration, not the bridge's
-        // current one.
+        // current one. The receiver the first one was writing to is cut with it, so the new source
+        // waits for the next.
         using var secondInput = new PushedStream();
         var second = hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, secondInput, CancellationToken.None);
         await EndsAsync(first);
         await Task.Delay(100);
 
-        Assert.Equal(BridgeState.Active, bridge.State);
+        Assert.Equal(BridgeState.WaitingForReceiver, bridge.State);
         Assert.False(second.IsCompleted);
     }
 
