@@ -11,6 +11,7 @@ using TransportR.Hub.Services;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
+using TransportR.Services;
 
 namespace TransportR.Hub.Controllers;
 
@@ -245,6 +246,17 @@ internal class ClientController : ControllerBase
 
         var source = await AdmitAsync(clientId);
         if (source == null) return this.Refuse();
+
+        // The handshake is the client's to time, within what the hub keeps a transfer's session for:
+        // -1 is no delay at all, and anything else past that range would hold the handshake open, or
+        // fail after the participants were written.
+        var longestTimeoutMs = TransferManager.SessionTtl.TotalMilliseconds;
+        if (request.TimeoutMs < Timeout.Infinite || request.TimeoutMs > longestTimeoutMs)
+        {
+            _logger.LogWarning("InitTransfer refused for {ClientId}: handshake timeout {TimeoutMs} ms is outside -1..{LongestTimeoutMs} ms",
+                clientId, request.TimeoutMs, longestTimeoutMs);
+            return BadRequest(new HubError("The transfer request is not acceptable."));
+        }
 
         var target = await _stateStore.GetClientAsync(request.TargetClientId);
         if (target == null)

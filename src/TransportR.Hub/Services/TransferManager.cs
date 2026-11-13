@@ -11,13 +11,19 @@ namespace TransportR.Services;
 /// </summary>
 internal class TransferManager : ITransferManager
 {
+    /// <summary>
+    /// How long a transfer's session lives in the shared store without a keep-alive, and so the
+    /// longest a handshake may be given to complete.
+    /// </summary>
+    public static readonly TimeSpan SessionTtl = TimeSpan.FromMinutes(5);
+
     private readonly ConcurrentDictionary<string, TransferState> _transfers = new();
     private readonly ConcurrentDictionary<string, TransferParticipants> _participants = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastHeartbeat = new();
     private readonly ConcurrentDictionary<string, byte> _removing = new();
     private readonly IStateStore _stateStore;
     private readonly TimeProvider _time;
-    private readonly TimeSpan _sessionTtl = TimeSpan.FromMinutes(5);
+    private readonly TimeSpan _sessionTtl = SessionTtl;
     private readonly TimeSpan _heartbeatInterval = TimeSpan.FromSeconds(10);
 
     public TransferManager(IStateStore stateStore, TimeProvider? timeProvider = null)
