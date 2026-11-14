@@ -323,7 +323,7 @@ internal class HttpStreamManager : IAsyncDisposable
         return new SegmentedWriteStream(
             _transport,
             _config.Logger,
-            query => NewRequest(HttpMethod.Post, $"{_dataUrl}/{_transferId}/send?{query}", type),
+            query => NewRequest(HttpMethod.Post, $"{_dataUrl}/{_transferId}/{WireRoutes.SendSegment}?{query}", type),
             _config.Options.StreamBufferSize,
             type == ConnectionType.Data ? _config.Options.PresenceHeartbeatInterval : null);
     }
@@ -435,7 +435,7 @@ internal class HttpStreamManager : IAsyncDisposable
         options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
         options.CollectHttpResponseDetails = true;
         options.KeepAliveInterval = _config.Options.PresenceHeartbeatInterval;
-        options.SetRequestHeader("X-Connection-Type", type.ToString());
+        options.SetRequestHeader(DataPlane.ConnectionTypeHeader, type.ToString());
 
         if (!string.IsNullOrEmpty(_affinity))
         {
@@ -452,7 +452,7 @@ internal class HttpStreamManager : IAsyncDisposable
 
     private Uri WebSocketUri()
     {
-        var uri = new UriBuilder($"{_dataUrl}/{_transferId}/send")
+        var uri = new UriBuilder($"{_dataUrl}/{_transferId}/{WireRoutes.SendSegment}")
         {
             Query = $"{DataPlane.HeartbeatParameter}={(long)_config.Options.PresenceHeartbeatInterval.TotalMilliseconds}"
         };
@@ -468,7 +468,7 @@ internal class HttpStreamManager : IAsyncDisposable
         {
             try
             {
-                using var request = NewRequest(HttpMethod.Get, $"{_dataUrl}/{_transferId}/receive", type);
+                using var request = NewRequest(HttpMethod.Get, $"{_dataUrl}/{_transferId}/{WireRoutes.ReceiveSegment}", type);
 
                 // Add Authorization Header
                 var tokenStr = await _transport.GetAccessTokenAsync(forceRefresh);
@@ -587,7 +587,7 @@ internal class HttpStreamManager : IAsyncDisposable
     private HttpRequestMessage NewRequest(HttpMethod method, string url, ConnectionType type)
     {
         var request = new HttpRequestMessage(method, url);
-        request.Headers.Add("X-Connection-Type", type.ToString());
+        request.Headers.Add(DataPlane.ConnectionTypeHeader, type.ToString());
 
         // Stated rather than inherited, on the segments as on the read side: the data plane runs on
         // HTTP/1.1, see "Data Plane Transport: HTTP/1.1" in TransportRArchitecture.md.

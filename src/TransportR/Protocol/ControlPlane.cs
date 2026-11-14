@@ -33,7 +33,7 @@ internal static class ControlPlane
     /// The query parameter that announces, in milliseconds, how often the client sends its presence
     /// heartbeat: the hub closes a stream it has heard nothing from for two of them.
     /// </summary>
-    public const string HeartbeatParameter = "heartbeatMs";
+    public const string HeartbeatParameter = DataPlane.HeartbeatParameter;
 
     /// <summary>Web defaults on both ends, for the bodies and for the data of the events.</summary>
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

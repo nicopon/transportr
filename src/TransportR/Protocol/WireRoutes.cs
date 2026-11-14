@@ -18,6 +18,15 @@ public static class WireRoutes
     public const string StreamBase = "/api/stream";
 
     /// <summary>
+    /// The last segment of a write stream's path under <see cref="StreamBase"/>: a WebSocket's
+    /// <c>GET</c>, or a segment's <c>POST</c>.
+    /// </summary>
+    public const string SendSegment = "send";
+
+    /// <summary>The last segment of a read stream's path under <see cref="StreamBase"/>, a <c>GET</c>.</summary>
+    public const string ReceiveSegment = "receive";
+
+    /// <summary>
     /// The last segment of <c>POST {StreamBase}/{transferId}/abort</c>: a participant asking the hub
     /// to end the transfer on a request of its own, for the case where the in-stream <c>Abort</c>
     /// cannot overtake the data in front of it. Answered 204; every refusal is a 404 carrying

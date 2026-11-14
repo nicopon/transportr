@@ -148,7 +148,7 @@ internal class StreamController : ControllerBase
     /// the peer, 202 when it was held at the bound with part of it relayed, both with
     /// <see cref="DataPlane.RelayedHeader"/>; 409 when the hub holds no epoch it follows on from.
     /// </summary>
-    [HttpPost("{transferId}/send")]
+    [HttpPost("{transferId}/" + WireRoutes.SendSegment)]
     [DisableRequestSizeLimit]
     public async Task Send(
         string transferId,
@@ -214,7 +214,7 @@ internal class StreamController : ControllerBase
     /// a read stream. A request that is not an upgrade is a front end that did not relay one: answered
     /// 426, it never opens anything, and the client goes on with segments.
     /// </summary>
-    [HttpGet("{transferId}/send")]
+    [HttpGet("{transferId}/" + WireRoutes.SendSegment)]
     [MiddlewareFilter(typeof(WebSocketPipeline))]
     public async Task SendOverWebSocket(
         string transferId,
@@ -376,7 +376,7 @@ internal class StreamController : ControllerBase
         return NoContent();
     }
 
-    [HttpGet("{transferId}/receive")]
+    [HttpGet("{transferId}/" + WireRoutes.ReceiveSegment)]
     public async Task Receive(string transferId)
     {
         if (!TryParseConnectionType(Request, transferId, out var type))
@@ -405,7 +405,7 @@ internal class StreamController : ControllerBase
         Response.ContentType = "application/octet-stream";
         // A proxy that buffers responses holds back the few bytes a stream can end on, an
         // acknowledgement or a Pong, until its buffer fills, which this stream may never do.
-        Response.Headers["X-Accel-Buffering"] = "no";
+        Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
         HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
         await Response.StartAsync();
         // Kestrel holds the headers until the first write, and a stream may have nothing to write
@@ -431,7 +431,7 @@ internal class StreamController : ControllerBase
     // that it folds into one value.
     private bool TryParseConnectionType(HttpRequest request, string transferId, out ConnectionType type)
     {
-        var header = request.Headers["X-Connection-Type"].ToString();
+        var header = request.Headers[DataPlane.ConnectionTypeHeader].ToString();
         foreach (var candidate in Enum.GetValues<ConnectionType>())
         {
             if (string.Equals(candidate.ToString(), header, StringComparison.OrdinalIgnoreCase))
@@ -441,7 +441,7 @@ internal class StreamController : ControllerBase
             }
         }
 
-        _logger.LogWarning("Stream request for transfer {TransferId} refused: X-Connection-Type '{Header}' does not name a connection type", transferId, header);
+        _logger.LogWarning("Stream request for transfer {TransferId} refused: {HeaderName} '{Header}' does not name a connection type", transferId, DataPlane.ConnectionTypeHeader, header);
         type = default;
         return false;
     }

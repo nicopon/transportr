@@ -23,6 +23,12 @@ namespace TransportR.Protocol;
 internal static class DataPlane
 {
     /// <summary>
+    /// The request header, on every request of a stream, naming which of a transfer's two connections it
+    /// belongs to: a <see cref="ConnectionType"/> by name.
+    /// </summary>
+    public const string ConnectionTypeHeader = "X-Connection-Type";
+
+    /// <summary>
     /// The query parameter naming the epoch a segment belongs to, a <see cref="Guid"/> the client
     /// draws for each opening of the stream. A segment at offset 0 of an epoch the hub does not hold
     /// opens it and replaces the previous one.

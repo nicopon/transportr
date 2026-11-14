@@ -146,7 +146,7 @@ internal class ClientController : ControllerBase
             // byte of body, and one that never sees it answers the client with an error of its own.
             Response.ContentType = "text/event-stream";
             Response.Headers.CacheControl = "no-cache";
-            Response.Headers["X-Accel-Buffering"] = "no";
+            Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
             HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
             await SseFormatter.WriteAsync(stream.ReadAllAsync(HttpContext.RequestAborted), Response.Body, HttpContext.RequestAborted);
