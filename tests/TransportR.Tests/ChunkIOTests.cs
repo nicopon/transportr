@@ -1,5 +1,6 @@
 using System.Buffers;
 using TransportR.Client.Protocol;
+using TransportR.Tests.TestHelpers;
 
 namespace POC_DataProxy.Tests;
 
@@ -101,7 +102,7 @@ public class ChunkIOTests
     }
 
     [Fact]
-    public async Task ChunkIO_WriteBatch_And_ReadChunk_RoundTrip()
+    public async Task ChunkIO_WriteBatch_And_ReadOwnedChunk_RoundTrip()
     {
         // Arrange
         var transferId = Guid.NewGuid();
@@ -116,19 +117,21 @@ public class ChunkIOTests
         ms.Position = 0;
 
         // Act - Read
-        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+        var chunk = await WireChunks.ReadAsync(ms);
 
         // Assert
         Assert.NotNull(chunk);
+        using var owner = chunk.Value.Payload;
         Assert.Equal(ChunkType.Batch, chunk.Value.Header.Type);
         Assert.Equal(transferId, chunk.Value.Header.TransferId);
         Assert.Equal(batchId, chunk.Value.Header.BatchId);
         Assert.Equal(count, chunk.Value.Header.Count);
-        Assert.Equal(payload, chunk.Value.Payload.ToArray());
+        Assert.NotNull(owner);
+        Assert.Equal(payload, owner.Memory.ToArray());
     }
 
     [Fact]
-    public async Task ChunkIO_WriteControl_And_ReadChunk_RoundTrip()
+    public async Task ChunkIO_WriteControl_And_ReadOwnedChunk_RoundTrip()
     {
         // Arrange
         var transferId = Guid.NewGuid();
@@ -141,18 +144,18 @@ public class ChunkIOTests
         ms.Position = 0;
 
         // Act - Read
-        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+        var chunk = await WireChunks.ReadAsync(ms);
 
         // Assert
         Assert.NotNull(chunk);
         Assert.Equal(ChunkType.BatchAck, chunk.Value.Header.Type);
         Assert.Equal(transferId, chunk.Value.Header.TransferId);
         Assert.Equal(batchId, chunk.Value.Header.BatchId);
-        Assert.True(chunk.Value.Payload.IsEmpty);
+        Assert.Null(chunk.Value.Payload);
     }
 
     [Fact]
-    public async Task ChunkIO_WriteComplete_And_ReadChunk_RoundTrip()
+    public async Task ChunkIO_WriteComplete_And_ReadOwnedChunk_RoundTrip()
     {
         // Arrange
         var transferId = Guid.NewGuid();
@@ -164,23 +167,23 @@ public class ChunkIOTests
         ms.Position = 0;
 
         // Act - Read
-        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+        var chunk = await WireChunks.ReadAsync(ms);
 
         // Assert
         Assert.NotNull(chunk);
         Assert.Equal(ChunkType.Complete, chunk.Value.Header.Type);
         Assert.Equal(transferId, chunk.Value.Header.TransferId);
-        Assert.True(chunk.Value.Payload.IsEmpty);
+        Assert.Null(chunk.Value.Payload);
     }
 
     [Fact]
-    public async Task ChunkIO_ReadChunkAsync_EmptyStream_ReturnsNull()
+    public async Task ChunkIO_ReadOwnedChunkAsync_EmptyStream_ReturnsNull()
     {
         // Arrange
         using var ms = new MemoryStream();
 
         // Act
-        var result = await ChunkIO.ReadChunkAsync(ms);
+        var result = await WireChunks.ReadAsync(ms);
 
         // Assert
         Assert.Null(result);
@@ -204,11 +207,12 @@ public class ChunkIOTests
         ms.Position = 0;
 
         // Read all
-        using var chunk1 = await ChunkIO.ReadChunkAsync(ms);
-        using var chunk2 = await ChunkIO.ReadChunkAsync(ms);
-        using var chunk3 = await ChunkIO.ReadChunkAsync(ms);
-        using var chunk4 = await ChunkIO.ReadChunkAsync(ms);
-        var chunk5 = await ChunkIO.ReadChunkAsync(ms); // Should be null (EOF)
+        var chunk1 = await WireChunks.ReadAsync(ms);
+        var chunk2 = await WireChunks.ReadAsync(ms);
+        var chunk3 = await WireChunks.ReadAsync(ms);
+        var chunk4 = await WireChunks.ReadAsync(ms);
+        var chunk5 = await WireChunks.ReadAsync(ms); // Should be null (EOF)
+        using var owner1 = chunk1!.Value.Payload;
 
         // Assert
         Assert.Equal(ChunkType.Batch, chunk1!.Value.Header.Type);
@@ -320,16 +324,18 @@ public class ChunkIOTests
         // Act
         await ChunkIO.WriteBatchAsync(ms, transferId, ChunkType.StreamBatch, batchId: 4, count: payload.Length, payload);
         ms.Position = 0;
-        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+        var chunk = await WireChunks.ReadAsync(ms);
 
         // Assert
         Assert.NotNull(chunk);
+        using var owner = chunk.Value.Payload;
         Assert.Equal(ChunkType.StreamBatch, chunk.Value.Header.Type);
         Assert.Equal(ChunkHeader.CurrentVersion, chunk.Value.Header.Version);
         Assert.Equal(4, chunk.Value.Header.BatchId);
         Assert.Equal(payload.Length, chunk.Value.Header.Count);
         Assert.Equal(transferId, chunk.Value.Header.TransferId);
-        Assert.Equal(payload, chunk.Value.Payload.ToArray());
+        Assert.NotNull(owner);
+        Assert.Equal(payload, owner.Memory.ToArray());
     }
 
     [Fact]
@@ -339,9 +345,10 @@ public class ChunkIOTests
 
         await ChunkIO.WriteBatchAsync(ms, Guid.NewGuid(), batchId: 0, count: 1, new byte[] { 1 });
         ms.Position = 0;
-        using var chunk = await ChunkIO.ReadChunkAsync(ms);
+        var chunk = await WireChunks.ReadAsync(ms);
+        using var owner = chunk!.Value.Payload;
 
-        Assert.Equal(ChunkType.Batch, chunk!.Value.Header.Type);
+        Assert.Equal(ChunkType.Batch, chunk.Value.Header.Type);
     }
 
     [Theory]

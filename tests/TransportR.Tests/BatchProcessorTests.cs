@@ -9,6 +9,7 @@ using TransportR.Client.Configuration;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Interfaces;
+using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;
 
@@ -123,17 +124,19 @@ public class BatchProcessorTests
         outputStream.Position = 0;
 
         // Read Chunk 1
-        var chunk1 = await ChunkIO.ReadChunkAsync(outputStream);
+        var chunk1 = await WireChunks.ReadAsync(outputStream);
         Assert.NotNull(chunk1);
+        using var owner1 = chunk1.Value.Payload;
         Assert.Equal(1, chunk1.Value.Header.BatchId);
 
         // Read Chunk 2
-        var chunk2 = await ChunkIO.ReadChunkAsync(outputStream);
+        var chunk2 = await WireChunks.ReadAsync(outputStream);
         Assert.NotNull(chunk2);
+        using var owner2 = chunk2.Value.Payload;
         Assert.Equal(2, chunk2.Value.Header.BatchId);
 
         // Should be end of stream
-        var chunk3 = await ChunkIO.ReadChunkAsync(outputStream);
+        var chunk3 = await WireChunks.ReadAsync(outputStream);
         Assert.Null(chunk3);
     }
 

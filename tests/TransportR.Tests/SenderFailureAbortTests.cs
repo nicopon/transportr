@@ -100,9 +100,9 @@ public class SenderFailureAbortTests
         {
             var chunks = new List<(ChunkType, int)>();
             using var reader = new MemoryStream(_body.ToArray());
-            while (await ChunkIO.ReadChunkAsync(reader) is { } chunk)
+            while (await WireChunks.ReadAsync(reader) is { } chunk)
             {
-                using (chunk)
+                using (chunk.Payload)
                 {
                     chunks.Add((chunk.Header.Type, chunk.Header.BatchId));
                 }

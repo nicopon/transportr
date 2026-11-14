@@ -260,9 +260,9 @@ public class BatchProcessorByteStreamTests
     {
         wire.Position = 0;
         var chunks = new List<(ChunkHeader, byte[])>();
-        while (await ChunkIO.ReadChunkAsync(wire) is { } chunk)
+        while (await WireChunks.ReadAsync(wire) is { } chunk)
         {
-            using (chunk) chunks.Add((chunk.Header, chunk.Payload.ToArray()));
+            using (chunk.Payload) chunks.Add((chunk.Header, chunk.Payload?.Memory.ToArray() ?? []));
         }
         return chunks;
     }

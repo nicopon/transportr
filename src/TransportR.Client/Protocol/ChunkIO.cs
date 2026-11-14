@@ -91,19 +91,8 @@ internal static class ChunkIO
     }
 
     /// <summary>
-    /// Reads a chunk from the stream.
-    /// </summary>
-    /// <returns>Header and payload (payload is empty for control messages), or null if stream ended.</returns>
-    public static async Task<ChunkData?> ReadChunkAsync(Stream stream, CancellationToken ct = default)
-    {
-        if (await ReadOwnedChunkAsync(stream, int.MaxValue, "a chunk carries", ct).ConfigureAwait(false) is not { } chunk) return null;
-
-        return new ChunkData(chunk.Header, chunk.Payload, chunk.Payload is null ? 0 : chunk.Header.PayloadLength);
-    }
-
-    /// <summary>
-    /// Reads a chunk as <see cref="ReadChunkAsync"/> does, and hands the memory its payload was read
-    /// into to the caller, as the caller's own.
+    /// Reads a chunk from the stream, and hands the memory its payload was read into to the caller,
+    /// as the caller's own.
     /// </summary>
     /// <param name="maxPayloadLength">
     /// The largest payload accepted. The length comes off the wire, so it is checked before any memory
@@ -112,8 +101,9 @@ internal static class ChunkIO
     /// <param name="allowedBy">What sets that bound, as the refusal names it.</param>
     /// <returns>
     /// The header, and the payload's memory, exactly its length, or <c>null</c> when it has none; or
-    /// <c>null</c> if the stream ended. Not disposable, unlike <see cref="ChunkData"/>, so that no copy
-    /// of it can return that memory: whoever the caller hands the owner to returns it, once.
+    /// <c>null</c> if the stream ended. The owner is handed over bare, not wrapped in a struct that
+    /// can be copied, so that no copy of it can return that memory: whoever the caller hands the owner
+    /// to returns it, once.
     /// </returns>
     internal static async ValueTask<(ChunkHeader Header, IMemoryOwner<byte>? Payload)?> ReadOwnedChunkAsync(
         Stream stream, int maxPayloadLength, string allowedBy, CancellationToken ct)

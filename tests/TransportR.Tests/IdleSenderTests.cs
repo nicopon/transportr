@@ -47,9 +47,9 @@ public class IdleSenderTests
 
             var pings = 0;
             using var reader = new MemoryStream(bytes);
-            while (ChunkIO.ReadChunkAsync(reader).GetAwaiter().GetResult() is { } chunk)
+            while (WireChunks.ReadAsync(reader).AsTask().GetAwaiter().GetResult() is { } chunk)
             {
-                using (chunk)
+                using (chunk.Payload)
                 {
                     if (chunk.Header.Type == ChunkType.Ping) pings++;
                 }

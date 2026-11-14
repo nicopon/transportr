@@ -163,9 +163,9 @@ public class HubEndedSessionTests
         {
             var types = new List<ChunkType>();
             using var reader = new MemoryStream(_body.ToArray());
-            while (await ChunkIO.ReadChunkAsync(reader) is { } chunk)
+            while (await WireChunks.ReadAsync(reader) is { } chunk)
             {
-                using (chunk) types.Add(chunk.Header.Type);
+                using (chunk.Payload) types.Add(chunk.Header.Type);
             }
 
             return types;
