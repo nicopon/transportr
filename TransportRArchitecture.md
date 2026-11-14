@@ -29,7 +29,7 @@ TransportR.Storage.Redis/                # Redis State Store implementation
 | **Dumb Pipe Architecture** | Hub forwards variable-length opaque bytes without deserialization |
 | **Reliable Delivery** | Packet-level ACK with automatic retry |
 | **Group-based Access** | Route transfers by logical groups |
-| **Observability** | Hub-side byte counting via `IHubProgressMonitor` |
+| **Observability** | Hub-side byte counting and write transports via `IHubProgressMonitor` |
 
 ---
 
@@ -262,16 +262,17 @@ preferred affinity.**
 | `IDataSender<T>` | Initiate transfers, discover receivers | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
 | `IDataReceiver<T>` | Receive transfers via event | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
 | `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR.Client/Abstractions/IBatchSerializer.cs) |
-| `IHubProgressMonitor` | Hub-side monitoring (bytes only) | [IHubProgressMonitor.cs](src/TransportR.Hub/Abstractions/IHubProgressMonitor.cs) |
+| `IHubProgressMonitor` | Hub-side monitoring (bytes and write transports) | [IHubProgressMonitor.cs](src/TransportR.Hub/Abstractions/IHubProgressMonitor.cs) |
 
-> The hub operates as a "dumb-pipe" and only tracks bytes.
+> The hub operates as a "dumb-pipe": it counts bytes and knows how a write stream reached it, never what the chunks hold.
 
 ## Observability
 
 **The packages emit no metrics of their own.** Two hooks are provided and the host decides what to
 do with them: `IHubProgressMonitor` on the hub side, and the `TransferInfo` records
 `GetTransfers()` returns on the client side. `samples/DataHub` builds its own OpenTelemetry meter
-on top of the first — copy it rather than expect one from the package.
+on top of the first — copy it rather than expect one from the package. The hub announces the transport
+of each write stream it takes on, to its log and to `IHubProgressMonitor.OnWriteStreamOpened`.
 
 ---
 

@@ -1,7 +1,7 @@
 namespace TransportR.Hub;
 
 /// <summary>
-/// Receives the bytes the hub forwards, as they cross it.
+/// Receives the bytes the hub forwards, as they cross it, and the transport that carries each write stream.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,4 +28,12 @@ public interface IHubProgressMonitor
     /// a write that then fails is counted all the same; the end of each stream reports 0.
     /// </param>
     void OnBytesTransferred(long bytes);
+
+    /// <summary>
+    /// Called once per opening of a write stream, where the hub takes it on: a WebSocket once it has
+    /// carried its first byte, a succession of segments when its first one is taken. Every reconnection
+    /// calls again. It runs on the request that opens the stream, so an implementation stays short; one
+    /// that throws is logged and the stream goes on. The hub does not say why a client chose the transport.
+    /// </summary>
+    void OnWriteStreamOpened(WriteStreamOpened opened) { }
 }

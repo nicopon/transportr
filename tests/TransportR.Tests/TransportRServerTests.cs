@@ -598,6 +598,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            new IgnoredProgress(),
             Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
             NullLogger<StreamController>.Instance)
@@ -626,6 +627,7 @@ public class TransportRServerTests
             policy: null!,
             terminator: null!,
             new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance),
+            new IgnoredProgress(),
             Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
             NullLogger<StreamController>.Instance)

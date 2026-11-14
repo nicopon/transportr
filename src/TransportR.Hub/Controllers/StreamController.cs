@@ -27,6 +27,7 @@ internal class StreamController : ControllerBase
     private readonly AccessPolicy _policy;
     private readonly ITransferTerminator _terminator;
     private readonly UploadEpochs _epochs;
+    private readonly IHubProgressMonitor _progressMonitor;
     private readonly TimeSpan _inactivityTimeout;
     private readonly TimeProvider _time;
     private readonly ILogger<StreamController> _logger;
@@ -40,6 +41,7 @@ internal class StreamController : ControllerBase
         AccessPolicy policy,
         ITransferTerminator terminator,
         UploadEpochs epochs,
+        IHubProgressMonitor progressMonitor,
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider time,
         ILogger<StreamController> logger)
@@ -52,6 +54,7 @@ internal class StreamController : ControllerBase
         _policy = policy;
         _terminator = terminator;
         _epochs = epochs;
+        _progressMonitor = progressMonitor;
         _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
         _time = time;
         _logger = logger;
@@ -59,10 +62,11 @@ internal class StreamController : ControllerBase
 
     /// <summary>
     /// Validates that the transfer exists and that the caller is the participant this stream
-    /// belongs to. Every rejection is a 404: the client already treats NotFound as a terminal
-    /// "transfer gone", and a 403 would turn the route into an existence oracle for transfer ids.
+    /// belongs to, and returns the transfer's participants; null is a refusal. Every rejection is a 404:
+    /// the client already treats NotFound as a terminal "transfer gone", and a 403 would turn the route
+    /// into an existence oracle for transfer ids.
     /// </summary>
-    private Task<bool> ValidateTransfer(string transferId, ConnectionType type, bool isWrite)
+    private Task<TransferParticipants?> ValidateTransfer(string transferId, ConnectionType type, bool isWrite)
     {
         // A participant holds two streams in opposite directions: the sender writes Data and reads
         // Control, the receiver reads Data and writes Control. So the role is the method crossed
@@ -74,7 +78,7 @@ internal class StreamController : ControllerBase
 
     private enum Role { Sender, Receiver, Either }
 
-    private async Task<bool> Admit(string transferId, Role role)
+    private async Task<TransferParticipants?> Admit(string transferId, Role role)
     {
         var participants = await _transferManager.GetParticipantsAsync(transferId);
         if (participants == null)
@@ -82,14 +86,14 @@ internal class StreamController : ControllerBase
             // A client reopening a stream of a transfer the hub retired or ended meets this, twice per
             // reopening; it says nothing about the caller's right to be there, which is judged below.
             _logger.LogInformation("Stream request for transfer {TransferId} refused: the hub does not know it (finished, terminated or never opened)", transferId);
-            return false;
+            return null;
         }
 
         // Dev mode arms no authorization on this route, so there is no attested identity to compare
         // and the data plane stays open. SecurityArchitecture.md states that of dev mode.
         if (User?.Identity?.IsAuthenticated != true)
         {
-            return true;
+            return participants;
         }
 
         var caller = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null);
@@ -106,7 +110,7 @@ internal class StreamController : ControllerBase
             _logger.LogWarning(
                 "Security: Stream access denied - the caller of transfer {TransferId} has no attested identity to compare (the identity could not be resolved, or its token carries no subject)",
                 transferId);
-            return false;
+            return null;
         }
 
         if (_policy.Evaluate(caller) == AccessVerdict.NoGroups)
@@ -114,7 +118,7 @@ internal class StreamController : ControllerBase
             _logger.LogWarning(
                 "Security: Stream access denied - caller '{CallerSubject}' holds no group, so it is not the {Role} of transfer {TransferId}",
                 callerSubject, roleName, transferId);
-            return false;
+            return null;
         }
 
         var expectedIds = role switch
@@ -131,7 +135,7 @@ internal class StreamController : ControllerBase
             if (expected?.Subject != null
                 && AccessPolicy.SameIdentity(expected.Subject, callerSubject) == AccessVerdict.Allowed)
             {
-                return true;
+                return participants;
             }
 
             expectedSubjects.Add($"'{expected?.Subject ?? "<none>"}'");
@@ -140,7 +144,7 @@ internal class StreamController : ControllerBase
         _logger.LogWarning(
             "Security: Stream access denied - caller '{CallerSubject}' is not the {Role} of transfer {TransferId} (expected {ExpectedSubjects})",
             callerSubject, roleName, transferId, string.Join(" or ", expectedSubjects));
-        return false;
+        return null;
     }
 
     /// <summary>
@@ -234,7 +238,7 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        if (!await ValidateTransfer(transferId, type, isWrite: true))
+        if (await ValidateTransfer(transferId, type, isWrite: true) is not { } participants)
         {
             this.Refuse();
             return;
@@ -265,7 +269,7 @@ internal class StreamController : ControllerBase
         }
 
         _epochs.Abandon(bridgeKey);
-        _logger.LogInformation("BRIDGE: The write stream of {BridgeKey} is carried by a WebSocket", bridgeKey);
+        AnnounceWriteStream(transferId, type, participants, WriteTransport.WebSocket);
 
         try
         {
@@ -293,7 +297,7 @@ internal class StreamController : ControllerBase
     /// </summary>
     private async Task<UploadEpoch?> OpenEpochAsync(string transferId, ConnectionType type, string bridgeKey, Guid? epoch, long? offset, int? heartbeatMs)
     {
-        if (!await ValidateTransfer(transferId, type, isWrite: true))
+        if (await ValidateTransfer(transferId, type, isWrite: true) is not { } participants)
         {
             this.Refuse();
             return null;
@@ -332,12 +336,35 @@ internal class StreamController : ControllerBase
             heartbeat = announced;
         }
 
+        AnnounceWriteStream(transferId, type, participants, WriteTransport.Segments);
         return _epochs.Open(
             bridgeKey,
             epochId,
             AttestedSubject(),
             heartbeat,
             (input, token) => _brokerServer.HandleSendAsync(transferId, type, input, token));
+    }
+
+    /// <summary>
+    /// Says, to the log and to the monitor, what carries a write stream. Both transports come through
+    /// here at the point where the hub commits to the stream, so a transport that never carried a byte
+    /// is not announced. The client is the transfer's participant for the stream, not the attested
+    /// subject, which dev mode does not have.
+    /// </summary>
+    private void AnnounceWriteStream(string transferId, ConnectionType type, TransferParticipants participants, WriteTransport transport)
+    {
+        var clientId = type == ConnectionType.Data ? participants.SenderId : participants.ReceiverId;
+        var bridgeKey = BridgeManager.KeyFor(transferId, type);
+        _logger.LogInformation("BRIDGE: The write stream of {BridgeKey} (client {ClientId}) is carried by {Transport}", bridgeKey, clientId, transport);
+
+        try
+        {
+            _progressMonitor.OnWriteStreamOpened(new WriteStreamOpened(transferId, clientId, type, transport));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("The progress monitor failed on the opening of the write stream of {BridgeKey} ({Message}); the stream goes on", bridgeKey, ex.Message);
+        }
     }
 
     // Dev mode attests nothing, and two absent subjects are the same identity.
@@ -355,7 +382,7 @@ internal class StreamController : ControllerBase
     [HttpPost("{transferId}/" + WireRoutes.AbortSegment)]
     public async Task<IActionResult> Abort(string transferId)
     {
-        if (!await Admit(transferId, Role.Either))
+        if (await Admit(transferId, Role.Either) is null)
         {
             return this.Refuse();
         }
@@ -385,7 +412,7 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        if (!await ValidateTransfer(transferId, type, isWrite: false))
+        if (await ValidateTransfer(transferId, type, isWrite: false) is null)
         {
             this.Refuse();
             return;

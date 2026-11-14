@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client;
 using TransportR.Client.Configuration;
+using TransportR.Hub;
 using TransportR.Hub.Interfaces;
 using TransportR.Tests.Infrastructure;
 
@@ -146,6 +148,57 @@ public class WebSocketTransferTests
             Assert.True(DateTime.UtcNow < deadline, "The hub never forgot the transfer");
             await Task.Delay(20);
         }
+    }
+
+    private sealed class RecordingMonitor(bool fails) : IHubProgressMonitor
+    {
+        private readonly ConcurrentQueue<WriteStreamOpened> _opened = new();
+
+        public IReadOnlyCollection<WriteStreamOpened> Opened => _opened;
+
+        public void OnBytesTransferred(long bytes) { }
+
+        public void OnWriteStreamOpened(WriteStreamOpened opened)
+        {
+            _opened.Enqueue(opened);
+            if (fails) throw new InvalidOperationException("The monitor failed.");
+        }
+    }
+
+    private static Action<IServiceCollection> Monitored(IHubProgressMonitor monitor) =>
+        services => services.AddSingleton(monitor);
+
+    [Fact]
+    public async Task EachWriteStreamOpening_IsAnnouncedToTheMonitor_AsCarriedByWebSocket_EvenWhenTheMonitorFails()
+    {
+        var monitor = new RecordingMonitor(fails: true);
+        await using var hub = await TestHubServerFactory.StartLoopbackAsync(Monitored(monitor));
+        await using var transfer = await StartAsync(hub);
+
+        Assert.Equal(Items, await transfer.DeliverAsync(Items));
+
+        var transferId = transfer.Send.TransferId;
+        var sender = new WriteStreamOpened(transferId, transfer.Sender.ClientId, ConnectionType.Data, WriteTransport.WebSocket);
+        var receiver = new WriteStreamOpened(transferId, transfer.Receiver.ClientId, ConnectionType.Control, WriteTransport.WebSocket);
+        await EventuallyAsync(() => monitor.Opened.Contains(sender) && monitor.Opened.Contains(receiver), "both write streams announced");
+        Assert.Null(transfer.SenderInfo.WriteTransportFallback);
+    }
+
+    [Fact]
+    public async Task EachWriteStreamOpening_IsAnnouncedToTheMonitor_AsCarriedBySegments()
+    {
+        var monitor = new RecordingMonitor(fails: false);
+        await using var hub = await TestHubServerFactory.StartLoopbackAsync(Monitored(monitor));
+        Action<ClientOptions> segments = options => options.WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly;
+        await using var transfer = await StartAsync(hub, segments, segments);
+
+        Assert.Equal(Items, await transfer.DeliverAsync(Items));
+
+        var transferId = transfer.Send.TransferId;
+        var sender = new WriteStreamOpened(transferId, transfer.Sender.ClientId, ConnectionType.Data, WriteTransport.Segments);
+        var receiver = new WriteStreamOpened(transferId, transfer.Receiver.ClientId, ConnectionType.Control, WriteTransport.Segments);
+        await EventuallyAsync(() => monitor.Opened.Contains(sender) && monitor.Opened.Contains(receiver), "both write streams announced");
+        Assert.All(monitor.Opened, opened => Assert.Equal(WriteTransport.Segments, opened.Transport));
     }
 
     [Fact]
