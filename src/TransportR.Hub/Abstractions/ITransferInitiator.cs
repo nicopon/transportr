@@ -19,12 +19,18 @@ public interface ITransferInitiator
     /// </summary>
     /// <param name="senderClientId">The registered client that will send.</param>
     /// <param name="receiverClientId">The registered client that will receive.</param>
-    /// <param name="timeoutMs">Timeout for the handshake in milliseconds.</param>
+    /// <param name="handshakeTimeout">
+    /// How long both clients have to answer, from zero to the time the hub keeps a transfer's session
+    /// for (five minutes): the range a client's own request is held to.
+    /// </param>
     /// <param name="cancellationToken">Abandons the handshake; the receiver is told to cancel.</param>
     /// <returns>
     /// The transfer identifier, which the handles both clients were given carry as
     /// <c>TransferId</c>. A client receives its handle during the handshake, before this returns.
     /// </returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="handshakeTimeout"/> is outside its range. Nothing has been written by then.
+    /// </exception>
     /// <exception cref="HubRequestFailedException">
     /// Either client is unknown, has an expired token, is not authorized to reach the other, is
     /// unreachable or refuses, or the handshake times out. The message is generic; the detail is in
@@ -33,6 +39,6 @@ public interface ITransferInitiator
     Task<string> InitTransferAsync(
         Guid senderClientId,
         Guid receiverClientId,
-        int timeoutMs,
+        TimeSpan handshakeTimeout,
         CancellationToken cancellationToken = default);
 }

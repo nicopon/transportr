@@ -54,12 +54,20 @@ internal class TransferInitiator : ITransferInitiator
     public async Task<string> InitTransferAsync(
         Guid senderClientId,
         Guid receiverClientId,
-        int timeoutMs,
+        TimeSpan handshakeTimeout,
         CancellationToken cancellationToken = default)
     {
         if (senderClientId == receiverClientId)
         {
             throw new ArgumentException("A transfer needs two distinct clients.", nameof(receiverClientId));
+        }
+
+        if (!AcceptsHandshakeTimeout(handshakeTimeout))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(handshakeTimeout),
+                handshakeTimeout,
+                $"The handshake timeout must be from zero to {TransferManager.SessionTtl}.");
         }
 
         var sender = await _stateStore.GetClientAsync(senderClientId);
@@ -90,8 +98,17 @@ internal class TransferInitiator : ITransferInitiator
             throw new HubRequestFailedException("Source and target clients are not both connected to this hub instance.");
         }
 
-        return await HandshakeAsync(sender, receiver, timeoutMs, requestSender: true, cancellationToken);
+        return await HandshakeAsync(sender, receiver, handshakeTimeout, requestSender: true, cancellationToken);
     }
+
+    /// <summary>
+    /// Whether a handshake may be given this long. The handshake is the caller's to time, within what the
+    /// hub keeps a transfer's session for: past that range a timeout would hold the handshake open, a
+    /// negative one with no deadline at all, or fail it after the participants were written. One rule for
+    /// the client's request and the host's call.
+    /// </summary>
+    internal static bool AcceptsHandshakeTimeout(TimeSpan timeout) =>
+        timeout >= TimeSpan.Zero && timeout <= TransferManager.SessionTtl;
 
     /// <summary>
     /// Refuses a source whose own token or groups let it open no transfer at all. Called before its
@@ -143,7 +160,7 @@ internal class TransferInitiator : ITransferInitiator
     internal async Task<string> HandshakeAsync(
         ClientRegistration sender,
         ClientRegistration receiver,
-        int timeoutMs,
+        TimeSpan handshakeTimeout,
         bool requestSender,
         CancellationToken cancellationToken = default)
     {
@@ -154,7 +171,7 @@ internal class TransferInitiator : ITransferInitiator
 
         await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId);
 
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs), _time);
+        using var timeout = new CancellationTokenSource(handshakeTimeout, _time);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
@@ -217,7 +234,7 @@ internal class TransferInitiator : ITransferInitiator
             if (cancellationToken.IsCancellationRequested) throw;
 
             _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
-            throw new HubRequestFailedException($"Handshake timed out after {timeoutMs}ms");
+            throw new HubRequestFailedException($"Handshake timed out after {handshakeTimeout.TotalMilliseconds}ms");
         }
 
         return StillOpen(transferId);
