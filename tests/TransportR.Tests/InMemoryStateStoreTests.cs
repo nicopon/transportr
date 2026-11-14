@@ -265,6 +265,30 @@ public class InMemoryStateStoreTests
         Assert.Null(await _store.GetSessionAsync("transfer-del"));
     }
 
+    [Fact]
+    public async Task CountTransfersOpenedBy_CountsOnlyTheLiveSessionsTheSenderOpenedItself()
+    {
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var store = new InMemoryStateStore(timeProvider: clock);
+        var sender = Guid.NewGuid();
+        var now = clock.GetUtcNow().UtcDateTime;
+        TransferSession Session(string id, Guid senderId, bool openedBySender, TimeSpan lifetime) =>
+            new(id, senderId, Guid.NewGuid(), now, now + lifetime) { OpenedBySender = openedBySender };
+
+        await store.SaveSessionAsync(Session("open-1", sender, true, TimeSpan.FromMinutes(5)));
+        await store.SaveSessionAsync(Session("open-2", sender, true, TimeSpan.FromMinutes(5)));
+        await store.SaveSessionAsync(Session("by-the-host", sender, false, TimeSpan.FromMinutes(5)));
+        await store.SaveSessionAsync(Session("another-sender", Guid.NewGuid(), true, TimeSpan.FromMinutes(5)));
+        await store.SaveSessionAsync(Session("deleted", sender, true, TimeSpan.FromMinutes(5)));
+        await store.SaveSessionAsync(Session("expiring", sender, true, TimeSpan.FromMinutes(1)));
+        await store.DeleteSessionAsync("deleted");
+
+        Assert.Equal(3, await store.CountTransfersOpenedByAsync(sender));
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.Equal(2, await store.CountTransfersOpenedByAsync(sender));
+    }
+
     // ========== Helpers ==========
 
     private static ClientRegistration CreateClient(Guid clientId, string connectionId)

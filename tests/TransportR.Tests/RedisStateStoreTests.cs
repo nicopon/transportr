@@ -294,6 +294,28 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.Null(await _store.GetSessionAsync(transferId));
     }
 
+    [RedisAvailableFact]
+    public async Task CountTransfersOpenedBy_CountsOnlyTheLiveSessionsTheSenderOpenedItself()
+    {
+        var sender = Guid.NewGuid();
+        TransferSession Session(string id, Guid senderId, bool openedBySender, TimeSpan lifetime) =>
+            new($"{id}-{Guid.NewGuid()}", senderId, Guid.NewGuid(), DateTime.UtcNow, DateTime.UtcNow + lifetime) { OpenedBySender = openedBySender };
+
+        var deleted = Session("deleted", sender, true, TimeSpan.FromMinutes(5));
+        await _store.SaveSessionAsync(Session("open-1", sender, true, TimeSpan.FromMinutes(5)));
+        await _store.SaveSessionAsync(Session("open-2", sender, true, TimeSpan.FromMinutes(5)));
+        await _store.SaveSessionAsync(Session("by-the-host", sender, false, TimeSpan.FromMinutes(5)));
+        await _store.SaveSessionAsync(Session("another-sender", Guid.NewGuid(), true, TimeSpan.FromMinutes(5)));
+        await _store.SaveSessionAsync(deleted);
+        await _store.SaveSessionAsync(Session("expiring", sender, true, TimeSpan.FromSeconds(2)));
+        await _store.DeleteSessionAsync(deleted.TransferId);
+
+        Assert.Equal(3, await _store.CountTransfersOpenedByAsync(sender));
+
+        await Task.Delay(2500);
+        Assert.Equal(2, await _store.CountTransfersOpenedByAsync(sender));
+    }
+
     // ========== Helpers ==========
 
     private static ClientRegistration CreateClient(Guid clientId, string connectionId)

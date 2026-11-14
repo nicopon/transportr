@@ -155,4 +155,21 @@ public class AccessPolicyTests
         Assert.NotNull(failure);
         Assert.Contains("TokenExpiryMarginSeconds", failure.ToString());
     }
+
+    [Theory]
+    [InlineData(nameof(AccessOptions.MaxHandshakesPerClient), 0)]
+    [InlineData(nameof(AccessOptions.MaxHandshakesPerClient), -1)]
+    [InlineData(nameof(AccessOptions.MaxOpenTransfersPerClient), 0)]
+    [InlineData(nameof(AccessOptions.MaxOpenTransfersPerClient), -1)]
+    public void ACeilingOfZeroOrLess_IsRefusedWhenTheHostStarts(string setting, int ceiling)
+    {
+        var failure = Record.Exception(() => AuthenticatedHubServerFactory.CreateHost(hub => hub.Services.Configure<AccessOptions>(options =>
+        {
+            if (setting == nameof(AccessOptions.MaxHandshakesPerClient)) options.MaxHandshakesPerClient = ceiling;
+            else options.MaxOpenTransfersPerClient = ceiling;
+        })));
+
+        Assert.NotNull(failure);
+        Assert.Contains(setting, failure.ToString());
+    }
 }

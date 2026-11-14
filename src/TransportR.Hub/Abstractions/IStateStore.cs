@@ -78,6 +78,16 @@ public interface IStateStore
     Task<TransferSession?> GetSessionAsync(string transferId);
 
     /// <summary>
+    /// Counts the live sessions <paramref name="senderId"/> opened itself
+    /// (<see cref="TransferSession.OpenedBySender"/>), for <see cref="AccessOptions.MaxOpenTransfersPerClient"/>.
+    /// </summary>
+    /// <remarks>
+    /// Read from the sessions themselves, as <see cref="GetSessionAsync"/> sees them: a session that
+    /// expires or is deleted stops counting then, with no release of its own that could be missed.
+    /// </remarks>
+    Task<int> CountTransfersOpenedByAsync(Guid senderId);
+
+    /// <summary>
     /// Extends the expiry of a session (Heartbeat).
     /// </summary>
     /// <remarks>

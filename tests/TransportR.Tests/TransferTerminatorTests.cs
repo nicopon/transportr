@@ -125,7 +125,8 @@ public class TransferTerminatorTests
             return inner.RemoveTransferAsync(transferId);
         }
 
-        public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => inner.RegisterParticipantsAsync(transferId, senderId, receiverId);
+        public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId, bool openedBySender) =>
+            inner.RegisterParticipantsAsync(transferId, senderId, receiverId, openedBySender);
         public Task<TransferParticipants?> GetParticipantsAsync(string transferId) => inner.GetParticipantsAsync(transferId);
         public Task<TransferState?> TrackAsync(string transferId) => inner.TrackAsync(transferId);
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => inner.UpdateSenderStatsAsync(transferId, itemsSent, acksReceived);

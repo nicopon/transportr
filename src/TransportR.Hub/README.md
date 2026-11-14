@@ -72,6 +72,11 @@ app.MapDataHub();
 app.Run();
 ```
 
+A client that opens transfers itself is held to two ceilings of `AccessOptions`, on by default: `MaxHandshakesPerClient`
+(32 handshakes at once on an instance) and `MaxOpenTransfersPerClient` (256 open transfers, counted through the state
+store). Past either, its request is refused with a 429; `null` lifts a ceiling. Transfers the host opens through
+`ITransferInitiator` are not counted.
+
 ## Testability
 
 Every hub-side clock and timer reads the `TimeProvider` in the container. A test registers its own

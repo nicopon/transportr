@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
@@ -25,6 +26,15 @@ internal class TransferInitiator : ITransferInitiator
     /// </summary>
     internal const string TargetUnavailable = "The target client is not reachable or not authorized.";
 
+    /// <summary>
+    /// What a client is told when a ceiling of <see cref="AccessOptions"/> refuses its transfer: neither
+    /// the ceiling nor its count, which the hub's log gives.
+    /// </summary>
+    internal const string TooManyTransfers = "The client has too many transfers open or being opened.";
+
+    private readonly ConcurrentDictionary<Guid, int> _handshakesInFlight = new();
+    private readonly int? _maxHandshakes;
+    private readonly int? _maxOpenTransfers;
     private readonly ClientStreams _streams;
     private readonly IStateStore _stateStore;
     private readonly ITransferManager _transferManager;
@@ -39,9 +49,12 @@ internal class TransferInitiator : ITransferInitiator
         ITransferManager transferManager,
         AccessPolicy policy,
         IOptions<AffinityOptions> affinityOptions,
+        IOptions<AccessOptions> accessOptions,
         ILogger<TransferInitiator> logger,
         TimeProvider timeProvider)
     {
+        _maxHandshakes = accessOptions.Value.MaxHandshakesPerClient;
+        _maxOpenTransfers = accessOptions.Value.MaxOpenTransfersPerClient;
         _time = timeProvider;
         _streams = streams;
         _stateStore = stateStore;
@@ -111,6 +124,59 @@ internal class TransferInitiator : ITransferInitiator
         timeout >= TimeSpan.Zero && timeout <= TransferManager.SessionTtl;
 
     /// <summary>
+    /// Takes one of the places <see cref="AccessOptions.MaxHandshakesPerClient"/> gives the sender on
+    /// this instance, for a transfer it opens itself; false when it holds them all. A place taken is
+    /// given back by <see cref="LeaveHandshake"/>, in a <c>finally</c>.
+    /// </summary>
+    internal bool TryEnterHandshake(Guid senderId)
+    {
+        if (_maxHandshakes is not { } ceiling) return true;
+
+        while (true)
+        {
+            var held = _handshakesInFlight.GetOrAdd(senderId, 0);
+            if (held >= ceiling)
+            {
+                _logger.LogWarning("InitTransfer refused for {ClientId}: {Held} of its handshakes in flight on this instance reach AccessOptions.MaxHandshakesPerClient",
+                    senderId, held);
+                return false;
+            }
+
+            if (_handshakesInFlight.TryUpdate(senderId, held + 1, held)) return true;
+        }
+    }
+
+    internal void LeaveHandshake(Guid senderId)
+    {
+        if (_maxHandshakes == null) return;
+
+        // The last place given back removes the entry, so that a client that comes and goes leaves none.
+        while (_handshakesInFlight.TryGetValue(senderId, out var held))
+        {
+            var left = held <= 1
+                ? _handshakesInFlight.TryRemove(KeyValuePair.Create(senderId, held))
+                : _handshakesInFlight.TryUpdate(senderId, held - 1, held);
+            if (left) return;
+        }
+    }
+
+    /// <summary>
+    /// Whether the sender holds fewer open transfers it opened itself than
+    /// <see cref="AccessOptions.MaxOpenTransfersPerClient"/>, on every instance that shares the store.
+    /// </summary>
+    internal async Task<bool> MayOpenAnotherAsync(Guid senderId)
+    {
+        if (_maxOpenTransfers is not { } ceiling) return true;
+
+        var open = await _stateStore.CountTransfersOpenedByAsync(senderId);
+        if (open < ceiling) return true;
+
+        _logger.LogWarning("InitTransfer refused for {ClientId}: {Open} open transfers it opened reach AccessOptions.MaxOpenTransfersPerClient ({Ceiling})",
+            senderId, open, ceiling);
+        return false;
+    }
+
+    /// <summary>
     /// Refuses a source whose own token or groups let it open no transfer at all. Called before its
     /// target is looked up, so that what it is told says nothing of the target.
     /// </summary>
@@ -169,7 +235,7 @@ internal class TransferInitiator : ITransferInitiator
         _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (opened by {Opener})",
             transferId, sender.ClientId, receiver.ClientId, requestSender ? "the host" : "the sender");
 
-        await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId);
+        await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId, openedBySender: !requestSender);
 
         using var timeout = new CancellationTokenSource(handshakeTimeout, _time);
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Mime;
 using System.Net.ServerSentEvents;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -280,6 +281,14 @@ internal sealed class ControlChannel : IAsyncDisposable
             && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { } error)
         {
             throw new HubRequestFailedException(error.Message);
+        }
+
+        // A proxy in front of the hub that limits the rate answers 429 too, without the hub's error.
+        if (response.StatusCode == HttpStatusCode.TooManyRequests
+            && response.Content.Headers.ContentType?.MediaType == MediaTypeNames.Application.Json
+            && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { Message: { } message })
+        {
+            throw new HubRequestFailedException(message);
         }
 
         response.EnsureSuccessStatusCode();

@@ -237,7 +237,8 @@ internal class ClientController : ControllerBase
     /// Opens a transfer from this client and answers with its id once the receiver is ready: a 409
     /// carries the reason it was not, written for the client. A receiver whose stream another instance
     /// holds is answered with a 421 that carries the affinity reaching that instance, for the client to
-    /// send this request again with it.
+    /// send this request again with it. A client past a ceiling of <see cref="AccessOptions"/> is
+    /// answered with a 429, before anything is written.
     /// </summary>
     [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment)]
     public async Task<IActionResult> InitTransfer(Guid clientId, [FromBody] InitTransferRequest request)
@@ -256,9 +257,14 @@ internal class ClientController : ControllerBase
             return BadRequest(new HubError("The transfer request is not acceptable."));
         }
 
+        if (!_initiator.TryEnterHandshake(clientId)) return TooManyTransfers();
+
         try
         {
             _initiator.ValidateSource(source);
+
+            // Asked before the target, so that a refusal says nothing of it, and before anything is written.
+            if (!await _initiator.MayOpenAnotherAsync(clientId)) return TooManyTransfers();
 
             var target = await _stateStore.GetClientAsync(request.TargetClientId);
             if (target == null)
@@ -283,7 +289,14 @@ internal class ClientController : ControllerBase
         {
             return new EmptyResult();
         }
+        finally
+        {
+            _initiator.LeaveHandshake(clientId);
+        }
     }
+
+    private ObjectResult TooManyTransfers() =>
+        StatusCode(StatusCodes.Status429TooManyRequests, new HubError(TransferInitiator.TooManyTransfers));
 
     /// <summary>The client's answer to an event that asked for one.</summary>
     [HttpPost("{clientId:guid}/" + WireRoutes.RepliesSegment + "/{requestId:guid}")]

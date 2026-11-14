@@ -269,6 +269,7 @@ public class TransferManagerTests
         }
 
         public Task<TransferSession?> GetSessionAsync(string transferId) => _inner.GetSessionAsync(transferId);
+        public Task<int> CountTransfersOpenedByAsync(Guid senderId) => _inner.CountTransfersOpenedByAsync(senderId);
         public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry) => _inner.ExtendSessionExpiryAsync(transferId, newExpiry);
         public Task SaveClientAsync(ClientRegistration client) => _inner.SaveClientAsync(client);
         public Task<ClientRegistration?> RenewClientAsync(Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry) =>

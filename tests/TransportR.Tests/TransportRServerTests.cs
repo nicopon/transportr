@@ -697,7 +697,7 @@ public class TransportRServerTests
         public Task<TransferState?> TrackAsync(string transferId) =>
             Task.FromResult<TransferState?>(_forgotten ? null : new TransferState(transferId));
 
-        public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId) => throw new NotSupportedException();
+        public Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId, bool openedBySender) => throw new NotSupportedException();
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => throw new NotSupportedException();
         public Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent) => throw new NotSupportedException();
         public TransferState? GetTransfer(string transferId) => throw new NotSupportedException();

@@ -36,12 +36,12 @@ internal class TransferManager : ITransferManager
 
     private DateTime Now => _time.GetUtcNow().UtcDateTime;
 
-    public async Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId)
+    public async Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId, bool openedBySender = false)
     {
         // Saved first: a session the store refuses fails the handshake before anyone has heard of the
         // transfer, and must leave no state behind for the inactivity sweep to cancel with both clients.
         var now = Now;
-        var session = new TransferSession(transferId, senderId, receiverId, now, now.Add(_sessionTtl));
+        var session = new TransferSession(transferId, senderId, receiverId, now, now.Add(_sessionTtl)) { OpenedBySender = openedBySender };
         await _stateStore.SaveSessionAsync(session).ConfigureAwait(false);
 
         _participants[transferId] = new TransferParticipants(senderId, receiverId);

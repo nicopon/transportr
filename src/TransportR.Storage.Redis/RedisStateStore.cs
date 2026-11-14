@@ -61,7 +61,16 @@ public class RedisStateStore : IStateStore
         }
 
         await _db.StringSetAsync(key, json, ttl);
+        if (session.OpenedBySender)
+        {
+            await _db.SetAddAsync(OpenedByKey(session.SenderId), session.TransferId);
+        }
     }
+
+    // The ids of the sessions a sender opened itself. An entry outlives a session whose TTL runs out,
+    // so the set is only a way to the sessions, never a count: the sessions decide what counts, and the
+    // count drops the entries they no longer back.
+    private static string OpenedByKey(Guid senderId) => $"{KeyPrefix}opened_by:{senderId}";
 
     public async Task<TransferSession?> GetSessionAsync(string transferId)
     {
@@ -71,6 +80,22 @@ public class RedisStateStore : IStateStore
         if (json.IsNullOrEmpty) return null;
 
         return JsonSerializer.Deserialize<TransferSession>(json.ToString()!);
+    }
+
+    public async Task<int> CountTransfersOpenedByAsync(Guid senderId)
+    {
+        var indexKey = OpenedByKey(senderId);
+        var ids = await _db.SetMembersAsync(indexKey);
+        if (ids.Length == 0) return 0;
+
+        var sessions = await _db.StringGetAsync(ids.Select(id => (RedisKey)$"{KeyPrefix}sessions:{id}").ToArray());
+        var gone = ids.Where((_, i) => !sessions[i].HasValue).ToArray();
+        if (gone.Length > 0)
+        {
+            await _db.SetRemoveAsync(indexKey, gone);
+        }
+
+        return ids.Length - gone.Length;
     }
 
     public async Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
@@ -95,8 +120,16 @@ public class RedisStateStore : IStateStore
 
     public async Task DeleteSessionAsync(string transferId)
     {
-        var key = $"{KeyPrefix}sessions:{transferId}";
-        await _db.KeyDeleteAsync(key);
+        var json = await _db.StringGetDeleteAsync($"{KeyPrefix}sessions:{transferId}");
+        if (json.IsNullOrEmpty) return;
+
+        // The count would drop the entry too; this keeps an ended transfer out of the index of a sender
+        // that never opens another.
+        var session = JsonSerializer.Deserialize<TransferSession>(json.ToString()!);
+        if (session is { OpenedBySender: true })
+        {
+            await _db.SetRemoveAsync(OpenedByKey(session.SenderId), transferId);
+        }
     }
 
     // --- Clients ---

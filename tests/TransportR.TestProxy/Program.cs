@@ -136,6 +136,11 @@ stateApi.MapGet("/sessions/{transferId}", async (string transferId, ProxyStateSt
     return session != null ? Results.Ok(session) : Results.NotFound();
 });
 
+stateApi.MapGet("/senders/{senderId:guid}/opened-transfers", async (Guid senderId, ProxyStateStore store) =>
+{
+    return Results.Ok(await store.CountTransfersOpenedByAsync(senderId));
+});
+
 stateApi.MapPut("/sessions/{transferId}/expiry", async (string transferId, [FromBody] DateTime newExpiry, ProxyStateStore store) =>
 {
     await store.ExtendSessionExpiryAsync(transferId, newExpiry);
@@ -300,6 +305,14 @@ public class ProxyStateStore : IStateStore
             return Task.FromResult<TransferSession?>(session);
         }
         return Task.FromResult<TransferSession?>(null);
+    }
+
+    public Task<int> CountTransfersOpenedByAsync(Guid senderId)
+    {
+        var now = DateTime.UtcNow;
+        var count = _sessions.Count(entry =>
+            entry.Value.OpenedBySender && entry.Value.SenderId == senderId && entry.Value.ExpiresAtUtc > now);
+        return Task.FromResult(count);
     }
 
     public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)

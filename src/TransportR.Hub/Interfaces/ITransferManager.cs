@@ -9,7 +9,8 @@ internal interface ITransferManager
     /// Registers sender and receiver for a transfer, and starts its state: from here on the
     /// inactivity sweep knows the transfer, whether or not a heartbeat ever reports on it.
     /// </summary>
-    Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId);
+    /// <param name="openedBySender">Written to the session as <see cref="TransferSession.OpenedBySender"/>.</param>
+    Task RegisterParticipantsAsync(string transferId, Guid senderId, Guid receiverId, bool openedBySender = false);
 
     /// <summary>
     /// Gets the participants of a transfer this instance holds, or of one the shared store knows.

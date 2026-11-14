@@ -107,6 +107,8 @@ public static class TransportRHubExtensions
         services.AddOptions<AccessOptions>()
             .Validate(o => o.TokenExpiryMarginSeconds >= 0, "AccessOptions.TokenExpiryMarginSeconds cannot be negative.")
             .Validate(o => o.AccessSweepIntervalSeconds > 0, "AccessOptions.AccessSweepIntervalSeconds must be positive.")
+            .Validate(o => o.MaxHandshakesPerClient is not <= 0, "AccessOptions.MaxHandshakesPerClient must be positive, or null for no ceiling.")
+            .Validate(o => o.MaxOpenTransfersPerClient is not <= 0, "AccessOptions.MaxOpenTransfersPerClient must be positive, or null for no ceiling.")
             .ValidateOnStart();
         services.AddSingleton<AccessPolicy>();
 

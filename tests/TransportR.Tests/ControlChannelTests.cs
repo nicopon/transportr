@@ -117,6 +117,25 @@ public class ControlChannelTests
         }
     }
 
+    [Fact]
+    public async Task ATooManyRequestsThatCarriesTheHubsError_IsARefusal_AndOneWithout_IsNot()
+    {
+        using var fromHub = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(new HubError("Too many."), options: ControlPlane.Json)
+        };
+        using var fromAProxy = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("<html>Slow down</html>", Encoding.UTF8, "text/html")
+        };
+
+        var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(fromHub));
+        Assert.Equal("Too many.", refusal.Message);
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxy));
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

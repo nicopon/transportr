@@ -70,6 +70,7 @@ Both planes are stated separately, because they are armed separately.
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | The flow control rules, when the host registers them; without them any group reaches any other |
 | Token tampering | Signature verified against IDP |
+| An authenticated client flooding `InitTransfer` | Ceilings per client on the transfers it opens itself, refused with a 429 before anything is written: `AccessOptions.MaxHandshakesPerClient` (32 at once, per instance) and `MaxOpenTransfersPerClient` (256 open, counted through the state store); the host's transfers are not counted |
 | Expired tokens | `exp` validated by the host on each request, each segment of a write stream included, and when a stream opens, a WebSocket's upgrade among them; judged by the hub for as long as it runs (see Token Renewal) |
 
 A write stream carried by a WebSocket is admitted once, at its upgrade, as a read GET is: no later request checks its

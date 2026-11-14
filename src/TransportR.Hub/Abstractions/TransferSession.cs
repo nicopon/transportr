@@ -16,4 +16,12 @@ public record TransferSession(
     Guid ReceiverId,
     DateTime CreatedAtUtc,
     DateTime ExpiresAtUtc
-);
+)
+{
+    /// <summary>
+    /// Whether the sender opened the transfer through its own request, rather than the host through
+    /// <see cref="ITransferInitiator"/>: only such a session counts against
+    /// <see cref="AccessOptions.MaxOpenTransfersPerClient"/>.
+    /// </summary>
+    public bool OpenedBySender { get; init; }
+}

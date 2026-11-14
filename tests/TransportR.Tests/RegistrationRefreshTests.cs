@@ -498,6 +498,7 @@ public class RegistrationRefreshTests
         public Task DeleteClientAsync(Guid clientId) => _inner.DeleteClientAsync(clientId);
         public Task SaveSessionAsync(TransferSession session) => _inner.SaveSessionAsync(session);
         public Task<TransferSession?> GetSessionAsync(string transferId) => _inner.GetSessionAsync(transferId);
+        public Task<int> CountTransfersOpenedByAsync(Guid senderId) => _inner.CountTransfersOpenedByAsync(senderId);
         public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry) => _inner.ExtendSessionExpiryAsync(transferId, newExpiry);
         public Task DeleteSessionAsync(string transferId) => _inner.DeleteSessionAsync(transferId);
     }

@@ -34,4 +34,30 @@ public class AccessOptions
     /// transfers, through <see cref="ITransferInitiator"/>.
     /// </summary>
     public bool ClientsMayOpenTransfers { get; set; } = true;
+
+    /// <summary>
+    /// How many transfers one client may be opening at once on this instance, each a request of its
+    /// whose handshake waits on the receiver. Default: 32; null for no ceiling. Zero or less is
+    /// refused at startup.
+    /// </summary>
+    /// <remarks>
+    /// A request past it is refused with a 429 before anything is written. Counted per instance,
+    /// where the handshake waits. A transfer the host opens through <see cref="ITransferInitiator"/>
+    /// is neither held to it nor counted.
+    /// </remarks>
+    public int? MaxHandshakesPerClient { get; set; } = 32;
+
+    /// <summary>
+    /// How many transfers one client may hold open among those it opened itself, on every instance
+    /// that shares the state store. Default: 256; null for no ceiling. Zero or less is refused at
+    /// startup.
+    /// </summary>
+    /// <remarks>
+    /// A request past it is refused with a 429 before anything is written. Counted on the sender, from
+    /// the sessions of the state store (<see cref="IStateStore.CountTransfersOpenedByAsync"/>). The
+    /// count and the write of the new session are two steps, so requests that arrive together can pass
+    /// it together, as many as <see cref="MaxHandshakesPerClient"/> lets in at once. A transfer the
+    /// host opens through <see cref="ITransferInitiator"/> is neither held to it nor counted.
+    /// </remarks>
+    public int? MaxOpenTransfersPerClient { get; set; } = 256;
 }

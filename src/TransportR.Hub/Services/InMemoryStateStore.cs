@@ -150,6 +150,14 @@ public class InMemoryStateStore : IStateStore
         return Task.FromResult<TransferSession?>(null);
     }
 
+    public Task<int> CountTransfersOpenedByAsync(Guid senderId)
+    {
+        var now = Now;
+        var count = _sessions.Count(entry =>
+            entry.Value.OpenedBySender && entry.Value.SenderId == senderId && entry.Value.ExpiresAtUtc > now);
+        return Task.FromResult(count);
+    }
+
     public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
         while (_sessions.TryGetValue(transferId, out var session) && session.ExpiresAtUtc > Now)

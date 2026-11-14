@@ -193,7 +193,7 @@ public class TokenRenewalRouteTests
             policy,
             reconciler,
             streams,
-            new TransferInitiator(streams, store, transfers, policy, affinity, NullLogger<TransferInitiator>.Instance, clock),
+            new TransferInitiator(streams, store, transfers, policy, affinity, Options.Create(new AccessOptions()), NullLogger<TransferInitiator>.Instance, clock),
             transfers,
             affinity,
             Options.Create(new DataPlaneConfiguration()),

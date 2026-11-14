@@ -44,6 +44,7 @@ public class ClosedConnectionTests
             _inner.RenewClientAsync(clientId, expectedSubject, groups, tokenExpiry);
         public Task SaveSessionAsync(TransferSession session) => _inner.SaveSessionAsync(session);
         public Task<TransferSession?> GetSessionAsync(string transferId) => _inner.GetSessionAsync(transferId);
+        public Task<int> CountTransfersOpenedByAsync(Guid senderId) => _inner.CountTransfersOpenedByAsync(senderId);
         public Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry) => _inner.ExtendSessionExpiryAsync(transferId, newExpiry);
         public Task DeleteSessionAsync(string transferId) => _inner.DeleteSessionAsync(transferId);
     }

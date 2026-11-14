@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,6 +12,7 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Hub;
+using TransportR.Hub.Interfaces;
 using TransportR.Protocol;
 using TransportR.Serialization.Json;
 using TransportR.Serialization.MessagePack; // Extension
@@ -902,6 +904,91 @@ public class TransferIntegrationTests
         Assert.Equal(transferId, send.TransferId);
         Assert.Equal(transferId, receive.TransferId);
     }
+
+    [Fact]
+    public async Task AClientAtItsCeilingOfOpenTransfers_IsRefusedBeforeAnythingIsWritten_ButNotTheHost()
+    {
+        var store = new SessionCountingStore();
+        using var host = TestHubServerFactory.CreateHost(services =>
+        {
+            services.Replace(ServiceDescriptor.Singleton<IStateStore>(store));
+            services.Configure<AccessOptions>(options => options.MaxOpenTransfersPerClient = 1);
+        });
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+        var hostSend = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += send => { hostSend.TrySetResult(send); return Task.CompletedTask; };
+        receiver.OnTransferStarted += _ => Task.CompletedTask;
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var first = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        Assert.Equal(1, store.SessionsSaved);
+
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        using (var refused = await RawHub.SendAsync(host, HttpMethod.Post, sender.ClientId, WireRoutes.TransfersSegment, token: null,
+                   new InitTransferRequest(receiver.ClientId, 1000)))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+            Assert.NotNull(await refused.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json));
+        }
+
+        Assert.Equal(1, store.SessionsSaved);
+
+        // The host's transfer is neither held to the client's ceiling nor counted against it.
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
+        await using var hostOpened = await hostSend.Task;
+
+        Assert.Equal(1, await store.CountTransfersOpenedByAsync(sender.ClientId));
+    }
+
+    [Fact]
+    public async Task AClientsHandshakePastItsCeiling_IsRefusedAtOnce_WhileItsOthersWaitOnTheReceiver()
+    {
+        const int ceiling = 2;
+        using var host = TestHubServerFactory.CreateHost(services =>
+            services.Configure<AccessOptions>(options => options.MaxHandshakesPerClient = ceiling));
+        var senderId = Guid.NewGuid();
+        var receiverId = Guid.NewGuid();
+
+        // A receiver that never answers holds each handshake for its whole timeout.
+        await using var senderStream = await RawHub.OpenAsync(host, senderId, token: null);
+        await using var receiverStream = await RawHub.OpenAsync(host, receiverId, token: null);
+        var transfers = host.Services.GetRequiredService<ITransferManager>();
+
+        var waiting = Enumerable.Range(0, ceiling).Select(_ => OpenRawTransferAsync(host, senderId, receiverId, timeoutMs: 3000)).ToList();
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (transfers.GetAllParticipants().Count < ceiling && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(ceiling, transfers.GetAllParticipants().Count);
+
+        using (var refused = await OpenRawTransferAsync(host, senderId, receiverId, timeoutMs: 3000))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+            Assert.All(waiting, handshake => Assert.False(handshake.IsCompleted, "the refusal waited for a handshake to end"));
+        }
+
+        // Each place is given back when its handshake ends, here by its timeout.
+        foreach (var handshake in waiting)
+        {
+            using var timedOut = await handshake;
+            Assert.Equal(HttpStatusCode.Conflict, timedOut.StatusCode);
+        }
+
+        using var after = await OpenRawTransferAsync(host, senderId, receiverId, timeoutMs: 0);
+        Assert.Equal(HttpStatusCode.Conflict, after.StatusCode);
+    }
+
+    private static Task<HttpResponseMessage> OpenRawTransferAsync(IHost host, Guid senderId, Guid receiverId, int timeoutMs) =>
+        RawHub.SendAsync(host, HttpMethod.Post, senderId, WireRoutes.TransfersSegment, token: null,
+            new InitTransferRequest(receiverId, timeoutMs)).WaitAsync(TimeSpan.FromSeconds(30));
 
     private static async Task AssertEventuallyEmptyAsync(TransportRClient<string> client)
     {

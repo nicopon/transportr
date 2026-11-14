@@ -92,6 +92,9 @@ public class TestProxyStateStore : IStateStore
         }
     }
 
+    public Task<int> CountTransfersOpenedByAsync(Guid senderId) =>
+        _httpClient.GetFromJsonAsync<int>($"/api/state/senders/{senderId}/opened-transfers");
+
     public async Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
         var response = await _httpClient.PutAsJsonAsync($"/api/state/sessions/{transferId}/expiry", newExpiry);
