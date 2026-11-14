@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Logging;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Protocol;
 

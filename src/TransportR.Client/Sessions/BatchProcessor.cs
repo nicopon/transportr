@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
-using TransportR.Protocol;
+using TransportR.Client.Protocol;
 
 namespace TransportR.Client.Sessions;
 

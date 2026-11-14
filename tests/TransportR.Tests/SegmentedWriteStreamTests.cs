@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using TransportR.Client.Internal;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Interfaces;
 using TransportR.Protocol;

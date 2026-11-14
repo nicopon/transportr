@@ -5,9 +5,9 @@ using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

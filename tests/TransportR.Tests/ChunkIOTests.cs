@@ -1,5 +1,5 @@
 using System.Buffers;
-using TransportR.Protocol;
+using TransportR.Client.Protocol;
 
 namespace POC_DataProxy.Tests;
 
@@ -345,12 +345,13 @@ public class ChunkIOTests
     }
 
     [Theory]
-    [InlineData(ChunkType.BatchAck)]
-    [InlineData(ChunkType.Complete)]
-    [InlineData(ChunkType.Abort)]
-    [InlineData((ChunkType)0xFF)]
-    public async Task WriteBatchAsync_WithANonBatchType_IsRefused(ChunkType type)
+    [InlineData((byte)ChunkType.BatchAck)]
+    [InlineData((byte)ChunkType.Complete)]
+    [InlineData((byte)ChunkType.Abort)]
+    [InlineData((byte)0xFF)]
+    public async Task WriteBatchAsync_WithANonBatchType_IsRefused(byte wireType)
     {
+        var type = (ChunkType)wireType;
         using var ms = new MemoryStream();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(

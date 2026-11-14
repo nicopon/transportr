@@ -1,10 +1,10 @@
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// Reason codes carried in an <see cref="ChunkType.Abort"/> chunk's
 /// <see cref="ChunkHeader.BatchId"/> field.
 /// </summary>
-public enum AbortReason
+internal enum AbortReason
 {
     /// <summary>The sending end released its transfer handle before the transfer completed.</summary>
     ReleasedBeforeCompletion = 1,
@@ -25,7 +25,7 @@ public enum AbortReason
     UndecodableBatch = 4,
 }
 
-public static class AbortReasonExtensions
+internal static class AbortReasonExtensions
 {
     public static string Describe(this AbortReason reason) => reason switch
     {

@@ -2,8 +2,8 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using TransportR.Client.Batching;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;
@@ -143,10 +143,11 @@ public class ReceivedChunkOwnershipTests
     }
 
     [Theory]
-    [InlineData(ChunkType.Pong)]
-    [InlineData((ChunkType)0xFF)]
-    public async Task AChunkThatIsNotABatch_HasItsPayloadReturnedOnce(ChunkType type)
+    [InlineData((byte)ChunkType.Pong)]
+    [InlineData((byte)0xFF)]
+    public async Task AChunkThatIsNotABatch_HasItsPayloadReturnedOnce(byte wireType)
     {
+        var type = (ChunkType)wireType;
         await using var processor = ByteProcessor();
         await processor.StartReceiverAsync();
         var owner = new CountingOwner([1, 2, 3, 4]);

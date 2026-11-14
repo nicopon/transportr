@@ -51,16 +51,6 @@ are disposed once the transfer has ended.
 
 The chunk types and the protocol flow are described in [TransportRArchitecture.md](https://github.com/nicopon/TransportR/blob/main/TransportRArchitecture.md).
 
-### Binary Header (v2)
-
-30-byte fixed header using `BinaryPrimitives` (zero external dependencies). The version byte is 2
-(`ChunkHeader.CurrentVersion`); a reader rejects any other value.
-
-```
-│ Version │ Type │ PayloadLen │ BatchId │ Count │ TransferId │ [Payload] │
-│ 1 byte  │ 1 b  │ 4 bytes    │ 4 bytes │ 4 b   │ 16 bytes   │ variable  │
-```
-
 ## Dependencies
 
 None: the core references no package beyond the .NET base library.

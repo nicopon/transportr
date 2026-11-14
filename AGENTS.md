@@ -111,9 +111,9 @@ host one of those types undoes that.
 
 ### Wire protocol
 
-Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR/Protocol/ChunkHeader.cs`:
+Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR.Client/Protocol/ChunkHeader.cs`:
 Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload. `ChunkIO`
-(`src/TransportR/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
+(`src/TransportR.Client/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
 `BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`, `StreamBatch`) are the whole vocabulary; `Abort`
 carries an `AbortReason` in `BatchId`, and `StreamBatch` is a `Batch` of a transfer without a serializer. Payload
 serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,

@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// The memory a chunk's payload is read into: an array rented from <see cref="ArrayPool{T}.Shared"/>,

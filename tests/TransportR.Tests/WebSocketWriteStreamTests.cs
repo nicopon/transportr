@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using TransportR.Client.Internal;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;

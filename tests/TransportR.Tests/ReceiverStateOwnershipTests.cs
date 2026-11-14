@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Runtime.InteropServices;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
-using TransportR.Protocol;
+using TransportR.Client.Protocol;
 
 namespace TransportR.Tests;
 

@@ -3,8 +3,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

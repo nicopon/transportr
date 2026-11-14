@@ -1,8 +1,8 @@
 using System.IO.Pipelines;
 using System.Net;
 using TransportR.Abstractions;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

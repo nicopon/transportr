@@ -1,9 +1,9 @@
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// Chunk type for wire protocol.
 /// </summary>
-public enum ChunkType : byte
+internal enum ChunkType : byte
 {
     Batch = 0x01,
     BatchAck = 0x02,     // Receiver acknowledges Batch receipt

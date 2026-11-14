@@ -1,4 +1,5 @@
 using System.Net.WebSockets;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Protocol;
 

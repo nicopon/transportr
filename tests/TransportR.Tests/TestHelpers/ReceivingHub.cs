@@ -1,4 +1,4 @@
-using TransportR.Protocol;
+using TransportR.Client.Protocol;
 
 namespace TransportR.Tests.TestHelpers;
 

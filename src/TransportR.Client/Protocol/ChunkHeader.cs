@@ -1,13 +1,13 @@
 using System.Buffers;
 using System.Buffers.Binary;
 
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// Binary chunk header for wire protocol.
 /// Fixed 30-byte header using native BinaryPrimitives (zero external dependencies).
 /// </summary>
-public readonly struct ChunkHeader
+internal readonly struct ChunkHeader
 {
     /// <summary>Fixed header size in bytes.</summary>
     public const int Size = 30;

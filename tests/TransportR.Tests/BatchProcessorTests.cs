@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 
 namespace TransportR.Tests;
 

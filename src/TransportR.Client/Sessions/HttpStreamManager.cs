@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
+using TransportR.Client.Protocol;
 using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;

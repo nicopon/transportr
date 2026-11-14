@@ -2,9 +2,9 @@ using System.Net;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client.Configuration;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Models;
-using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 using TransportR.Tests.TestHelpers;
 

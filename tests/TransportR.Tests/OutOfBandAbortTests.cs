@@ -1,6 +1,7 @@
 using System.Net;
 using TransportR.Abstractions;
 using TransportR.Client.Configuration;
+using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;

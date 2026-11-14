@@ -1,12 +1,12 @@
 using System.Buffers;
 
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// Chunk I/O operations for reading and writing protocol messages.
 /// Replaces ProtoProtocol with zero external dependencies.
 /// </summary>
-public static class ChunkIO
+internal static class ChunkIO
 {
     /// <summary>
     /// Writes a batch chunk (header + payload) to the stream.
@@ -200,7 +200,7 @@ public static class ChunkIO
 /// <summary>
 /// Represents a chunk read from the stream.
 /// </summary>
-public readonly struct ChunkData : IDisposable
+internal readonly struct ChunkData : IDisposable
 {
     /// <summary>Chunk header.</summary>
     public ChunkHeader Header { get; }

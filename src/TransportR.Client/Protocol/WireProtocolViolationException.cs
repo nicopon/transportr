@@ -1,4 +1,4 @@
-namespace TransportR.Protocol;
+namespace TransportR.Client.Protocol;
 
 /// <summary>
 /// Thrown when a peer sends a wire message this protocol version cannot interpret: an unsupported
@@ -10,7 +10,7 @@ namespace TransportR.Protocol;
 /// speaking a protocol this version does not understand is not, and reconnecting only repeats the
 /// same violation.
 /// </remarks>
-public class WireProtocolViolationException : Exception
+internal class WireProtocolViolationException : Exception
 {
     public WireProtocolViolationException(string message) : base(message)
     {
