@@ -53,7 +53,7 @@ says: a builder method on the client, an options class on the hub.
 | hub | `UploadEpoch.DefaultHoldBound` | 30 s | **fixed** | A segment waiting for the peer to read it: answered `202` with what got through, and the client sends the rest again. Below the 60 s a default nginx allows a request without an answer |
 | hub | `WebSocketInput.ProbeBound` | 10 s | **fixed** | Wait for a WebSocket's probe after the upgrade, the write-transport probe's included, above the client's 5 s so that the client is the one to decide about the path |
 | hub | `WebSocketInput.CloseBound` | 2 s | **fixed** | A `Close` the hub sends, and after a `Close(4409)` its wait for the client's own; the write-transport probe's wait for the client's `Close`, and its answer |
-| hub | `DataPlaneConfiguration.BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
+| hub | `DataPlaneConfiguration.BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub ends the transfer, which cancels the bridge |
 | hub | `DataPlaneConfiguration.TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
 | hub | `DataPlaneConfiguration.StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
 | hub | `BridgeCleanupService.SweepInterval` | 5 s | **fixed** | Interval between two `BridgeTimeoutSeconds` checks |
@@ -156,7 +156,7 @@ A batch body the receiver cannot decode is not a cut: it arrived whole, so a res
 receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead of reconnecting; the sender's
 `SendAsync` or `CompleteAsync` throws `TransferFailedException`. The other way round, a batch the sender cannot
 serialize fails the sender's session at once, and the receiver is told with `Abort` (`SerializationFailed`). Either
-`Abort` falls back on `POST /api/stream/{id}/abort` when it cannot be written within `AbortWriteTimeout`.
+`Abort` falls back on the abort request (§6) when it cannot be written within `AbortWriteTimeout`.
 
 What a cut is on a write stream depends on its transport (see "Data Plane Transport" in `TransportRArchitecture.md`).
 Over segments no connection stays open between two of them to fail: a cut is a segment that fails, which ends the epoch,
@@ -219,7 +219,7 @@ Recovery is the client's, and has two paths:
     The client answers by opening a new stream, which registers it afresh, and closes the old one
     once the new one is registered.
 -   A stream that ended (cut, closed by the hub, or silent for 30 s) is opened again after a delay
-    (see "Events stream, reopening" in Key Timings), and each opening registers the client. The
+    (`ControlChannel.FirstReopenDelay` in Key Timings), and each opening registers the client. The
     client then restarts the streams of its transfers at once rather than waiting for their next
     failure.
 
@@ -252,7 +252,9 @@ if (pong.NextExpectedBatchId > currentBatch.Id) {
 
 ### 3. Hub-Driven Timeout (Dead Transfer Cleanup)
 
-The Hub employs a **TransferCleanupService** that monitors all active transfers.
+The Hub employs a **TransferCleanupService** that monitors all active transfers. `BridgeCleanupService` judges something
+else: it ends, through `ITransferTerminator`, the transfer of a bridge left short of `Active` for `BridgeTimeoutSeconds`,
+waiting for a peer, and skips `Active` bridges, left to the policies below.
 
 -   **LastActivityUtc**: Updates on the per-transfer heartbeats, on the probe request (`…/ping`), and on every read the hub makes from one of the transfer's streams: the bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' heartbeats are silent.
 -   **Which hub instance judges**: the one that registered the transfer, or that accepted one of its streams. An instance that only looks the transfer up in the shared store (a misrouted request, a check whether the hub still holds it) starts no state, so its sweep never ends a transfer it does not carry.
@@ -260,7 +262,7 @@ The Hub employs a **TransferCleanupService** that monitors all active transfers.
 -   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration, or from the first of its streams it accepts. Because heartbeats and probes refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
 -   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
 -   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the hub refuses it when it starts, and the deployment has to name the longest outage it intends to survive before enabling it.
--   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request below) is cancelled on both clients with a `cancel-transfer` event. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
+-   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request, §6) is cancelled on both clients with a `cancel-transfer` event. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
 -   **Not a liveness check**: a transfer whose participant's token ran out, or whose groups may no longer reach each other, is ended by the access sweep instead (see "Token Renewal" in `SecurityArchitecture.md`).
 
 ### 4. Affinity Handoff (HA)
@@ -292,9 +294,11 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 $$\text{Window} = \text{MaxInFlightBatches} \times \text{batch size} \ge \text{RTT} \times \text{Bandwidth}$$
 On a 25 ms link aiming for 60–100 MB/s, BDP is 1.5–2.5 MB. A window smaller than this (such as 8 batches of 64 KB = 512 KB) starves the producer while waiting for acknowledgements across round-trips. For continuous streaming across WAN or cloud regions, 256 KB or 512 KB batches with an in-flight window of 4–8 MB maintain pipeline saturation while keeping memory bounded.
 
-A producer parked on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
+A producer parked in `SendAsync` on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
 
-The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does. An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB. The one thing that still gets through a full stream is a request of its own, so the sender then sends `POST /api/stream/{id}/abort` (for this case only) and the hub ends the transfer as a host terminating a run does: both participants are told to cancel. The receiver fails as for any transfer the hub ends, not with the `Abort`'s reason. Only the replica that carried the transfer's streams acts on the request: it holds the bridges and the event streams to tell. Behind a proxy with affinity the request has to follow the streams' cookie, which the session sets on it as on its streams; a hub that holds none of the transfer's bridges answers 404 and leaves it alone. Where the request cannot be made (the hub is unreachable, a proxy blocks the path, the hub predates the route) only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
+**An `Abort` can be lost.** The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does.
+
+**An `Abort` can also be stuck** behind data the receiver does not read, and it then goes as a request of its own (§6).
 
 The sender's window is taken **by the producer, before serialization** (in a `ByteStreamClient`, which has none, before the batch's buffer is rented). Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
 
@@ -305,6 +309,16 @@ That placement is also why the sender's window cannot count bytes: the serialize
 **Bytes are wire bytes** — the serialized payload as it arrived, charged to a chunk before it is decoded and returned item by item as the consumer takes them. It is the only size available without knowing what the item type costs on the heap, and it is not that cost: Arrow IPC bodies are close to their decoded buffers less whatever LZ4 saved, while MessagePack records decode to several times their wire size. Size the bound against that expansion.
 
 **A chunk larger than the whole budget — in either dimension — is still admitted into an empty buffer.** Refusing it would be a permanent stall rather than backpressure, since nothing can ever free room for it, and a chunk cannot be handed over in parts. Lowering either bound therefore throttles a transfer and cannot deadlock one.
+
+### 6. The Abort Request
+
+An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB.
+
+The one thing that still gets through a full stream is a request of its own. A participant whose `Abort` was not written within `AbortWriteTimeout` sends `POST /api/stream/{id}/abort`, for this case only, and the hub ends the transfer through `ITransferTerminator`, as for a host terminating a run: both participants are told to cancel. The receiver fails as for any transfer the hub ends (§3), not with the `Abort`'s reason. It is a request the hub acts on, not a message anyone listens for.
+
+- **Which instance acts.** Only the one that carried the transfer's streams: it holds the bridges and the event streams to tell. Behind a proxy with affinity the request follows the streams' cookie, which the session sets on it as on its streams (§4); a hub that holds none of the transfer's bridges answers 404 and leaves it alone.
+- **When it cannot be made** (the hub is unreachable, a proxy blocks the path, the hub predates the route), only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
+- **Who may send it**: either participant, admitted as on the stream routes ("Security Guarantees" in `SecurityArchitecture.md`).
 
 ---
 
@@ -392,7 +406,7 @@ stateDiagram-v2
 
 `Completed`, `Failed` and `Disposed` are final, and `Stopped` completes on the first of them. A released handle keeps an outcome it already has: releasing a completed session leaves it `Completed`.
 
-`Reconnecting` probes the hub with a request until it answers, 1 to 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
+`Reconnecting` probes the hub with a request until it answers, with a pause after each failed probe that doubles from 2 s to 15 s (*Key Timings*), and no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
 
 ### Client Internals
 
@@ -400,11 +414,15 @@ One `DataSession` per transfer. What runs, and who owns it:
 
 | Part | Owns | Runs on |
 |------|------|---------|
-| `DataSession` | The session loop (open the streams, reconnect, close), the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
+| `DataSession` | The session loop (open the streams, reconnect, close), the write and read loops it hands each attempt, the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
 | `HttpStreamManager` | One attempt at a time: two streams (data, control) under one cancellation source, the write one over a WebSocket or segments by `WriteTransportPolicy`. It reports how each attempt ended as a `StreamOutcome` (`Ended`, `Cancelled`, `Gone`, `Retryable`, `Fatal`), and sends the `abort` request | Two stream tasks per attempt |
-| `BatchProcessor` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, the dispatch of incoming chunks, the receiver's `ReceiverState` and the sink the client supplies | The serialization worker (sender); the read loop (both) |
+| `BatchProcessor` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, which reads the batches off the source the client builds, the dispatch of incoming chunks, the receiver's `ReceiverState` (order, duplicates) and the sink the client builds. It knows neither the item type nor whether the client carries items or bytes | The serialization worker (sender); the read loop (both) |
 | `BatchAccumulator<T>` | Items not yet in a batch; flushes by size or `BatchFlushIntervalMs`, and takes an in-flight slot per batch | The caller's thread, and a flush timer |
 | `ReconnectionHandler` | The probe request while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
+
+Above the sessions, `TransportRClient<T>` and `ByteStreamClient` both compose `ClientConnection`, what a client is to the
+hub whatever its transfers carry: the registration, the presence heartbeat, the token renewal and the `ControlChannel`, which
+holds the events stream, opens it again when it is lost, and makes the requests of the control plane.
 
 Each side writes one stream and reads the other. The write loop drains the outgoing channel and flushes once per drain; the read loop hands each chunk to `BatchProcessor`.
 

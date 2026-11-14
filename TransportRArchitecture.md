@@ -28,7 +28,7 @@ TransportR.Storage.Redis/                # Redis State Store implementation
 | **Network Simplification** | Single ingress point for all transfers |
 | **Dumb Pipe Architecture** | Hub forwards variable-length opaque bytes without deserialization |
 | **Reliable Delivery** | Packet-level ACK with automatic retry |
-| **Group-based Access** | Route transfers by logical groups |
+| **Group-based Access** | Groups taken from token scopes decide which client may send to which |
 | **Observability** | Hub-side byte counting and write transports via `IHubProgressMonitor` |
 
 ---
@@ -81,7 +81,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 2. **Data Plane (HTTP Streaming)**
     - **Role**: "The Pipe"
-    - **Methods**: `GET` (a WebSocket) or `POST` (segments) `/api/stream/{id}/send`, `GET /api/stream/{id}/receive`, and `POST /api/stream/{id}/abort` for the one case a stream cannot carry (see *Abort request* below)
+    - **Methods**: `GET` (a WebSocket) or `POST` (segments) `/api/stream/{id}/send`, `GET /api/stream/{id}/receive`, `POST /api/stream/{id}/abort` for the one case a stream cannot carry ("6. The Abort Request" in `ResilienceArchitecture.md`), and `/api/stream/probe/send` for the write-transport probe (below)
     - **Responsibility**: Moves batches of data. The **Hub** acts as a **Dumb Pipe**, forwarding opaque binary chunks from Sender to Receiver without inspecting or deserializing the payload.
 
 ### Communication Channels
@@ -94,7 +94,7 @@ TransportR clearly separates responsibilities between coordination and transfer:
 | **Data Receive** | HTTP GET (`/api/stream/{id}/receive`, Header: `X-Connection-Type: Data`) | Hub → Receiver |
 | **Control Send** | WebSocket or HTTP POST segments, as Data Send (Header: `X-Connection-Type: Control`) | ACKs Receiver → Hub |
 | **Control Receive** | HTTP GET (Header: `X-Connection-Type: Control`) | ACKs Hub → Sender |
-| **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written because the data in front of it fills the stream; the hub ends the transfer |
+| **Abort request** | HTTP POST (`/api/stream/{id}/abort`) | Participant → Hub, when its in-stream `Abort` cannot be written; the hub ends the transfer ("6. The Abort Request" in `ResilienceArchitecture.md`) |
 | **Token renewal** | HTTP PUT (`/api/client/{id}/token`) | Client → Hub, ahead of the token's expiry |
 
 Every control request names the client in its path and carries the token the client holds at that moment; with
@@ -229,7 +229,7 @@ For a deployment:
 TransportR utilizes a **Dataplane First** resilience strategy:
 
 - **Stream Handshake (Ping/Pong)**: After a cut, the client probes the hub with a request, then reopens its streams once it answers; a Ping/Pong on the new data stream tells the sender where the receiver stands.
-- **Packet-Level Resumption**: Receiver indicates the exact offset to resume from, eliminating the need for Hub-side state (Checkpoints).
+- **Packet-Level Resumption**: Receiver names the next batch it expects, the one to resume from, eliminating the need for Hub-side state (Checkpoints).
 - **Sender-side Buffering**: Payloads are kept until End-to-End ACK is received.
 - **Hub Lifecycle Management**: Hub terminates transfers that go silent (timeout), and, if configured, those that stop progressing.
 
@@ -321,26 +321,10 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 
 ## Integration
 
-See [README.md](./README.md) for code examples (Server, Sender, Receiver).
+See [README.md](./README.md) for code examples (Server, Sender, Receiver), and the hub's
+[README](./src/TransportR.Hub/README.md#transfers-the-host-opens) for transfers the host opens.
 
 ---
-
-## Tests
-
-Unit and integration tests cover the critical components:
-
-- `BatchAccumulator` — Flush strategies, batch IDs
-- `ReceiverState` — Ordering, duplicates
-- `ChunkIO` — Binary protocol read/write
-- `FlowControlService` — Group permissions, wildcards
-- `StateStore` — InMemory + Redis (a container, or a local `redis-server`)
-- `TransferManager` — Lifecycle (No persistence)
-
-Run: `dotnet test`
-
----
-
-
 
 ## Performance
 

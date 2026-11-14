@@ -123,59 +123,12 @@ internal class ClientOptions
     /// Maximum number of batches allowed in flight — flushed by the accumulator but not yet
     /// acknowledged by the receiver. <c>null</c> (the default) means unbounded.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// When set, the producer blocks in <c>SendAsync</c> once the window is full and resumes as
-    /// acknowledgements come back. This is the only backpressure path from the receiver to the
-    /// producer: TCP throttles the HTTP write, but nothing upstream of it. Left unbounded, a slow
-    /// receiver makes the sender hold the entire source in memory — bounding the receiver alone
-    /// does not prevent it.
-    /// </para>
-    /// <para>
-    /// A receiver that stops acknowledging — one that stopped early, or went away — never reopens
-    /// the window, so the blocked <c>SendAsync</c> fails with <c>TransferFailedException</c> once
-    /// nothing has been acknowledged for <see cref="CompleteStallTimeout"/>.
-    /// </para>
-    /// <para>
-    /// <b>Sizing.</b> The window counts <i>batches</i>, so the memory it bounds is roughly
-    /// <c>MaxInFlightBatches × batch size</c>. A window too small costs throughput — the producer
-    /// idles waiting for acknowledgements — and the right value depends on how large a batch is,
-    /// which only the caller knows. This is why there is no default: for item-sized POCOs the
-    /// unbounded behaviour is a memory spike, but for multi-megabyte payloads it is the process.
-    /// On high-latency or WAN links, size the window to at least the bandwidth-delay product
-    /// (<c>RTT × bandwidth</c>) to prevent the sender from stalling between acknowledgements.
-    /// </para>
-    /// </remarks>
     public int? MaxInFlightBatches { get; set; }
 
     /// <summary>
     /// How much the receiver may hold for a consumer that is behind, before the incoming stream
     /// is made to wait. <c>null</c> (the default) means unbounded.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This is the receiving end of the same backpressure <see cref="MaxInFlightBatches"/>
-    /// applies at the other, and the two compose: a full receive buffer parks the read loop,
-    /// which withholds the acknowledgement that would reopen the sender's window. Left unset at
-    /// both ends, nothing anywhere pushes back and a slow consumer is paid for in memory.
-    /// </para>
-    /// <para>
-    /// <b>Unbounded by default, for the same reason the send window is.</b> The right figure
-    /// depends on how large an item is, which only the caller knows, and a default would be a
-    /// guess dressed as a safeguard. Set it.
-    /// </para>
-    /// <para>
-    /// <b>Two dimensions, because neither alone is a bound.</b> A count of items says nothing
-    /// when an item is a multi-megabyte Arrow record batch; a byte budget is a clumsy way to
-    /// hold ten thousand small records. Declare both and the first one reached binds. The byte
-    /// figure is <i>wire</i> bytes — see <see cref="BufferCapacity"/> for what that does and does
-    /// not measure.
-    /// </para>
-    /// <para>
-    /// A single chunk larger than the byte bound is still admitted, so lowering this throttles a
-    /// transfer and cannot stall one.
-    /// </para>
-    /// </remarks>
     public BufferCapacity? ReceiveBufferCapacity { get; set; }
 
     /// <summary>
