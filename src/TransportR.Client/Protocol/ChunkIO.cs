@@ -96,7 +96,7 @@ internal static class ChunkIO
     /// </summary>
     /// <param name="maxPayloadLength">
     /// The largest payload accepted. The length comes off the wire, so it is checked before any memory
-    /// is rented for it: a larger one is a <see cref="WireProtocolViolationException"/>.
+    /// is rented for it: a negative length, or one above this, is a <see cref="WireProtocolViolationException"/>.
     /// </param>
     /// <param name="allowedBy">What sets that bound, as the refusal names it.</param>
     /// <returns>
@@ -110,7 +110,12 @@ internal static class ChunkIO
     {
         var read = await ChunkHeader.ReadFromStreamAsync(stream, ct).ConfigureAwait(false);
         if (read is not { } header) return null;
-        if (header.PayloadLength <= 0) return (header, null);
+        if (header.PayloadLength < 0)
+        {
+            throw new WireProtocolViolationException($"A chunk announced a payload of {header.PayloadLength} bytes.");
+        }
+
+        if (header.PayloadLength == 0) return (header, null);
         if (header.PayloadLength > maxPayloadLength)
         {
             throw new WireProtocolViolationException(

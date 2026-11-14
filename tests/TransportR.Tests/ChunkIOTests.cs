@@ -189,6 +189,23 @@ public class ChunkIOTests
         Assert.Null(result);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public async Task ChunkIO_ReadOwnedChunkAsync_ANegativeAnnouncedLength_IsAProtocolViolation(int announced)
+    {
+        // Arrange: a header only, as a peer announcing a length that is no length would send it.
+        var header = new byte[ChunkHeader.Size];
+        ChunkHeader.CreateBatch(Guid.NewGuid(), batchId: 0, count: 1, payloadLength: announced).WriteTo(header);
+        using var ms = new MemoryStream(header);
+
+        // Act
+        var violation = await Assert.ThrowsAsync<WireProtocolViolationException>(() => WireChunks.ReadAsync(ms).AsTask());
+
+        // Assert
+        Assert.Contains(announced.ToString(), violation.Message);
+    }
+
     [Fact]
     public async Task ChunkIO_MultipleChunks_PreservesAll()
     {
