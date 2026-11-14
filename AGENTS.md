@@ -6,15 +6,18 @@ This file provides guidance when working with code in this repository.
 
 TransportR is a .NET library for bulk data transfer between applications through a centralized hub
 (HTTP requests and server-sent events for control, HTTP streaming for data), for network-segmented
-environments. It is explicitly **not** a message broker: no pub/sub, no hub-side persistence/replay, point-to-point transfers only. See README.md for
-the pitch/comparison-to-Kafka-and-gRPC, and the three docs below for the design.
+environments. It is explicitly **not** a message broker: no pub/sub, no hub-side persistence/replay, point-to-point
+transfers only. See README.md for the pitch/comparison-to-Kafka-and-gRPC. The design lives in three documents, which this
+file points into rather than repeats:
 
-- `TransportRArchitecture.md` — control plane (requests and a stream of server-sent events) vs data plane
-  (HTTP streaming) split, binary wire protocol (30-byte `ChunkHeader` + opaque payload), HA model.
-- `ResilienceArchitecture.md` — "Dataplane First" resilience: resume point via in-stream Ping/Pong
-  (streams reopen once a probe request answers), packet-level resumption, the EOF "domino sequence"
-  that terminates a transfer.
-- `SecurityArchitecture.md` — JWT/OAuth2, `transportr:group:*` scopes, dev vs production auth mode.
+- `TransportRArchitecture.md` — projects, control plane vs data plane, the data plane's transport (HTTP/1.1, WebSocket or
+  segments), binary wire protocol, HA.
+- `ResilienceArchitecture.md` — the table of timings, disconnection and registration lifetime, resumption (probe, then
+  in-stream Ping/Pong), the reapers, backpressure, the abort request, the EOF "domino sequence", the client's internals.
+- `SecurityArchitecture.md` — JWT/OAuth2, `transportr:group:*` scopes, flow control, what each plane admits, token
+  renewal, dev vs production auth mode.
+
+The package READMEs under `src/` are for users: the hub's covers its integration and the transfers its host opens.
 
 ## Build & Test
 
@@ -32,10 +35,9 @@ dotnet test --collect:"XPlat Code Coverage"
 prefer it when you need the sample/test binaries under `bin/Release/net10.0/` for a benchmark run,
 since `run-benchmark.sh --no-build` execs those directly.
 
-Redis-backed tests (`RedisStateStoreTests`) run on a Testcontainers `redis:7.0` when Docker answers,
-and otherwise on a `redis-server` already on the machine (`tools/`, `PATH`, `/opt/homebrew/bin`),
-started on a free port per test (`tests/TransportR.Tests/RedisServer.cs`). They are decorated with
-`[RedisAvailableFact]` and auto-skip (not fail) only when neither exists. Nothing installs Redis for you.
+Redis-backed tests (`RedisStateStoreTests`, `[RedisAvailableFact]`) run on a Testcontainers `redis:7.0` when Docker
+answers, and otherwise on a `redis-server` already on the machine; they auto-skip (not fail) only when neither exists
+(`tests/TransportR.Tests/README.md`). Nothing installs Redis for you.
 
 ### End-to-end / benchmark scenarios
 
@@ -67,175 +69,66 @@ cookie-based sticky sessions) fronting two `DataHub` instances on ports 5001/500
 clients at the proxy — this is the local reference setup for exercising the affinity redirect (a 421 answered
 to an `InitTransfer`) and per-transfer affinity; `ha-transfer-affinity` is its acceptance scenario.
 
-## Architecture
+## Decisions not to reverse
 
-### Control plane vs data plane
+Each is described where its pointer leads. A change that undoes one is the owner's decision, not a refactor.
 
-This split is the central design decision and shows up everywhere: the control plane
-(`ClientController`, everything under `/api/client/{clientId}`) only ever does presence/discovery/handshake
-— a client's stream of server-sent events, which registers it, plus ordinary requests for `receivers`,
-`transfers`, `replies`, `presence`, the transfer heartbeats and the probe a reconnecting session makes
-before it reopens its streams — and never touches bulk bytes. Data itself moves
-over plain HTTP (`StreamController`: a read stream is one long `GET /api/stream/{id}/receive`; a write
-stream is a WebSocket, `GET /api/stream/{id}/send` with an upgrade, or, as the fallback, a succession of short
-`POST /api/stream/{id}/send` segments, each at an offset in an epoch), with the hub acting as a **dumb pipe** that forwards opaque chunks
-without deserializing them or parsing their headers: only the clients read a `ChunkHeader`, and a
-change that has the hub read one (to see a `Complete` or an `Abort`, say) reverses this decision
-rather than extending it. What the hub reads of a write stream is its transport's: a segment's epoch and offset,
-a WebSocket's probe and `Close` status. Reliability, the resume point and even transfer-completion detection are
-data-plane mechanisms (in-stream Ping/Pong, EOF detection) specifically to avoid control-vs-stream
-race conditions. The hub judges a transfer's activity on
-its heartbeats and on the bytes its streams carry, counted and never read, and a sender's data stream on its
-silence (two presence intervals without a segment, or without a byte on a WebSocket, is a cut stream). Don't reintroduce a
-control-plane message for something the data plane already decides (see "Why Not Control Plane?"
-in `ResilienceArchitecture.md`). The one request of the data plane that carries no stream is `POST /api/stream/{id}/abort` (`StreamController.Abort`): a participant whose in-stream `Abort`
-cannot overtake the data in front of it (a full stream carries nothing more) asks the hub to end the
-transfer, which the hub does through `ITransferTerminator`. It is for that case only — the data plane
-cannot decide it — and it stays a request the hub acts on, not a message anyone listens for.
+### Hub and planes
 
-The data plane is HTTP/1.1 on purpose, pinned in `HttpStreamManager`, a WebSocket's upgrade included: do not enable
-HTTP/2 without reading "Data Plane Transport" in `TransportRArchitecture.md` (a continuous upload was capped by the
-flow-control window; segments under HTTP/2 have not been measured, and a WebSocket over HTTP/2 is excluded). The
-client chooses the write transport (`WriteTransportPolicy`), and a fallback from WebSocket to segments is
-observable, never silent: in its log and on `TransferInfo`.
+- **The hub never reads a frame.** It forwards opaque chunks: only the clients read a `ChunkHeader` (internal to
+  `TransportR.Client`, which the hub does not reference), and what the hub reads of a write stream is its transport's. A
+  change that has the hub read one reverses this decision rather than extending it ("Data Plane Transport" in
+  `TransportRArchitecture.md`).
+- **The data plane decides what it can.** Resumption and the end of a transfer are data-plane mechanisms, to avoid
+  control-vs-stream races: don't reintroduce a control-plane message for something the data plane already decides ("Why
+  Not Control Plane?" in `ResilienceArchitecture.md`).
+- **The abort request is for one case**, an `Abort` that cannot overtake the data in front of it, and stays a request the
+  hub acts on, not a message anyone listens for (§6 in `ResilienceArchitecture.md`). The write-transport probe, the other
+  data-plane route with no transfer's bytes, decides nothing ("Data Plane Transport" in `TransportRArchitecture.md`).
+- **The data plane is HTTP/1.1 on purpose** (`HttpStreamManager`, a WebSocket's upgrade included), and a fallback from
+  WebSocket to segments is observable, never silent: read "Data Plane Transport" before changing either.
+- **The control plane's wire form is internal** (`ControlPlane` and its records, `ClientController`, `ControlChannel`);
+  what is public is the path segments of `WireRoutes`. A change that hands a host one of those types undoes that.
+- **The handshake lives in `TransferInitiator`**, for a sender that asks (`ClientController.InitTransfer`) and for the
+  host (`ITransferInitiator`), so authorization and the cleanup of a half-done handshake cannot drift between the two
+  ("Transfers the host opens" in `src/TransportR.Hub/README.md`).
 
-The handshake itself lives in `TransferInitiator`, not in the controller: `ClientController.InitTransfer`
-drives it for a sender that asks, and `ITransferInitiator` for the application hosting the hub,
-which opens a transfer between two registered clients without either asking. One implementation,
-so authorization and the cleanup of a half-done handshake cannot drift between the two.
+### State and lifecycle
 
-The control plane's wire form is internal: the events, their data and the request bodies (`ControlPlane`
-and its records), `ClientController` and the client's `ControlChannel` are not public, so it can change
-without breaking the API. What is public is the path segments of `WireRoutes`. A change that hands a
-host one of those types undoes that.
+- **`IStateStore` is the home of every state HA shares** (`src/TransportR.Hub/Abstractions/IStateStore.cs`: in memory,
+  Redis, and `TestProxyStateStore` for the HA harness, not a product feature): a new state-carrying concept for HA goes
+  there, not in a hub-local field. The per-transfer progress counters stay local on purpose, which is why HA requires
+  effective affinity ("High Availability" in `TransportRArchitecture.md`).
+- **Registrations outlive their stream**, so a reconnect reclaims them, and `GetReceivers` never filters on
+  `DisconnectedAtUtc`. The presence heartbeat keeps them, not a transfer's heartbeat (§1b, §1c in
+  `ResilienceArchitecture.md`).
+- **The state machines take events, not target states** (`BridgeStateMachine`, `DataSessionStateMachine`), and derive
+  flags such as `SenderConnected` from the state. A change to transfer lifecycle belongs there, not in ad-hoc flags in
+  `ConnectionBridge`/`TransferManager`; their tests drive them directly ("Client State Machine" in
+  `ResilienceArchitecture.md`).
+- **Only a clean end of the sender's data stream retires a transfer** (its final segment, or `Close(4000)`); a rupture
+  may resume ("Transfer Completion: EOF Domino Sequence" in `ResilienceArchitecture.md`).
+- **Liveness and rights are judged apart.** The reapers judge
+  silence, and progress only where `StalledProgressTimeoutSeconds` is set, since a reconnection looks like a stall (§3 in
+  `ResilienceArchitecture.md`); the access sweep judges rights ("Token Renewal" in `SecurityArchitecture.md`).
 
-### Wire protocol
+### Client and access
 
-Every chunk is a fixed 30-byte `ChunkHeader` (`src/TransportR.Client/Protocol/ChunkHeader.cs`:
-Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload. `ChunkIO`
-(`src/TransportR.Client/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
-`BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`, `StreamBatch`) are the whole vocabulary; `Abort`
-carries an `AbortReason` in `BatchId`, and `StreamBatch` is a `Batch` of a transfer without a serializer. Payload
-serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,Json,Arrow}`
-are interchangeable implementations; the hub never needs to know which one is
-in use because it never deserializes the payload. The item type sits on the interface, not on the
-call, so a serializer that cannot carry a client's item type (`WithArrowSerialization()` on anything
-but `RecordBatch`) is a compile error rather than a throw on the first batch — `MessagePack` and `Json` are generic
-over `T`, `Arrow` closes over `RecordBatch`.
-
-### Project layering
-
-```
-src/TransportR                          # Protocol, interfaces, models — no ASP.NET Core/hub deps
-src/TransportR.Client                   # Client: TransportRClient<T>, ControlChannel, batching, OAuth2 client credentials
-src/TransportR.Hub                      # Hub: ClientController (control) + StreamController (data), BridgeManager, group flow control
-src/TransportR.Serialization.{MessagePack,Json,Arrow}  # IBatchSerializer<T> implementations
-src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
-src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
-```
-
-`IStateStore` (`src/TransportR/Interfaces/IStateStore.cs`) is the abstraction that makes HA possible:
-client registrations and `TransferSession`s go through it, with three implementations —
-`InMemoryStateStore` (default, single hub), `RedisStateStore` (HA, shared across hub instances), and
-`TestProxyStateStore` in `samples/DataHub`, the adapter of the reference HA harness, which forwards to `ProxyStateStore` in `TransportR.TestProxy` (not a product feature).
-A new state-carrying concept for HA needs a home in this interface, not a hub-local field.
-
-Client registrations outlive their stream on purpose (a reconnect reclaims them), so they are
-marked `DisconnectedAtUtc` rather than deleted, and evicted after `DisconnectedGraceSeconds`
-(`ClientRegistryConfiguration`). `GetReceivers` exposes the marker and never filters on it: a caller
-finding nobody fails outright, whereas one trying a dead client retries.
-
-Presence is kept alive by `POST /api/client/{id}/presence/{connectionId}` (`ClientController.Presence`),
-sent every `PresenceHeartbeatInterval` independently of any transfer and answered 404 when the hub no
-longer knows the stream, so the client registers again. It is also the client's proof of life: the
-stream announces the interval when it opens, and the hub closes one it has heard nothing from for two of
-them. The per-transfer heartbeat (`…/transfers/{id}/heartbeat`) cannot serve this: it only exists while a
-transfer does and it feeds `TransferState`, not the registration.
-
-### Sender/receiver client model
-
-`TransportRClient<T>` implements both `IDataSender<T>` and `IDataReceiver<T>`
-(`src/TransportR/Interfaces/ITransportRClient.cs`). A sender calls `InitTransferAsync` to get a
-`Send<T>` handle (`src/TransportR/Abstractions/Send.cs`); a receiver registers `OnTransferStarted`
-and consumes a `Receive<T>` handle via `IAsyncEnumerable`; `ByteStreamClient` (from `ByteStreamClientBuilder(batchBytes)`)
-does the same for a stream of bytes through `ByteSend`/`ByteReceive`, and both compose the internal `ClientConnection`. A transfer the host opens reaches the
-sender through `OnSendRequested` instead; a client with no handler refuses it. `BatchAccumulator` buffers items
-client-side and flushes by size or timeout; `BatchProcessor` drives the per-transfer send/receive
-loop; `ReceiverState` tracks ordering/dedup on the receiving side and hands the batches, in order, to
-the sink the client built (over a `ReceiveBuffer`), as the send worker reads them from the source it built:
-neither knows the item type or the mode. `ControlChannel` owns the stream of events and the requests made of the control
-plane, and opens the stream again when it is lost; `HttpStreamManager` owns the data-plane
-streams, picks what carries each write stream and reports how every attempt ended, and `DataSession` reopens them
-after a cut (the hub never proactively notifies clients of a disconnect — see "Disconnection Detection" in
-`ResilienceArchitecture.md`).
-
-### Hub-side lifecycle
-
-`ConnectionBridge` + `BridgeStateMachine` model one active transfer as a bridge between a sender
-stream and a receiver stream (`BridgeManager` is only the `ConcurrentDictionary` that keys them by
-`transferId:ConnectionType`). `BridgeStateMachine` takes **events**, not target states —
-`OnSenderRegistered`/`OnSenderLost`/… — and picks the resulting state itself, so a caller cannot
-drive it into a state its table forbids, and `SenderConnected`/`ReceiverConnected` are derived from
-the state rather than stored beside it. Its client-side counterpart, `DataSessionStateMachine`
-(driven by `DataSession`), takes events for the endings (`OnStreamsLost`, `OnReleased`, `OnAborted`,
-`OnEndedByHub`) and `TransitionTo` for the rest, which refuses a move out of a terminal state, and out
-of a receiver's closing phase to anything but one. They
-are directly unit-tested (`BridgeStateMachineTests.cs`, `ConnectionBridgeTests.cs`,
-`DataSessionStateMachineTests.cs`) — a
-change to transfer lifecycle belongs in the state machine, not scattered as ad-hoc flags in
-`ConnectionBridge`/`TransferManager`.
-A transfer ends well when the sender's data stream ends cleanly (its final segment, or a WebSocket's `Close(4000)`): the bridge takes `OnCompleted` and
-`ITransferRetirer.RetireAsync` (internal) removes the state and both bridges, telling nobody. Only that
-signal retires; a rupture may resume. It is why a completed sender's `DisposeAsync` waits for the answer to that end,
-and a completed receiver's for its data GET, which the hub ends after it: a GET cut sooner cuts the end.
-`BridgeCleanupService`/`TransferCleanupService` are the reaper, and they judge different things:
-`BridgeCleanupService` cancels a bridge idle for `BridgeTimeoutSeconds` (300s), ending its transfer
-through `ITransferTerminator`, and **skips `Active` bridges entirely**; `TransferCleanupService`
-terminates a transfer with no activity at all for
-`TransferInactivityTimeoutSeconds` (60s) — it knows a transfer from its registration or the first stream
-it accepts, never from a heartbeat or a lookup — and, only if `StalledProgressTimeoutSeconds` is set,
-off by default — one that is alive but making no progress. Heartbeats and stream bytes refresh activity but
-not progress, which is why the second check exists and why it is opt-in (a reconnection looks like a
-stall from the hub). The other place the hub unilaterally ends a transfer is `AccessSweepService`/
-`AccessReconciler`, which judge a participant's right to act, not its liveness (see "Auth").
-
-### Backpressure
-
-Both ends can be bounded, the two compose, and **both are `null` by default** — see
-"Backpressure" in `ResilienceArchitecture.md`. Opt-in is deliberate: the right figure depends on
-item size, which only the caller knows, so a default would be a guess nobody goes looking for.
-`Build()` warns when neither is set.
-
-The sender's `MaxInFlightBatches` counts **batches**, and its slot is taken *by the producer,
-before serialization* (in a `ByteStreamClient`, which has none, before the batch's buffer is rented) — moving it behind the serializer converts a managed backlog into an
-off-heap one. That placement is also why it cannot count bytes: the serialized size is not known
-yet. It does not need to, because the receiver's `ReceiveBufferCapacity` reaches it — a full
-receive buffer parks the read loop, which withholds the ack that reopens the send window.
-
-`ReceiveBufferCapacity` counts **items and wire bytes**, whichever binds first: an item count is
-not a bound when an item is an Arrow record batch, and a byte budget is a clumsy one for small
-records. A chunk larger than the whole budget, in either dimension, is still admitted into an
-empty buffer — the bound must throttle, never stall, and a batch is handed to the consumer whole
-or not at all, because a resend cannot name anything smaller. `null` means no bound; a `BufferCapacity` with neither
-dimension set is refused rather than treated as one.
-
-### Auth
-
-Groups are derived from JWT scopes (`transportr:group:senders`/`transportr:group:receivers`), never
-trusted from client-supplied data, so `IFlowControlService` authorization is only as strong as the
-IdP issuing those scopes. `EnableAuth=false` (default) is dev mode: the hub trusts whatever group the
-client claims — never conflate this with production. `TransportR.Auth.SimpleIdp` /
-`samples/TestIdp` exist purely so a scenario can exercise the real JWT path without an external IdP;
-they are not meant to be production identity providers.
-
-Whether a token is still good, whether a client holds any right, whether it may send to another and
-whether two identities are one is decided once, by `AccessPolicy`, for registration (opening the
-stream), `InitTransfer`, `GetReceivers`, the data plane, renewal and the sweep — a new surface asks it
-rather than keeping a copy. On every control route the `clientId` of the path has to be the identity the
-request's token attests (dev mode attests none, and compares none). A client renews its token ahead of
-the expiry (`PUT /api/client/{id}/token`), or when its host asks (`RefreshRegistrationAsync`), and the hub
-closes a client's stream, and ends its transfers, when that does not happen: see "Token Renewal" in
-`SecurityArchitecture.md`.
+- **Backpressure is opt-in at both ends, `null` by default**: the right figure depends on item size, which only the
+  caller knows, and `Build()` warns when neither is set. The sender's window counts batches, taken before serialization;
+  the receiver's bound counts items and wire bytes and throttles, never stalls; a `BufferCapacity` that bounds nothing is
+  refused (§5 in `ResilienceArchitecture.md`).
+- **The item type sits on `IBatchSerializer<T>`**, so a serializer that cannot carry it is a compile error, not a throw
+  on the first batch ("Contracts" in `src/TransportR.Client/README.md`).
+- **Groups come from JWT scopes, never from client-supplied data**, so authorization is only as strong as the IdP. Dev
+  mode (`UseDevMode()`; `EnableAuth=false` in `samples/DataHub`) trusts whatever group a client claims: never conflate it
+  with production, nor `TransportR.Auth.SimpleIdp` and `samples/TestIdp` with identity providers ("Scope Convention" and
+  "Development vs Production Mode" in `SecurityArchitecture.md`).
+- **`AccessPolicy` alone decides** whether a token is good, a right held, a send allowed and two identities one: for
+  registration, `InitTransfer`, `GetReceivers`, the data plane, renewal, the sweep, and, through `RegisteredCaller`, every
+  route that acts for a registered client, the write-transport probe included. A new surface asks it rather than keeping
+  a copy. On every control route the path's `clientId` has to be the identity the request's token attests ("Security
+  Guarantees" and "Token Renewal" in `SecurityArchitecture.md`).
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 
@@ -256,10 +149,11 @@ closes a client's stream, and ends its transfers, when that does not happen: see
   and leave a one-line pointer. `./scripts/lint-comments.sh` enforces this and runs in CI ahead
   of the build.
 - **A doc comment outlives nothing.** When a member goes, its `///` block goes with it.
-- **Prose has a budget, and it is spent.** The transfer lifecycle is already described in this
-  file, three `*Architecture.md` files, six package READMEs and the XML docs. Before describing
-  a mechanism in a fifth place, delete one of the four — two sources for one subject are two
-  sources that will diverge. A new document needs the same justification as a new interface.
+- **Prose has a budget, and it is spent.** The transfer lifecycle is already described in three
+  `*Architecture.md` files, eight package READMEs and the XML docs; this file only points into them.
+  Before describing a mechanism in a fourth place, delete one of the three — two sources for one
+  subject are two sources that will diverge. A new document needs the same justification as a new
+  interface.
 - **Say what you did not check.** A `Verified:` line names what was run; when a change or a review
   touched only part of a surface, it also names what it did not cover ("7 of 94 source files",
   "unit tests only, no scenario"). Verification that does not state its perimeter reads as if it
