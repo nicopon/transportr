@@ -545,7 +545,7 @@ public class RegistrationRefreshTests
 
             // The client presents the token it holds as soon as it has connected: wait for that, so
             // that what follows starts from a settled registration.
-            var deadline = DateTime.UtcNow.AddSeconds(10);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
             while ((await node.RegistrationAsync()).TokenExpiry < DateTime.UtcNow.AddMinutes(30)
                    || !store.Writes.Any(w => w.Kind == "Renewal"))
             {

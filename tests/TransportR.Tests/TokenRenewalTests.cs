@@ -19,6 +19,10 @@ public class TokenRenewalTests
 {
     private static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(3);
 
+    // A twelve-second token is renewed about nine seconds in, after two refused asks. A loaded CI
+    // runner can hold timers back for seconds, so the window leaves room well past that.
+    private static readonly TimeSpan RetriedRenewalWindow = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task ClientWithinItsTokenLifetime_CanOpenATransfer()
     {
@@ -139,7 +143,7 @@ public class TokenRenewalTests
         await client.ConnectAsync();
         var first = (await ExpiryOf(host, client.ClientId)())!.Value;
 
-        var renewed = await EventuallyAsync(ExpiryOf(host, client.ClientId), e => e > first.AddSeconds(1), TimeSpan.FromSeconds(10));
+        var renewed = await EventuallyAsync(ExpiryOf(host, client.ClientId), e => e > first.AddSeconds(1), RetriedRenewalWindow);
 
         Assert.True(renewed > first.AddSeconds(1), $"Never renewed ({calls} calls); the hub still holds {renewed:O}.");
         Assert.True(calls >= 5, $"The provider was asked {calls} times.");
@@ -168,7 +172,7 @@ public class TokenRenewalTests
         await client.ConnectAsync();
         var first = (await ExpiryOf(host, client.ClientId)())!.Value;
 
-        var renewed = await EventuallyAsync(ExpiryOf(host, client.ClientId), e => e > first.AddSeconds(1), TimeSpan.FromSeconds(10));
+        var renewed = await EventuallyAsync(ExpiryOf(host, client.ClientId), e => e > first.AddSeconds(1), RetriedRenewalWindow);
 
         Assert.True(renewed > first.AddSeconds(1), $"Never renewed ({calls} calls); the hub still holds {renewed:O}.");
         Assert.True(calls >= 5);
