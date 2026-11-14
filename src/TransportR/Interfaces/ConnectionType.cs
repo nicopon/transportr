@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR;
 
 /// <summary>
 /// Specifies the type of connection for streaming.

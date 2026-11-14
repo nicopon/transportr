@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IO;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
-using TransportR.Protocol;
 
 namespace TransportR.Client;
 

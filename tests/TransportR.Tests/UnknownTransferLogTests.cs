@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

@@ -13,7 +13,6 @@ using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Identity;
 using TransportR.Interfaces;
-using TransportR.Protocol;
 using TransportR.Services;
 
 namespace TransportR.Hub;

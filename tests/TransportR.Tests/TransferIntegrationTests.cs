@@ -7,15 +7,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Configuration;
-using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Serialization.Json.Services;
 using TransportR.Serialization.MessagePack; // Extension

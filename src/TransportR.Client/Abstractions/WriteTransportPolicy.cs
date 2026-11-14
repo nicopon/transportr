@@ -1,7 +1,7 @@
 namespace TransportR.Client;
 
 /// <summary>
-/// Which <see cref="TransportR.Models.WriteTransport"/> a client may use.
+/// Which <see cref="WriteTransport"/> a client may use.
 /// </summary>
 public enum WriteTransportPolicy
 {

@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR;
 
 /// <summary>
 /// Information about a connected client.

@@ -4,7 +4,6 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
-using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
 
 namespace TransportR.Tests.Infrastructure;

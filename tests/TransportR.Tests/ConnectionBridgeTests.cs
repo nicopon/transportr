@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Tests;

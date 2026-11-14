@@ -1,4 +1,4 @@
-namespace TransportR.Protocol;
+namespace TransportR;
 
 /// <summary>
 /// What the hub answers to a renewal: the expiry it recorded, read off the token its own host

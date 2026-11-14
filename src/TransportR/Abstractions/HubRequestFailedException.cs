@@ -1,4 +1,4 @@
-namespace TransportR.Abstractions;
+namespace TransportR;
 
 /// <summary>
 /// Thrown when the hub refuses a request, or cannot carry it out.

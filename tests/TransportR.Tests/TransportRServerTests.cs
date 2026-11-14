@@ -13,7 +13,6 @@ using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;
-using TransportR.Protocol;
 using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 

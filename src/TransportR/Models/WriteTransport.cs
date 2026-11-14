@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR;
 
 /// <summary>
 /// What carries a client's write stream: the sender's data, the receiver's acknowledgements. Read

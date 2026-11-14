@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TransportR.Hub;
 using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 

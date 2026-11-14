@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Net.ServerSentEvents;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Protocol;
 

@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;

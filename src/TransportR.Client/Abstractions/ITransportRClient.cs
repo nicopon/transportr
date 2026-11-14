@@ -1,6 +1,4 @@
 // Re-export abstract classes from Abstractions namespace for backward compatibility
-using TransportR.Abstractions;
-using TransportR.Models;
 
 namespace TransportR.Client;
 

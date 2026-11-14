@@ -3,7 +3,6 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

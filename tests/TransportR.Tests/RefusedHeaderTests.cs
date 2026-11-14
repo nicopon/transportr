@@ -1,7 +1,6 @@
 using System.Net;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Hosting;
-using TransportR.Interfaces;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 

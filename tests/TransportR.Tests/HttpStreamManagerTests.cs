@@ -163,7 +163,7 @@ public class HttpStreamManagerTests
             Assert.Equal(HttpVersion.Version11, request.Version);
             Assert.Equal(HttpVersionPolicy.RequestVersionExact, request.VersionPolicy);
         });
-        Assert.Equal(TransportR.Models.WriteTransport.Segments, manager.WriteTransport);
+        Assert.Equal(TransportR.WriteTransport.Segments, manager.WriteTransport);
         Assert.Contains("200", manager.WriteTransportFallback);
     }
 

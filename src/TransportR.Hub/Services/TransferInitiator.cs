@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Abstractions;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
 using TransportR.Interfaces;

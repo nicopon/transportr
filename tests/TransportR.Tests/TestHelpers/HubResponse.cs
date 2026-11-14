@@ -1,5 +1,4 @@
 using System.Net;
-using TransportR.Protocol;
 
 namespace TransportR.Tests.TestHelpers;
 

@@ -4,7 +4,6 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;

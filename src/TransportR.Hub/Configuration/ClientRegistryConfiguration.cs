@@ -8,7 +8,7 @@ namespace TransportR.Hub;
 /// A registration is not deleted when its events stream ends: on an unstable network the
 /// same client usually reconnects within seconds under the same identifier, and removing it would
 /// break a transfer that was about to resume. It is instead marked with
-/// <see cref="Models.ClientInfo.DisconnectedAtUtc"/> and given a grace period.
+/// <see cref="ClientInfo.DisconnectedAtUtc"/> and given a grace period.
 /// </para>
 /// <para>
 /// The two values below are the eviction policy that goes with that marker. Without one, the two

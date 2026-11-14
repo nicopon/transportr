@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using TransportR.Protocol;
 
 namespace TransportR.Hub.Controllers;
 

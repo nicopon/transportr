@@ -25,7 +25,7 @@ public interface ITransferInitiator
     /// The transfer identifier, which the handles both clients were given carry as
     /// <c>TransferId</c>. A client receives its handle during the handshake, before this returns.
     /// </returns>
-    /// <exception cref="Abstractions.HubRequestFailedException">
+    /// <exception cref="HubRequestFailedException">
     /// Either client is unknown, has an expired token, is not authorized to reach the other, is
     /// unreachable or refuses, or the handshake times out. The message is generic; the detail is in
     /// the hub log.

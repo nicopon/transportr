@@ -4,10 +4,10 @@ using Sender.Configuration;
 using Sender.Services;
 using Serilog;
 using Shared.Models;
+using TransportR;
 using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Client;
 using TransportR.Client.Services;
-using TransportR.Models;
 using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Serialization.Protobuf; // Extension

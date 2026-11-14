@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Protocol;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

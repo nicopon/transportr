@@ -1,5 +1,5 @@
 
-namespace TransportR.Protocol;
+namespace TransportR;
 
 /// <summary>
 /// The endpoints both ends of a transfer have to agree on.

@@ -4,8 +4,6 @@ using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
-using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Sessions;
@@ -312,7 +310,7 @@ internal class HttpStreamManager : IAsyncDisposable
         if (policy != WriteTransportPolicy.SegmentsOnly && _webSocketUnavailable == null
             && await TryOpenWebSocketAsync(type, token) is { } socket)
         {
-            LogOpened(type, Models.WriteTransport.WebSocket);
+            LogOpened(type, TransportR.WriteTransport.WebSocket);
             return new WebSocketWriteStream(socket, _config.Options.StreamBufferSize);
         }
 
@@ -321,7 +319,7 @@ internal class HttpStreamManager : IAsyncDisposable
             throw new StreamRefusedException(StreamOutcome.Fatal, "The data stream requires a WebSocket, and the path to the hub does not carry one.");
         }
 
-        LogOpened(type, Models.WriteTransport.Segments);
+        LogOpened(type, TransportR.WriteTransport.Segments);
         return new SegmentedWriteStream(
             _transport,
             _config.Logger,
