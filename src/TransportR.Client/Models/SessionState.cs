@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Client.Models;
 
 /// <summary>
 /// Represents the high-level state of a DataSession.

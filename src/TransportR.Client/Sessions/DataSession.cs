@@ -3,9 +3,9 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
+using TransportR.Client.Models;
 using TransportR.Client.Protocol;
-using TransportR.Models;
-using TransportR.Services;
+using TransportR.Client.Services;
 
 namespace TransportR.Client.Sessions;
 

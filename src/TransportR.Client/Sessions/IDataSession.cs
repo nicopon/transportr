@@ -1,4 +1,4 @@
-using TransportR.Models;
+using TransportR.Client.Models;
 
 namespace TransportR.Client.Sessions;
 

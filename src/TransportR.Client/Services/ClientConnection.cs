@@ -3,8 +3,8 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
+using TransportR.Client.Models;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 using TransportR.Protocol;
 
 namespace TransportR.Client.Services;

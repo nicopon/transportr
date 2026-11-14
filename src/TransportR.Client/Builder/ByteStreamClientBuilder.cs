@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using TransportR.Client.Builder;
 using TransportR.Client.Internal;
 
 namespace TransportR.Client;

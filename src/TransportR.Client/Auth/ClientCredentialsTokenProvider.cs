@@ -3,7 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Internal;
 
-namespace TransportR.Auth.ClientCredentials;
+namespace TransportR.Client.Auth;
 
 /// <summary>
 /// Token provider that acquires OAuth tokens using the client credentials flow.

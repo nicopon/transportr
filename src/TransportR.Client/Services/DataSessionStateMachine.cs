@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Models;
+using TransportR.Client.Models;
 
-namespace TransportR.Services;
+namespace TransportR.Client.Services;
 
 /// <summary>
 /// Manages state transitions for DataSession with validation and thread safety.

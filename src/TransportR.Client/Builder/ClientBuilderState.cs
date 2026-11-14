@@ -5,7 +5,7 @@ using Microsoft.IO;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 
-namespace TransportR.Client;
+namespace TransportR.Client.Builder;
 
 /// <summary>
 /// What a client needs to reach the hub, assembled by the builder of either kind of client.

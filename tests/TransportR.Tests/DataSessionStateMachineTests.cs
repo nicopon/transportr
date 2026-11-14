@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Models;
-using TransportR.Services;
+using TransportR.Client.Models;
+using TransportR.Client.Services;
 
 namespace TransportR.Tests;
 

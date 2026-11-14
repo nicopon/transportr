@@ -1,8 +1,8 @@
 using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
+using TransportR.Client.Models;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

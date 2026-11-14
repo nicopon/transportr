@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Auth.ClientCredentials;
+using TransportR.Client.Auth;
 
 namespace TransportR.Client;
 

@@ -1,7 +1,7 @@
 using System.Net;
+using TransportR.Client.Models;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 using TransportR.Tests.TestHelpers;
 
 namespace TransportR.Tests;

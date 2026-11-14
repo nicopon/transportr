@@ -1,4 +1,4 @@
-namespace TransportR.Auth.ClientCredentials;
+namespace TransportR.Client.Auth;
 
 /// <summary>
 /// Configuration options for OAuth client credentials token acquisition.

@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
+using TransportR.Client.Models;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 
 namespace TransportR.Tests;
 
