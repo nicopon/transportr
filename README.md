@@ -197,6 +197,8 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | `WithBatchTimeout(timeout)` | `1 s` | Flush a partial batch after this long: a whole number of milliseconds, at least one |
 | `WithMaxInFlightBatches(n)` | unbounded | Sender-side backpressure, in batches |
 | `WithReceiveCapacity(items, bytes)` | unbounded | Receiver-side backpressure, first bound reached wins |
+| `WithMaxBatchBytes(bytes)` | `256 MiB` | The largest batch on the wire, at both ends: a receiver fails the transfer on a larger one |
+| `WithWriteTransport(policy)` | `PreferWebSocket` | What carries a write stream: a WebSocket, else segments; `RequireWebSocket` fails without one, `SegmentsOnly` never asks |
 
 **Both backpressure bounds are opt-in, and `Build()` warns when neither is set.** The right figure depends on
 how large an item is, which only the caller knows. Set both: either one alone moves the backlog to the other

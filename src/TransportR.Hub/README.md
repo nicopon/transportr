@@ -72,6 +72,47 @@ app.MapDataHub();
 app.Run();
 ```
 
+## Transfers the host opens
+
+A host that coordinates its own clients, over a channel of its own, can open each transfer itself instead of leaving it to
+a sender. It resolves `ITransferInitiator` from the container and names both clients by their `ClientId`:
+
+```csharp
+var initiator = app.Services.GetRequiredService<ITransferInitiator>();
+var transferId = await initiator.InitTransferAsync(senderId, receiverId, TimeSpan.FromSeconds(20));
+
+// To end the run before the transfer completes, on the instance that carries it:
+await app.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(transferId);
+```
+
+The transfer goes through the authorization and the handshake a sender's own request does, and `InitTransferAsync`
+returns once both clients hold their handles. The receiver sees an ordinary `OnTransferStarted`. The sender, a
+`TransportRClient<T>` or a `ByteStreamClient`, is handed its handle through `OnSendRequested`, inside the handshake; a
+client with no handler attached refuses the transfer, and the host's call fails.
+
+```csharp
+sender.OnSendRequested += send =>
+{
+    _ = SendOrdersAsync(send);   // the handler runs inside the handshake: hand the handle off and return
+    return Task.CompletedTask;
+};
+
+async Task SendOrdersAsync(Send<Order> send)
+{
+    await using (send)
+    {
+        foreach (var order in GetOrders())
+            await send.SendAsync(order);
+        await send.CompleteAsync();
+    }
+}
+```
+
+`TerminateAsync` removes the transfer's state and bridges and tells both clients to cancel, and their sessions fail with
+`TransferFailedException`. `AccessOptions.ClientsMayOpenTransfers = false` reserves opening transfers to the host: a client
+is then refused `GetReceivers` and `InitTransfer`. With affinity handoff on, a transfer the host opens is refused unless
+both clients' streams are on the instance that opens it ("Affinity Handoff" in `ResilienceArchitecture.md`).
+
 A client that opens transfers itself is held to two ceilings of `AccessOptions`, on by default: `MaxHandshakesPerClient`
 (32 handshakes at once on an instance) and `MaxOpenTransfersPerClient` (256 open transfers, counted through the state
 store). Past either, its request is refused with a 429; `null` lifts a ceiling. Transfers the host opens through

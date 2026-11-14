@@ -1,13 +1,13 @@
 # TransportR - Client
 
-The client of [TransportR](https://github.com/nicopon/TransportR): streams typed records between .NET applications through a hub both sides connect out to.
+The client of [TransportR](https://github.com/nicopon/TransportR): streams typed records (`TransportRClient<T>`) or raw bytes (`ByteStreamClient`) between .NET applications through a hub both sides connect out to.
 
 ## Features
 
 - **Efficient Streaming**: Stream large datasets in batches, with opt-in backpressure at both ends to bound memory.
 - **Resilience**: Automatic reconnection and resumption from the receiver's last batch, checked by fault-injection scenarios (see the repository's `scripts/README.md`).
-- **Serializer-agnostic**: MessagePack, JSON, Apache Arrow, or your own `IBatchSerializer<T>`.
-- **Built-in auth**: OAuth2 client credentials. MessagePack serialization ships in its own package, `TransportR.Serialization.MessagePack`.
+- **Serializer-agnostic**: MessagePack, JSON or Apache Arrow, each in a package of its own (`TransportR.Serialization.*`), or your own `IBatchSerializer<T>`.
+- **Built-in auth**: OAuth2 client credentials or a token provider, renewed ahead of the token's expiry, or a static token.
 
 ## Installation
 
