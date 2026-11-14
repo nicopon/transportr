@@ -1,4 +1,4 @@
-namespace TransportR.FlowControl;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Configuration options for the flow control service.

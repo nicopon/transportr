@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Configuration;
 using TransportR.Hub.Access;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;

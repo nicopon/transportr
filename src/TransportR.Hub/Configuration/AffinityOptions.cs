@@ -1,4 +1,4 @@
-namespace TransportR.Hub.Configuration;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Options for affinity detection and handoff.

@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Hub;
 using TransportR.Hub.Services;
-using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

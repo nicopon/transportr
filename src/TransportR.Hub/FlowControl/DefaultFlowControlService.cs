@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Hub;
 
-namespace TransportR.FlowControl;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Default implementation of flow control using a configurable group access dictionary.

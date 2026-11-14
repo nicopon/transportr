@@ -1,4 +1,4 @@
-namespace TransportR.Hub.Configuration;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Options for the decision on whether a client may still act, and for how often it is re-taken.

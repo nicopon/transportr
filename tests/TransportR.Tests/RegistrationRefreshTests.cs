@@ -12,9 +12,7 @@ using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Hub.Services;
-using TransportR.Identity;
 using TransportR.Protocol;
-using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

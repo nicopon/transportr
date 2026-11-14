@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
-using TransportR.Hub;
 
-namespace TransportR.Services;
+namespace TransportR.Hub;
 
 /// <summary>
 /// In-memory implementation of IStateStore.

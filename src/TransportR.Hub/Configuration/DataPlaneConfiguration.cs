@@ -1,4 +1,4 @@
-namespace TransportR.Configuration;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Configuration for data plane timeouts and behavior.

@@ -1,6 +1,6 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
-using TransportR.Identity;
+using TransportR.Hub;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

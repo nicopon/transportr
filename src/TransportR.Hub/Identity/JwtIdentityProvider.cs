@@ -1,8 +1,7 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
-using TransportR.Hub;
 
-namespace TransportR.Identity;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Resolves client identity from JWT claims.

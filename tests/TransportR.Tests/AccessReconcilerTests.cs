@@ -3,7 +3,6 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
 using TransportR.Hub.Access;
-using TransportR.Hub.Configuration;
 using TransportR.Hub.Services;
 using TransportR.Services;
 

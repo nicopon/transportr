@@ -1,4 +1,4 @@
-using TransportR.FlowControl;
+using TransportR.Hub;
 
 namespace TransportR.Tests;
 
