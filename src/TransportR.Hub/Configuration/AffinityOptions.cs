@@ -27,8 +27,9 @@ public class AffinityOptions
     public string? CustomCookieName { get; set; }
 
     /// <summary>
-    /// Whether affinity handoff is enabled.
-    /// When enabled, InitTransfer will redirect sender to receiver's replica.
+    /// Whether affinity handoff is enabled: InitTransfer then redirects the sender to the receiver's
+    /// replica. Only <c>UseAffinityHandoff()</c> turns it on, so the callback it takes cannot turn it
+    /// off again.
     /// </summary>
-    public bool Enabled { get; set; } = false;
+    internal bool Enabled { get; set; } = false;
 }
