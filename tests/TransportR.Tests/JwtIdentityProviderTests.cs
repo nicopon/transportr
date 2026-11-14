@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Logging;
 using TransportR.Identity;
+using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
@@ -50,5 +52,18 @@ public class JwtIdentityProviderTests
         var groups = GroupsOf(Principal(new Claim("scope", "other:transportr:group:senders")));
 
         Assert.Empty(groups);
+    }
+
+    [Fact]
+    public void The_Resolved_Identity_Is_Logged_At_Debug_Only()
+    {
+        // Resolved by every control request and every segment: at Information it was a line per request.
+        var logs = new LogRecorder();
+        var provider = new JwtIdentityProvider(logs.Factory.CreateLogger<JwtIdentityProvider>());
+
+        provider.ResolveIdentity(Principal(new Claim("scope", "transportr:group:senders")), providedClientId: null, providedGroups: null);
+
+        Assert.True(logs.Has(LogLevel.Debug, "Resolved identity"));
+        Assert.DoesNotContain(logs.MessagesFrom(LogLevel.Information), message => message.Contains("Resolved identity"));
     }
 }

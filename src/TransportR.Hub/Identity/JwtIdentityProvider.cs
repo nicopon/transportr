@@ -93,8 +93,13 @@ public class JwtIdentityProvider : IClientIdentityProvider
             }
         }
 
-        _logger?.LogInformation("JwtIdentityProvider: Resolved identity - ClientId={ClientId}, Subject={Subject}, Groups=[{Groups}], Expiry={Expiry}",
-            clientId, subject, string.Join(", ", groups), tokenExpiry?.ToString("u") ?? "N/A");
+        // Every control request and every segment resolves an identity: the line is per request, and its
+        // arguments are built only when someone reads it.
+        if (_logger?.IsEnabled(LogLevel.Debug) == true)
+        {
+            _logger.LogDebug("JwtIdentityProvider: Resolved identity - ClientId={ClientId}, Subject={Subject}, Groups=[{Groups}], Expiry={Expiry}",
+                clientId, subject, string.Join(", ", groups), tokenExpiry?.ToString("u") ?? "N/A");
+        }
 
         return new ClientIdentity(clientId, groups, tokenExpiry, subject);
     }
