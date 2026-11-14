@@ -11,9 +11,9 @@ namespace TransportR.Client.Services;
 
 /// <summary>
 /// What a client is to the hub, whatever its transfers carry: its registration and the turn that
-/// orders it, the presence heartbeat, the token renewal, the requests it makes of the control plane,
-/// and the order in which all of it is let go. It is also the <see cref="ISessionContext"/> its sessions
-/// run in.
+/// orders it, the presence heartbeat, the token renewal, the write-transport probe, the requests it
+/// makes of the control plane, and the order in which all of it is let go. It is also the
+/// <see cref="ISessionContext"/> its sessions run in.
 /// </summary>
 /// <remarks>
 /// Owns the <see cref="ControlChannel"/> and the <see cref="HttpClient"/> it is given, and disposes
@@ -34,6 +34,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     private readonly IAsyncDisposable _sessions;
     private readonly Func<IEnumerable<IDataSession>> _listSessions;
     private readonly Action<string> _removeSession;
+    private readonly WriteTransportProbe? _probe;
 
     private bool _registered;
     private Timer? _presenceTimer;
@@ -51,11 +52,13 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     /// not follow the sessions that come and go after it.
     /// </param>
     /// <param name="removeSession">Drops a session from the client's registry once it has ended.</param>
+    /// <param name="dataUrl">The hub's <see cref="WireRoutes.StreamBase"/>, which the write-transport probe goes to.</param>
     public ClientConnection(
         ControlChannel channel,
         ILogger logger,
         ClientOptions options,
         HttpClient httpClient,
+        string dataUrl,
         IAsyncDisposable sessions,
         Func<IEnumerable<IDataSession>> listSessions,
         Action<string> removeSession)
@@ -67,6 +70,12 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
         _sessions = sessions;
         _listSessions = listSessions;
         _removeSession = removeSession;
+
+        if (options.ProbeWriteTransport)
+        {
+            _probe = new WriteTransportProbe(this, channel.CookieHeader, dataUrl, options, logger);
+            channel.Registered = _probe.Start;
+        }
     }
 
     public Guid ClientId => _channel.ClientId;
@@ -257,6 +266,11 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
         {
             await _renewer.DisposeAsync();
             _renewer = null;
+        }
+
+        if (_probe != null)
+        {
+            await _probe.DisposeAsync();
         }
 
         // Stop all sessions

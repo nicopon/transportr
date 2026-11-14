@@ -143,6 +143,11 @@ for an upgrade. `GetTransfers()` reports `TransferInfo.WriteTransport` (`WebSock
 opening) and `TransferInfo.WriteTransportFallback` (why a transfer has no WebSocket, null otherwise). A proxy in front of
 the hub must relay the upgrade: see the hub's README.
 
+`.WithWriteTransportProbe()`, off by default, has the client prove after each registration what the path carries of a
+write stream, for the hub to tell its `IHubProgressMonitor` before any transfer; the client logs the outcome. It costs up
+to 5 s per registration on a path that accepts the upgrade without relaying it, and each transfer still finds its own
+transport.
+
 ### Serialization
 MessagePack is the recommended default: it takes any POCO without attributes or schema. JSON is about 20 % slower
 to produce in our benchmark, and can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`).

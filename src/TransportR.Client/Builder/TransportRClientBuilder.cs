@@ -237,6 +237,23 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Has the client prove, after each registration with the hub, what the path to the hub carries of a
+    /// write stream, so that the hub can tell its host before any transfer. Off by default.
+    /// </summary>
+    /// <remarks>
+    /// It runs in the background, under the policy of <see cref="WithWriteTransport"/>: a WebSocket, then
+    /// segments. On a path that accepts the upgrade without relaying its bytes, it costs up to the 5 s a
+    /// WebSocket's opening is given, per registration. The hub hands what reached it to its
+    /// <c>IHubProgressMonitor</c>; the client logs it. Each transfer still finds its own transport when
+    /// its stream opens.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithWriteTransportProbe()
+    {
+        _state.EnableWriteTransportProbe();
+        return this;
+    }
+
+    /// <summary>
     /// Builds the <see cref="TransportRClient{T}"/>.
     /// </summary>
     public TransportRClient<T> Build()

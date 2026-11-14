@@ -53,7 +53,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
         HttpClient httpClient,
         RecyclableMemoryStreamManager streamManager)
     {
-        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions,
+        _connection = new ClientConnection(channel, logger, options, httpClient, dataUrl, sessionRegistry, () => sessionRegistry.Sessions,
             transferId => sessionRegistry.TryRemove(transferId, out _));
         _serializer = serializer;
         _logger = logger;

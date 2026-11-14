@@ -79,7 +79,7 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
         HttpClient httpClient,
         RecyclableMemoryStreamManager streamManager)
     {
-        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions,
+        _connection = new ClientConnection(channel, logger, options, httpClient, dataUrl, sessionRegistry, () => sessionRegistry.Sessions,
             transferId => sessionRegistry.TryRemove(transferId, out _));
         _logger = logger;
         _options = options;

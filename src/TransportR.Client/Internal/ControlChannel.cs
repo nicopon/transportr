@@ -104,6 +104,12 @@ internal sealed class ControlChannel : IAsyncDisposable
     /// <summary>Run once a stream that was lost is open again, the client registered on it.</summary>
     public Func<Task>? Reopened { get; set; }
 
+    /// <summary>
+    /// Run with the id of each stream the client is registered on once it is the client's: the first, a
+    /// reopening's and a replacement's. It runs on the registering call and must return at once.
+    /// </summary>
+    public Action<string>? Registered { get; set; }
+
     /// <summary>True while the client holds a stream the hub registered it on.</summary>
     public bool IsOpen => _current is { Ended: false };
 
@@ -377,6 +383,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             _ = old.DisposeAsync().AsTask();
         }
 
+        Registered?.Invoke(stream.ConnectionId);
         return true;
     }
 

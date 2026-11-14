@@ -335,129 +335,36 @@ internal class HttpStreamManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Opens a WebSocket and proves that the path carries it. Returns null once the session has given up
-    /// on one: anything short of a proven socket that is not the hub's own verdict says the path does
-    /// not carry one, and an actual outage then fails on the first segment and reconnects as usual.
+    /// Opens a WebSocket and proves that the path carries it (<see cref="ProvenWebSocket"/>). Returns null
+    /// once the session has given up on one: an actual outage then fails on the first segment and
+    /// reconnects as usual.
     /// </summary>
     /// <exception cref="StreamRefusedException">The hub refused the stream.</exception>
     private async Task<WebSocket?> TryOpenWebSocketAsync(ConnectionType type, CancellationToken token)
     {
-        var refreshed = false;
-        while (true)
+        var options = _config.Options;
+        var opening = await ProvenWebSocket.OpenAsync(
+            _transport,
+            ProvenWebSocket.UriOf(
+                $"{_dataUrl}/{_transferId}/{WireRoutes.SendSegment}",
+                $"{DataPlane.HeartbeatParameter}={(long)options.PresenceHeartbeatInterval.TotalMilliseconds}"),
+            accessToken => ProvenWebSocket.NewSocket(type, _affinity, accessToken, options.PresenceHeartbeatInterval),
+            options.WebSocketOpenBound,
+            _config.Logger,
+            token);
+
+        if (opening.Unavailable is { } reason)
         {
-            var accessToken = await _transport.GetAccessTokenAsync(refreshed);
-            var socket = NewWebSocket(type, accessToken);
-            using var bound = CancellationTokenSource.CreateLinkedTokenSource(token);
-            bound.CancelAfter(_config.Options.WebSocketOpenBound);
-
-            var proven = false;
-            try
-            {
-                await socket.ConnectAsync(WebSocketUri(), _transport.HttpClient, bound.Token);
-                await ProveAsync(socket, bound.Token);
-                proven = true;
-                return socket;
-            }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested)
-            {
-                var seconds = _config.Options.WebSocketOpenBound.TotalSeconds;
-                GiveUpOnWebSocket(socket.HttpStatusCode == HttpStatusCode.SwitchingProtocols
-                    ? $"the path accepted the upgrade but did not carry its probe within {seconds:0.#}s"
-                    : $"the upgrade was not answered within {seconds:0.#}s");
-                return null;
-            }
-            catch (WebSocketException)
-            {
-                switch (socket.HttpStatusCode)
-                {
-                    case HttpStatusCode.Gone:
-                    case HttpStatusCode.NotFound when CarriesRefusal(socket):
-                        throw new StreamRefusedException(StreamOutcome.Gone, $"Transfer Gone ({socket.HttpStatusCode})");
-
-                    case HttpStatusCode.Unauthorized when !refreshed:
-                        _config.Logger.LogWarning("Stream Unauthorized (401). Refreshing token and retrying...");
-                        refreshed = true;
-                        continue;
-
-                    case HttpStatusCode.Unauthorized:
-                        throw new StreamRefusedException(StreamOutcome.Retryable, "Unauthorized (401) - Check credentials");
-
-                    case HttpStatusCode.SwitchingProtocols:
-                        GiveUpOnWebSocket("the path accepted the upgrade but did not carry its probe");
-                        return null;
-
-                    case 0:
-                        GiveUpOnWebSocket("the connection failed before the upgrade was answered");
-                        return null;
-
-                    default:
-                        GiveUpOnWebSocket($"the upgrade was answered {(int)socket.HttpStatusCode}");
-                        return null;
-                }
-            }
-            finally
-            {
-                if (!proven)
-                {
-                    socket.Dispose();
-                }
-            }
+            GiveUpOnWebSocket(reason);
         }
+
+        return opening.Socket;
     }
 
     private void GiveUpOnWebSocket(string reason)
     {
         _webSocketUnavailable = reason;
         _config.Logger.LogWarning("No WebSocket for the write stream of Transfer={TransferId}: {Reason}", _transferId, reason);
-    }
-
-    private static bool CarriesRefusal(ClientWebSocket socket) =>
-        socket.HttpResponseHeaders?.Keys.Any(name => string.Equals(name, WireRoutes.RefusedHeader, StringComparison.OrdinalIgnoreCase)) == true;
-
-    private static async Task ProveAsync(WebSocket socket, CancellationToken token)
-    {
-        await socket.SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Text, endOfMessage: true, token);
-
-        var answer = await socket.ReceiveAsync(new byte[1].AsMemory(), token);
-        if (answer.MessageType != WebSocketMessageType.Text)
-        {
-            throw new WebSocketException(WebSocketError.InvalidMessageType, "The probe was not answered with a text message.");
-        }
-    }
-
-    // No KeepAliveTimeout: it aborts a sound stream as soon as the hub stops reading, which is what a
-    // hub parked on a slow peer does. The interval alone sends what a front end's idle timer needs.
-    private ClientWebSocket NewWebSocket(ConnectionType type, string? accessToken)
-    {
-        var socket = new ClientWebSocket();
-        var options = socket.Options;
-        options.HttpVersion = HttpVersion.Version11;
-        options.HttpVersionPolicy = HttpVersionPolicy.RequestVersionExact;
-        options.CollectHttpResponseDetails = true;
-        options.KeepAliveInterval = _config.Options.PresenceHeartbeatInterval;
-        options.SetRequestHeader(DataPlane.ConnectionTypeHeader, type.ToString());
-
-        if (!string.IsNullOrEmpty(_affinity))
-        {
-            options.SetRequestHeader("Cookie", _affinity);
-        }
-
-        if (!string.IsNullOrEmpty(accessToken))
-        {
-            options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
-        }
-
-        return socket;
-    }
-
-    private Uri WebSocketUri()
-    {
-        var uri = new UriBuilder($"{_dataUrl}/{_transferId}/{WireRoutes.SendSegment}")
-        {
-            Query = $"{DataPlane.HeartbeatParameter}={(long)_config.Options.PresenceHeartbeatInterval.TotalMilliseconds}"
-        };
-        uri.Scheme = uri.Scheme == Uri.UriSchemeHttps ? "wss" : "ws";
-        return uri.Uri;
     }
 
     private async Task<StreamResult> RunReadStreamAsync(ConnectionType type, Func<Stream, CancellationToken, Task> readAction, CancellationToken token)

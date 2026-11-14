@@ -28,6 +28,12 @@ internal class ClientOptions
     public TimeSpan WebSocketOpenBound { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// Whether the client proves, after each registration, what the path to the hub carries of a write
+    /// stream, for the hub to announce. Default: off.
+    /// </summary>
+    public bool ProbeWriteTransport { get; set; }
+
+    /// <summary>
     /// Interval for per-transfer heartbeat reporting. Default: 1 second.
     /// </summary>
     /// <remarks>

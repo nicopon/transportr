@@ -116,6 +116,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithWriteTransportProbe"/>
+    public ByteStreamClientBuilder WithWriteTransportProbe()
+    {
+        _state.EnableWriteTransportProbe();
+        return this;
+    }
+
     /// <summary>
     /// Builds the <see cref="ByteStreamClient"/>.
     /// </summary>

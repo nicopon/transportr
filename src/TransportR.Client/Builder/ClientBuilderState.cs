@@ -33,6 +33,7 @@ internal sealed class ClientBuilderState
     private Func<Task<string>>? _tokenProvider;
     private TimeSpan? _tokenRefreshThreshold;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
+    private bool _probeWriteTransport;
 
     public BufferCapacity? ReceiveCapacity { get; private set; }
 
@@ -96,6 +97,8 @@ internal sealed class ClientBuilderState
         _writeTransportPolicy = policy;
     }
 
+    public void EnableWriteTransportProbe() => _probeWriteTransport = true;
+
     public void RequireUrl()
     {
         if (string.IsNullOrWhiteSpace(_url))
@@ -116,7 +119,8 @@ internal sealed class ClientBuilderState
         {
             BatchFlushIntervalMs = _batchFlushIntervalMs,
             MaxInFlightBatches = _maxInFlightBatches,
-            WriteTransportPolicy = _writeTransportPolicy
+            WriteTransportPolicy = _writeTransportPolicy,
+            ProbeWriteTransport = _probeWriteTransport
         };
 
         options.ReceiveBufferCapacity = ReceiveCapacity;

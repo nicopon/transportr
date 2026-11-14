@@ -156,6 +156,12 @@ public class WebSocketTransferTests
 
         public IReadOnlyCollection<WriteStreamOpened> Opened => _opened;
 
+        private readonly ConcurrentQueue<WriteTransportProbed> _probed = new();
+
+        public IReadOnlyCollection<WriteTransportProbed> Probed => _probed;
+
+        public void OnWriteTransportProbed(WriteTransportProbed probed) => _probed.Enqueue(probed);
+
         public void OnBytesTransferred(long bytes) { }
 
         public void OnWriteStreamOpened(WriteStreamOpened opened)
@@ -199,6 +205,47 @@ public class WebSocketTransferTests
         var receiver = new WriteStreamOpened(transferId, transfer.Receiver.ClientId, ConnectionType.Control, WriteTransport.Segments);
         await EventuallyAsync(() => monitor.Opened.Contains(sender) && monitor.Opened.Contains(receiver), "both write streams announced");
         Assert.All(monitor.Opened, opened => Assert.Equal(WriteTransport.Segments, opened.Transport));
+    }
+
+    private static readonly Action<ClientOptions> Probing = options => options.ProbeWriteTransport = true;
+
+    [Fact]
+    public async Task AClientThatProbes_HasTheHubAnnounceAWebSocket_BeforeAnyTransfer()
+    {
+        var monitor = new RecordingMonitor(fails: false);
+        await using var hub = await TestHubServerFactory.StartLoopbackAsync(Monitored(monitor));
+        await using var client = TestClients.Create(null, hub.BaseUrl, configure: Probing);
+
+        await client.ConnectAsync();
+
+        await EventuallyAsync(() => monitor.Probed.Contains(new WriteTransportProbed(client.ClientId, WriteTransport.WebSocket)), "the probe announced");
+        Assert.DoesNotContain(new WriteTransportProbed(client.ClientId, WriteTransport.Segments), monitor.Probed);
+        Assert.Empty(monitor.Opened);
+        Assert.Empty(client.GetTransfers());
+    }
+
+    [Fact]
+    public async Task AClientThatProbes_BehindAFrontEndThatDropsTheUpgrade_HasTheHubAnnounceSegments()
+    {
+        var monitor = new RecordingMonitor(fails: false);
+        var dropsTheUpgrade = With(app => app.Use((context, next) =>
+        {
+            if (IsWriteSocket(context)) context.Request.Headers.Remove("Upgrade");
+            return next();
+        }));
+        await using var hub = await TestHubServerFactory.StartLoopbackAsync(services =>
+        {
+            Monitored(monitor)(services);
+            dropsTheUpgrade(services);
+        });
+        await using var client = TestClients.Create(null, hub.BaseUrl, configure: Probing);
+
+        await client.ConnectAsync();
+
+        await EventuallyAsync(() => monitor.Probed.Contains(new WriteTransportProbed(client.ClientId, WriteTransport.Segments)), "the probe announced");
+        Assert.DoesNotContain(new WriteTransportProbed(client.ClientId, WriteTransport.WebSocket), monitor.Probed);
+        Assert.Empty(monitor.Opened);
+        Assert.Empty(client.GetTransfers());
     }
 
     [Fact]

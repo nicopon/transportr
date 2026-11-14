@@ -113,6 +113,13 @@ with an upgrade) where the path to the hub carries one, and over **segments** (a
 resumption, the end sequence), and the hub copies the bytes of both unread: what it reads is the transport's own, an
 epoch and an offset, a WebSocket's probe and `Close` status.
 
+**The write-transport probe** (`WithWriteTransportProbe()`, off by default) has a client open, in the background after
+each registration, a write stream of the same form with no transfer behind it (`/api/stream/probe/send`, naming its
+events stream in `connection`): a WebSocket and its proof, else an empty `POST`, as the policy allows and judged as an
+opening is. The hub announces what reached it, before any transfer (*Observability*). It informs and decides nothing:
+each transfer still finds its own transport when its stream opens, and the proof does not see a front end that holds
+bytes back after it.
+
 **A WebSocket opens in this order.**
 
 1. The client sends the upgrade with `X-Connection-Type`, the token, the affinity cookie and `heartbeatMs` (the presence
@@ -272,7 +279,8 @@ preferred affinity.**
 do with them: `IHubProgressMonitor` on the hub side, and the `TransferInfo` records
 `GetTransfers()` returns on the client side. `samples/DataHub` builds its own OpenTelemetry meter
 on top of the first — copy it rather than expect one from the package. The hub announces the transport
-of each write stream it takes on, to its log and to `IHubProgressMonitor.OnWriteStreamOpened`.
+of each write stream it takes on, to its log and to `IHubProgressMonitor.OnWriteStreamOpened`, and of each
+write-transport probe to `OnWriteTransportProbed`.
 
 ---
 
