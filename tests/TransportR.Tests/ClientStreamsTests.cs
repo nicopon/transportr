@@ -93,6 +93,25 @@ public class ClientStreamsTests
         Assert.False(currentNext.IsCompleted, "the remaining stream was not reached by the client's heartbeat");
     }
 
+    [Fact]
+    public async Task AStreamWhoseEventsAreNotRead_IsClosedAtTheBound_ByTheWriteThatFindsItFull()
+    {
+        var streams = new ClientStreams(TimeProvider.System);
+        var stream = streams.Open(Guid.NewGuid(), Heartbeat);
+
+        for (var i = 0; i < ClientStream.EventCapacity; i++)
+        {
+            Assert.True(streams.TrySend(stream.ConnectionId, ControlPlane.CancelTransfer, new CancelTransferEvent($"transfer-{i}")));
+        }
+
+        Assert.Null(stream.EndReason);
+        Assert.False(streams.TrySend(stream.ConnectionId, ControlPlane.CancelTransfer, new CancelTransferEvent("one-too-many")));
+        Assert.Contains("not read", stream.EndReason);
+
+        // Closed, not merely full: a question finds it so too, rather than waiting on a client that reads nothing.
+        await Assert.ThrowsAsync<IOException>(() => Ask(streams, stream).Answer.WaitAsync(Bound));
+    }
+
     private static async Task<Task<bool>> ReadPastRegistrationAsync(ClientStream stream)
     {
         var events = stream.ReadAllAsync(CancellationToken.None).GetAsyncEnumerator();

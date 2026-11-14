@@ -169,7 +169,15 @@ internal sealed class ClientStream
     /// </summary>
     internal static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
 
-    private readonly Channel<SseItem<string>> _events = Channel.CreateUnbounded<SseItem<string>>(new UnboundedChannelOptions { SingleReader = true });
+    /// <summary>
+    /// How many events may wait for the client to read them. A client that lets this many pile up is
+    /// not reading its stream, which is closed rather than left to hold them all: the client opens
+    /// another, and registers again, as after any loss of its stream.
+    /// </summary>
+    internal const int EventCapacity = 1024;
+
+    private readonly Channel<SseItem<string>> _events = Channel.CreateBounded<SseItem<string>>(
+        new BoundedChannelOptions(EventCapacity) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
     private readonly CancellationTokenSource _closed = new();
     private readonly TimeSpan _silenceLimit;
     private readonly TimeProvider _time;
@@ -193,8 +201,16 @@ internal sealed class ClientStream
 
     internal void Touch() => Interlocked.Exchange(ref _lastHeard, _time.GetUtcNow().UtcTicks);
 
-    internal bool TryWrite(string eventType, object data) =>
-        !_closed.IsCancellationRequested && _events.Writer.TryWrite(Item(eventType, data));
+    /// <returns>False when the stream has closed, or this write found it full and closed it.</returns>
+    internal bool TryWrite(string eventType, object data)
+    {
+        if (_closed.IsCancellationRequested) return false;
+        if (_events.Writer.TryWrite(Item(eventType, data))) return true;
+
+        EndReason ??= $"its events were not read: {EventCapacity} were waiting";
+        Close();
+        return false;
+    }
 
     internal void Close()
     {
