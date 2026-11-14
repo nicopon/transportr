@@ -12,16 +12,18 @@ namespace TransportR.Client;
 /// Client for sending and receiving data transfers.
 /// Acts as a coordinator between ClientConnection, SessionRegistry, and DataSessions.
 /// </summary>
-public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISessionContext, IAsyncDisposable
+public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAsyncDisposable
 {
     public Guid ClientId => _connection.ClientId;
 
     /// <summary>The client's control plane. Internal so that the tests can reach the hub through it.</summary>
     internal ControlChannel Channel => _connection.Channel;
 
+    /// <summary>What the client's sessions are given as their context. Internal so that the tests can reach it.</summary>
+    internal ClientConnection Connection => _connection;
+
     // Dependencies
     private readonly ClientConnection _connection;
-    private readonly SessionRegistry<ClientSession<T>> _sessionRegistry;
     private readonly IBatchSerializer<T> _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
@@ -51,8 +53,8 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         HttpClient httpClient,
         RecyclableMemoryStreamManager streamManager)
     {
-        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions);
-        _sessionRegistry = sessionRegistry;
+        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions,
+            transferId => sessionRegistry.TryRemove(transferId, out _));
         _serializer = serializer;
         _logger = logger;
         _defaultBatchSize = defaultBatchSize;
@@ -181,33 +183,9 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     private ClientSession<T> NewSession(string transferId, int batchSize, string? affinity)
     {
         var (send, receive) = SessionPorts.Create(_options, _serializer, _streamManager, batchSize);
-        var session = new DataSession(this, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
+        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
         return new ClientSession<T>(session, send, receive);
     }
 
     internal IBatchSerializer<T> Serializer => _serializer;
-
-    #region ISessionContext Implementation
-
-    ILogger ISessionConfig.Logger => _logger;
-    HttpClient IStreamTransport.HttpClient => _connection.HttpClient;
-    ClientOptions ISessionConfig.Options => _options;
-
-    void IControlPlane.RemoveSession(string transferId)
-    {
-        _sessionRegistry.TryRemove(transferId, out _);
-    }
-
-    Task IControlPlane.ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken)
-        => _connection.ReportTransferAsync(transferId, affinity, items, acks, cancellationToken);
-
-    Task<bool> IControlPlane.ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken)
-        => _connection.ProbeAsync(transferId, affinity, cancellationToken);
-
-    Task<string?> IStreamTransport.GetAccessTokenAsync(bool forceRefresh)
-    {
-        return _connection.Channel.GetAccessTokenAsync(forceRefresh);
-    }
-
-    #endregion
 }

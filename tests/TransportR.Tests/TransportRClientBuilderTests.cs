@@ -22,7 +22,7 @@ public class TransportRClientBuilderTests
             .WithBatchTimeout(TimeSpan.FromMilliseconds(250))
             .Build();
 
-        Assert.Equal(250, ((ISessionConfig)client).Options.BatchFlushIntervalMs);
+        Assert.Equal(250, client.Connection.Options.BatchFlushIntervalMs);
     }
 
     [Theory]

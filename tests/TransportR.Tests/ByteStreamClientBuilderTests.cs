@@ -48,7 +48,7 @@ public class ByteStreamClientBuilderTests
             .WithLoggerFactory(NullLoggerFactory.Instance)
             .Build();
 
-        var options = ((ISessionConfig)client).Options;
+        var options = client.Connection.Options;
         Assert.Equal(250, options.BatchFlushIntervalMs);
         Assert.Equal(4, options.MaxInFlightBatches);
         Assert.Equal(BufferCapacity.Bytes(1 << 20), options.ReceiveBufferCapacity);

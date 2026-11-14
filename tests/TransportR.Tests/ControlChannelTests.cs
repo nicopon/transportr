@@ -123,7 +123,7 @@ public class ControlChannelTests
     public async Task AProbeAnsweredWithANotFound_HearsTheHub_OnlyWhenTheHubMarkedIt(bool marked)
     {
         await using var client = TestClients.Create(new NotFoundHub(marked), "http://hub");
-        var probe = ((IControlPlane)client).ProbeAsync("transfer-1", affinity: null, CancellationToken.None);
+        var probe = client.Connection.ProbeAsync("transfer-1", affinity: null, CancellationToken.None);
 
         if (marked)
         {

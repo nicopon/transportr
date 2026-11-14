@@ -24,7 +24,7 @@ namespace TransportR.Client;
 /// <see cref="TransportRClient{T}"/> does for items.
 /// </para>
 /// </remarks>
-public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDisposable
+public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
 {
     // The batch size its sessions carry: a byte client cuts its batches by size, and has no count.
     private const int RequestedBatchSize = 1000;
@@ -35,8 +35,10 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
     /// <summary>The client's control plane. Internal so that the tests can reach the hub through it.</summary>
     internal ControlChannel Channel => _connection.Channel;
 
+    /// <summary>What the client's sessions are given as their context. Internal so that the tests can reach it.</summary>
+    internal ClientConnection Connection => _connection;
+
     private readonly ClientConnection _connection;
-    private readonly SessionRegistry<ByteClientSession> _sessionRegistry;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
     private readonly int _batchBytes;
@@ -77,8 +79,8 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
         HttpClient httpClient,
         RecyclableMemoryStreamManager streamManager)
     {
-        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions);
-        _sessionRegistry = sessionRegistry;
+        _connection = new ClientConnection(channel, logger, options, httpClient, sessionRegistry, () => sessionRegistry.Sessions,
+            transferId => sessionRegistry.TryRemove(transferId, out _));
         _logger = logger;
         _options = options;
         _batchBytes = batchBytes;
@@ -154,31 +156,7 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
     {
         var send = new ByteBatchSource(_batchBytes, _options.BatchFlushIntervalMs, _streamManager);
         var receive = new ByteReceivePort(_options.ReceiveBufferCapacity);
-        var session = new DataSession(this, transferId, batchSize, _dataUrl, affinity, send, receive.OpenSink);
+        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, send, receive.OpenSink);
         return new ByteClientSession(session, send, receive);
     }
-
-    #region ISessionContext Implementation
-
-    ILogger ISessionConfig.Logger => _logger;
-    HttpClient IStreamTransport.HttpClient => _connection.HttpClient;
-    ClientOptions ISessionConfig.Options => _options;
-
-    void IControlPlane.RemoveSession(string transferId)
-    {
-        _sessionRegistry.TryRemove(transferId, out _);
-    }
-
-    Task IControlPlane.ReportTransferAsync(string transferId, string? affinity, long items, long acks, CancellationToken cancellationToken)
-        => _connection.ReportTransferAsync(transferId, affinity, items, acks, cancellationToken);
-
-    Task<bool> IControlPlane.ProbeAsync(string transferId, string? affinity, CancellationToken cancellationToken)
-        => _connection.ProbeAsync(transferId, affinity, cancellationToken);
-
-    Task<string?> IStreamTransport.GetAccessTokenAsync(bool forceRefresh)
-    {
-        return _connection.Channel.GetAccessTokenAsync(forceRefresh);
-    }
-
-    #endregion
 }

@@ -12,7 +12,8 @@ namespace TransportR.Client.Services;
 /// <summary>
 /// What a client is to the hub, whatever its transfers carry: its registration and the turn that
 /// orders it, the presence heartbeat, the token renewal, the requests it makes of the control plane,
-/// and the order in which all of it is let go.
+/// and the order in which all of it is let go. It is also the <see cref="ISessionContext"/> its sessions
+/// run in.
 /// </summary>
 /// <remarks>
 /// Owns the <see cref="ControlChannel"/> and the <see cref="HttpClient"/> it is given, and disposes
@@ -20,7 +21,7 @@ namespace TransportR.Client.Services;
 /// it has to come before the <see cref="HttpClient"/> goes, which a session being released still
 /// needs to tell its peer.
 /// </remarks>
-internal sealed class ClientConnection : IAsyncDisposable
+internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
 {
     // What OpenTransferAsync allows the hub beyond the handshake timeout it announced: the round trip of
     // the request, and the work the hub does around the handshake itself.
@@ -32,6 +33,7 @@ internal sealed class ClientConnection : IAsyncDisposable
     private readonly HttpClient _httpClient;
     private readonly IAsyncDisposable _sessions;
     private readonly Func<IEnumerable<IDataSession>> _listSessions;
+    private readonly Action<string> _removeSession;
 
     private bool _registered;
     private Timer? _presenceTimer;
@@ -48,13 +50,15 @@ internal sealed class ClientConnection : IAsyncDisposable
     /// The sessions held at the moment of the call. Asked again each time, since what it returns does
     /// not follow the sessions that come and go after it.
     /// </param>
+    /// <param name="removeSession">Drops a session from the client's registry once it has ended.</param>
     public ClientConnection(
         ControlChannel channel,
         ILogger logger,
         ClientOptions options,
         HttpClient httpClient,
         IAsyncDisposable sessions,
-        Func<IEnumerable<IDataSession>> listSessions)
+        Func<IEnumerable<IDataSession>> listSessions,
+        Action<string> removeSession)
     {
         _channel = channel;
         _logger = logger;
@@ -62,6 +66,7 @@ internal sealed class ClientConnection : IAsyncDisposable
         _httpClient = httpClient;
         _sessions = sessions;
         _listSessions = listSessions;
+        _removeSession = removeSession;
     }
 
     public Guid ClientId => _channel.ClientId;
@@ -69,6 +74,14 @@ internal sealed class ClientConnection : IAsyncDisposable
     public ControlChannel Channel => _channel;
 
     public HttpClient HttpClient => _httpClient;
+
+    public ILogger Logger => _logger;
+
+    public ClientOptions Options => _options;
+
+    public Task<string?> GetAccessTokenAsync(bool forceRefresh = false) => _channel.GetAccessTokenAsync(forceRefresh);
+
+    public void RemoveSession(string transferId) => _removeSession(transferId);
 
     public async Task ConnectAsync(IEnumerable<string>? groups, CancellationToken cancellationToken)
     {

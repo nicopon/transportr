@@ -1,11 +1,9 @@
 namespace TransportR.Client.Sessions;
 
 /// <summary>
-/// Interface exposing the session context dependencies from the parent TransportRClient.
-/// Enables dependency injection and unit testing of DataSession.
+/// What a session asks of the client that holds it, gathered so that a test can stand in for the
+/// client. <see cref="Services.ClientConnection"/> is the implementation.
 /// </summary>
 internal interface ISessionContext : ISessionConfig, IStreamTransport, IControlPlane
 {
-    // No additional members needed, functions as an aggregator for the Client implementation
-    // The specific logic (DataSession, HttpStreamManager) uses the narrow interfaces.
 }
