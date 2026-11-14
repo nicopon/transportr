@@ -609,6 +609,9 @@ internal class DataSession : IDataSession
 
     #region Streams Management
 
+    // Half to full delay: sessions cut together, by a hub that restarted, must not retry in step.
+    private static TimeSpan Jittered(TimeSpan delay) => delay * (0.5 + Random.Shared.NextDouble() * 0.5);
+
     private async Task RunSessionLoop(CancellationToken token)
     {
         _config.Logger.LogInformation("Session Loop {TransferId} Starting. IsSender={IsSender}", TransferId, IsSender);
@@ -640,7 +643,7 @@ internal class DataSession : IDataSession
                         else
                         {
                             // Wait before retrying probe
-                            await Task.Delay(2000, token);
+                            await Task.Delay(Jittered(TimeSpan.FromSeconds(2)), token);
                         }
                         break;
 
@@ -667,7 +670,7 @@ internal class DataSession : IDataSession
             catch (Exception ex)
             {
                 _config.Logger.LogError(ex, "Session Loop Error");
-                await Task.Delay(1000, token);
+                await Task.Delay(Jittered(TimeSpan.FromSeconds(1)), token);
             }
         }
 

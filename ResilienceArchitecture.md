@@ -22,9 +22,9 @@ says: a builder method on the client, an options class on the hub.
 |---|---|---|---|---|
 | client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
 | client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx`, or a `404` carrying `TransportR-Refused`, means the hub answers |
-| client | Reconnect pause (`DataSession.cs:631`) | 2 s | **fixed** | Pause after a failed probe |
+| client | Reconnect pause (`DataSession.cs:631`) | 1 to 2 s | **fixed** | Pause after a failed probe: half to full delay, so that sessions cut together do not probe in step |
 | client | Closing-phase retry (`DataSession.cs:28`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
-| client | Session loop error pause (`DataSession.cs:658`) | 1 s | **fixed** | Pause after an unexpected error in the session loop |
+| client | Session loop error pause (`DataSession.cs:658`) | 0.5 to 1 s | **fixed** | Pause after an unexpected error in the session loop: half to full delay |
 | client | `Complete` resend (`DataSession.cs:24`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
 | client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
 | client | Abort write (`DataSession.cs:32`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
@@ -391,7 +391,7 @@ stateDiagram-v2
 
 `Completed`, `Failed` and `Disposed` are final, and `Stopped` completes on the first of them. A released handle keeps an outcome it already has: releasing a completed session leaves it `Completed`.
 
-`Reconnecting` probes the hub with a request until it answers, 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
+`Reconnecting` probes the hub with a request until it answers, 1 to 2 s apart after a failed probe, with no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
 
 ### Client Internals
 
