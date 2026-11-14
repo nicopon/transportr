@@ -13,12 +13,16 @@ namespace TransportR.Hub.Services;
 /// </summary>
 internal class BridgeCleanupService : BackgroundService
 {
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
+
+    // A sweep that failed is not repeated at once: what broke it is likely to still be broken.
+    private static readonly TimeSpan SweepErrorPause = TimeSpan.FromSeconds(10);
+
     private readonly ILogger<BridgeCleanupService> _logger;
     private readonly ITransferTerminator _terminator;
     private readonly BridgeManager _bridgeManager;
     private readonly DataPlaneConfiguration _config;
     private readonly TimeProvider _time;
-    private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(5);
 
     public BridgeCleanupService(
         ILogger<BridgeCleanupService> logger,
@@ -43,7 +47,7 @@ internal class BridgeCleanupService : BackgroundService
             try
             {
                 await CleanupStaleBridgesAsync(stoppingToken);
-                await Task.Delay(_checkInterval, _time, stoppingToken);
+                await Task.Delay(SweepInterval, _time, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -52,7 +56,7 @@ internal class BridgeCleanupService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in bridge cleanup loop");
-                await Task.Delay(TimeSpan.FromSeconds(10), _time, stoppingToken);
+                await Task.Delay(SweepErrorPause, _time, stoppingToken);
             }
         }
 

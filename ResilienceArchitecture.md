@@ -14,56 +14,57 @@ TransportR implements a **"Dataplane First" resilience pattern** where:
 
 ## Key Timings
 
-The one table of timings. A value the code keeps in a constant names its `file:line`. A **fixed** value has no setting:
+The one table of timings. A value the code keeps in a constant is named by its `Type.Member`, which `./scripts/lint-comments.sh`
+checks exists. A **fixed** value has no setting:
 no route from the builder on the client, no options property on the hub. Any other is set where the *Settable* column
 says: a builder method on the client, an options class on the hub.
 
 | Side | Name | Default | Settable | What it bounds |
 |---|---|---|---|---|
 | client | `ClientOptions.PongTimeout` | 10 s | **fixed** | Wait for the in-stream `Pong` that carries the resume point |
-| client | Reconnect probe (`ReconnectionHandler.cs:12`) | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx`, or a `404` carrying `TransportR-Refused`, means the hub answers |
-| client | Reconnect pause (`DataSession.cs:631`) | 1 to 2 s | **fixed** | Pause after a failed probe: half to full delay, so that sessions cut together do not probe in step |
-| client | Closing-phase retry (`DataSession.cs:28`) | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
-| client | Session loop error pause (`DataSession.cs:658`) | 0.5 to 1 s | **fixed** | Pause after an unexpected error in the session loop: half to full delay |
-| client | `Complete` resend (`DataSession.cs:24`) | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
+| client | `ReconnectionHandler.ProbeTimeout` | 5 s | **fixed** | One `POST /api/client/{id}/transfers/{transferId}/ping` to the instance holding the transfer's bridge while `Reconnecting`: a `2xx`, or a `404` carrying `TransportR-Refused`, means the hub answers |
+| client | `DataSession.FirstProbePause`, `DataSession.MaxProbePause` | 2 s → 15 s | **fixed** | Pause after a probe the hub did not answer: doubling with each miss up to 15 s, half to full delay so that sessions cut together do not probe in step, and back to 2 s on each new loss. A hub that comes back is found within 15 s, well inside `TransferInactivityTimeoutSeconds` |
+| client | `DataSession.CompletingPhaseRetryMs` | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
+| client | `DataSession.LoopErrorPause` | 0.5 to 1 s | **fixed** | Pause after an unexpected error in the session loop: half to full delay |
+| client | `DataSession.CompleteRetryMs` | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
 | client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
-| client | Abort write (`DataSession.cs:32`) | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
-| client | Abort request (`DataSession.cs:35`) | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
-| client | Read stream end (`HttpStreamManager.cs:57`) | 2 s | **fixed** | Wait for the hub to end the read stream: after it refused the write stream, before the attempt ends; when a completed receiver's handle is released |
+| client | `DataSession.AbortWriteTimeout` | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
+| client | `DataSession.AbortRequestTimeout` | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
+| client | `HttpStreamManager.ReadSideEndTimeout` | 2 s | **fixed** | Wait for the hub to end the read stream: after it refused the write stream, before the attempt ends; when a completed receiver's handle is released |
 | client | `ClientOptions.HandshakeTimeout` | 20 s | **fixed** for a client; a host opening a transfer passes a `handshakeTimeout` to `ITransferInitiator` | `InitTransfer`: the receiver's answer (and a host-opened sender's), the hub applying the value its caller passes; a client's request outside 0 to 5 min (a session's lifetime) is a `400`, a host's call an `ArgumentOutOfRangeException` |
-| client | Handshake margin (`TransportRClient.cs:47`) | 10 s | **fixed** | `InitTransferAsync` as a whole, on top of the handshake timeout: the request, its replay after a redirect and the reading of both answers. A hub that has said nothing by then fails the call with a `HubRequestFailedException` |
+| client | `ClientConnection.HandshakeMargin` | 10 s | **fixed** | `InitTransferAsync` as a whole, on top of the handshake timeout: the request, its replay after a redirect and the reading of both answers. A hub that has said nothing by then fails the call with a `HubRequestFailedException` |
 | client | `ClientOptions.HeartbeatInterval` | 1 s | **fixed** | Per-transfer statistics heartbeat (`POST …/transfers/{transferId}/heartbeat`), which only runs while a transfer does |
-| client | Heartbeat request (`DataSession.cs:38`) | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
+| client | `DataSession.HeartbeatTimeout` | 5 s | **fixed** | One transfer heartbeat; a beat still waiting is not joined by the next |
 | client | `ClientOptions.PresenceHeartbeatInterval` | 15 s | **fixed** | The presence heartbeat (`POST …/presence/{connectionId}`), which keeps the registration alive between transfers and tells the hub the client is there. Announced when the events stream opens; a beat is bounded by the interval itself. It is also how long a sender's data stream may be idle before it writes a `Ping`, and the keepalive interval of a WebSocket write stream, at both ends |
 | client | `ClientOptions.WebSocketOpenBound` | 5 s | **fixed** | Opening a WebSocket write stream, the upgrade and the proof together: past it the path is taken as not carrying one, and the session uses segments |
-| client | Short-lived cuts (`HttpStreamManager.cs:62-63`) | 3 in a row, each within 30 s of its opening | **fixed** | Cuts of a proven WebSocket that read as a path not carrying one: segments from then on. A connection that lives 30 s clears the count |
+| client | `HttpStreamManager.ShortLivedRupturesUntilFallback`, `HttpStreamManager.ShortLived` | 3 in a row, each within 30 s of its opening | **fixed** | Cuts of a proven WebSocket that read as a path not carrying one: segments from then on. A connection that lives 30 s clears the count |
 | client | `ClientOptions.StreamBufferSize` | 512 KB | **fixed** | Not a delay: the buffer in front of each data-plane write, which is also the largest segment or WebSocket message it sends |
-| client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval, a millisecond at the least (`Accumulator.cs`, `FlushIntervalLoop`) |
+| client | `ClientOptions.BatchFlushIntervalMs` | 1000 ms | `WithBatchTimeout` | A partial batch's wait before it is flushed; checked every half interval, a millisecond at the least (`Accumulator<TBatch>.FlushIntervalLoop`) |
 | client | `ClientOptions.TokenRefreshThreshold` | 5 min | `WithTokenRefreshThreshold` | How long before its expiry a token is renewed, and no more than half of what is left of it |
-| client | `ClientCredentialsOptions.RefreshThreshold` (`ClientCredentialsOptions.cs:31`) | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
-| client | Renewal request (`TokenRenewer.cs:29`) | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
-| client | Renewal retry (`TokenRenewer.cs:30-31`) | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
-| client | Events stream, silence (`ControlChannel.cs:40`) | 30 s | **fixed** | A stream that carried nothing, keepalives included, for this long is abandoned and opened again. An opening the hub has not answered with the registration by then fails |
-| client | Events stream, first opening (`ControlChannel.cs:44`, `:138-165`) | 5 attempts, 500 ms → 5 s | **fixed** | Attempts to open the first stream, the delay doubling; a refusal is raised at once. Restarting a data stream is not backed off |
-| client | Events stream, reopening (`ControlChannel.cs:42-43`) | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
-| hub | Keepalive (`ClientStreams.cs:130`) | 15 s | **fixed** | Quiet on an events stream before the hub writes a `keepalive` event: half the client's silence limit |
+| client | `ClientCredentialsOptions.RefreshThreshold` | 5 min | **fixed** | How long before its expiry `WithClientCredentials` stops reusing its cached token |
+| client | `TokenRenewer.RequestTimeout` | 10 s | **fixed** | One `PUT /api/client/{id}/token` |
+| client | `TokenRenewer.FirstRetry`, `TokenRenewer.MaxRetry` | 1 s → 30 s | **fixed** | Delay after a failed renewal: doubling, half to full delay, until the expiry |
+| client | `ControlChannel.StreamSilenceLimit` | 30 s | **fixed** | A stream that carried nothing, keepalives included, for this long is abandoned and opened again. An opening the hub has not answered with the registration by then fails |
+| client | `ControlChannel.FirstOpenAttempts`, `ControlChannel.FirstOpenDelay`, `ControlChannel.MaxOpenDelay` | 5 attempts, 500 ms → 5 s | **fixed** | Attempts to open the first stream, the delay doubling; a refusal is raised at once. Restarting a data stream is not backed off |
+| client | `ControlChannel.FirstReopenDelay`, `ControlChannel.MaxReopenDelay` | 1 s → 30 s | **fixed** | After a stream was lost: doubling, half to full delay, no limit |
+| hub | `ClientStream.KeepAliveInterval` | 15 s | **fixed** | Quiet on an events stream before the hub writes a `keepalive` event: half the client's silence limit |
 | hub | Client silence | twice the announced presence interval (30 s) | **fixed**, announced by the client | An events stream the hub has heard nothing from is closed; any request the hub admits from that client counts as hearing from it |
 | hub | Sender's data stream, silence | twice the interval its opening announces (30 s) | **fixed**, announced by the client | A write stream of the sender's data taken as cut: an epoch with no segment, or a WebSocket whose read has waited that long for a byte. No other write stream is judged on silence |
-| hub | Segment hold (`UploadEpoch.cs:45`) | 30 s | **fixed** | A segment waiting for the peer to read it: answered `202` with what got through, and the client sends the rest again. Below the 60 s a default nginx allows a request without an answer |
-| hub | WebSocket probe (`WebSocketInput.cs:22`) | 10 s | **fixed** | Wait for a WebSocket's probe after the upgrade, above the client's 5 s so that the client is the one to decide about the path |
-| hub | WebSocket close (`WebSocketInput.cs:26`) | 2 s | **fixed** | A `Close` the hub sends, and after a `Close(4409)` its wait for the client's own |
-| hub | `BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
-| hub | `TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
-| hub | `StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
-| hub | Bridge sweep (`BridgeCleanupService.cs:22`) | 5 s | **fixed** | Interval between two `BridgeTimeoutSeconds` checks |
-| hub | Bridge sweep error pause (`BridgeCleanupService.cs:56`) | 10 s | **fixed** | Pause after a failed sweep |
-| hub | Transfer sweep (`TransferCleanupService.cs:22`) | 10 s | **fixed** | Interval between two inactivity and stalled-progress checks |
-| hub | Session TTL (`TransferManager.cs:20`) | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats and by the bytes of its streams |
-| hub | Session extension (`TransferManager.cs:21`) | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
-| hub | `DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose events stream ended is kept |
-| hub | `ConnectedTtlSeconds` | 3600 s | `ClientRegistryConfiguration` | A connected registration the hub has not heard from at all (stores with server-side expiry) |
-| hub | `AccessSweepIntervalSeconds` | 5 s | `AccessOptions` | Interval between two passes that judge every registered client again |
-| hub | `TokenExpiryMarginSeconds` | 0 s | `AccessOptions` | How long a token is still honoured after its `exp` |
+| hub | `UploadEpoch.DefaultHoldBound` | 30 s | **fixed** | A segment waiting for the peer to read it: answered `202` with what got through, and the client sends the rest again. Below the 60 s a default nginx allows a request without an answer |
+| hub | `WebSocketInput.ProbeBound` | 10 s | **fixed** | Wait for a WebSocket's probe after the upgrade, above the client's 5 s so that the client is the one to decide about the path |
+| hub | `WebSocketInput.CloseBound` | 2 s | **fixed** | A `Close` the hub sends, and after a `Close(4409)` its wait for the client's own |
+| hub | `DataPlaneConfiguration.BridgeTimeoutSeconds` | 300 s | `DataPlaneConfiguration` | A bridge short of `Active` waiting for its peer: the hub cancels it and ends the transfer |
+| hub | `DataPlaneConfiguration.TransferInactivityTimeoutSeconds` | 60 s | `DataPlaneConfiguration` | A transfer with no activity at all: no heartbeat, no byte on either stream |
+| hub | `DataPlaneConfiguration.StalledProgressTimeoutSeconds` | disabled | `DataPlaneConfiguration` | Opt-in: a transfer alive but whose counters do not move |
+| hub | `BridgeCleanupService.SweepInterval` | 5 s | **fixed** | Interval between two `BridgeTimeoutSeconds` checks |
+| hub | `BridgeCleanupService.SweepErrorPause` | 10 s | **fixed** | Pause after a failed sweep |
+| hub | `TransferCleanupService.SweepInterval` | 10 s | **fixed** | Interval between two inactivity and stalled-progress checks |
+| hub | `TransferManager.SessionTtl` | 5 min | **fixed** | Expiry of a transfer's session in the `IStateStore`, pushed back by its heartbeats and by the bytes of its streams |
+| hub | `TransferManager.SessionExtensionInterval` | 10 s | **fixed** | At most one extension of that expiry per transfer and interval |
+| hub | `ClientRegistryConfiguration.DisconnectedGraceSeconds` | 300 s | `ClientRegistryConfiguration` | How long a registration whose events stream ended is kept |
+| hub | `ClientRegistryConfiguration.ConnectedTtlSeconds` | 3600 s | `ClientRegistryConfiguration` | A connected registration the hub has not heard from at all (stores with server-side expiry) |
+| hub | `AccessOptions.AccessSweepIntervalSeconds` | 5 s | `AccessOptions` | Interval between two passes that judge every registered client again |
+| hub | `AccessOptions.TokenExpiryMarginSeconds` | 0 s | `AccessOptions` | How long a token is still honoured after its `exp` |
 
 ### Cross-process invariants
 

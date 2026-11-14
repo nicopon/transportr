@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # scripts/lint-comments.sh - Refuse deliberation left in committed code
 #
-# Three comment habits this repository has decided against, all checkable:
+# Three comment habits this repository has decided against, all checkable (and, last, a table of
+# timings that must not cite a name the code does not have):
 #
 #   1. Deliberation. A comment that asks a question, weighs options or says "for now" is
 #      thinking, not documentation. Left in place it tells the next reader the matter is settled
@@ -74,6 +75,22 @@ HITS=$(grep -nE "${AT}(DECISION:|[Ww]e now${END}|used to${END})" $SOURCES \
 if [ -n "$HITS" ]; then
     echo "History left in code — a comment that tells what the code used to do:"
     report h "$HITS"
+fi
+
+# 5. The table of timings in ResilienceArchitecture.md cites each constant as `Type.Member`, never by
+#    file and line: the type has to be declared in src/, and a file that declares it the member.
+REFS=$(awk '/^## Key Timings/{t=1;next} /^##/{t=0} t && /^\| (client|hub) \|/' ResilienceArchitecture.md \
+    | cut -d'|' -f3 | grep -oE '`[A-Z][A-Za-z0-9]*\.[A-Za-z_][A-Za-z0-9_]*`' | tr -d '`' | sort -u)
+HITS=$([ -n "$REFS" ] || echo "no Type.Member found in the table of timings"
+for ref in $REFS; do
+    files=$(grep -rlE "(class|record|struct|interface|enum)[[:space:]]+${ref%%.*}([^[:alnum:]_]|$)" src --include='*.cs' | grep -vE '/(bin|obj)/')
+    [ -n "$files" ] || { echo "$ref: no such type in src/"; continue; }
+    grep -qE "^[[:space:]]*(public|private|internal|protected)[^=;(]*[[:space:]]${ref#*.}[[:space:]]*(=|;|\{|\(|=>)" $files \
+        || echo "$ref: no such member in the file of its type"
+done)
+if [ -n "$HITS" ]; then
+    echo "The table of timings cites a name that does not exist:"
+    report n "$HITS"
 fi
 
 if [ $FAILED -ne 0 ]; then

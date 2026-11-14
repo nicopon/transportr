@@ -7,6 +7,8 @@ namespace TransportR.Hub.Services;
 
 internal class TransferCleanupService : BackgroundService
 {
+    private static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(10);
+
     private readonly ITransferManager _transferManager;
     private readonly ITransferTerminator _terminator;
     private readonly ILogger<TransferCleanupService> _logger;
@@ -17,8 +19,6 @@ internal class TransferCleanupService : BackgroundService
 
     // Alive but not advancing. Opt-in: null disables the check entirely.
     private readonly TimeSpan? _stalledProgressTimeout;
-
-    private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(10);
 
     public TransferCleanupService(
         ITransferManager transferManager,
@@ -44,7 +44,7 @@ internal class TransferCleanupService : BackgroundService
             _inactivityTimeout,
             _stalledProgressTimeout?.ToString() ?? "disabled");
 
-        using var timer = new PeriodicTimer(_checkInterval, _time);
+        using var timer = new PeriodicTimer(SweepInterval, _time);
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {

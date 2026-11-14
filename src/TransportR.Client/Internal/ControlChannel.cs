@@ -41,6 +41,8 @@ internal sealed class ControlChannel : IAsyncDisposable
     private static readonly TimeSpan FirstReopenDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxReopenDelay = TimeSpan.FromSeconds(30);
     private const int FirstOpenAttempts = 5;
+    private static readonly TimeSpan FirstOpenDelay = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan MaxOpenDelay = TimeSpan.FromSeconds(5);
 
     private readonly HttpClient _http;
     private readonly string _clientUrl;
@@ -139,7 +141,7 @@ internal sealed class ControlChannel : IAsyncDisposable
         if (_current != null) throw new InvalidOperationException("The client is already connected.");
 
         _groups = groups;
-        var delay = TimeSpan.FromMilliseconds(500);
+        var delay = FirstOpenDelay;
         for (var attempt = 1; ; attempt++)
         {
             try
@@ -158,7 +160,7 @@ internal sealed class ControlChannel : IAsyncDisposable
                 _logger.LogWarning("Connection attempt {Attempt}/{MaxRetries} failed, retrying in {Delay}ms: {Message}",
                     attempt, FirstOpenAttempts, delay.TotalMilliseconds, ex.Message);
                 await Task.Delay(delay, cancellationToken);
-                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 5000));
+                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxOpenDelay.Ticks));
             }
         }
     }

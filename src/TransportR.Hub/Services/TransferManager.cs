@@ -23,7 +23,10 @@ internal class TransferManager : ITransferManager
     private readonly IStateStore _stateStore;
     private readonly TimeProvider _time;
     private readonly TimeSpan _sessionTtl = SessionTtl;
-    private readonly TimeSpan _heartbeatInterval = TimeSpan.FromSeconds(10);
+
+    // A transfer's session expiry is pushed back at most this often: its heartbeats and the bytes of
+    // its streams arrive far oftener than the store needs telling.
+    private static readonly TimeSpan SessionExtensionInterval = TimeSpan.FromSeconds(10);
 
     public TransferManager(IStateStore stateStore, TimeProvider? timeProvider = null)
     {
@@ -106,7 +109,7 @@ internal class TransferManager : ITransferManager
     private async Task CheckHeartbeatAsync(string transferId)
     {
         var now = Now;
-        if (!_lastHeartbeat.TryGetValue(transferId, out var last) || (now - last) > _heartbeatInterval)
+        if (!_lastHeartbeat.TryGetValue(transferId, out var last) || (now - last) > SessionExtensionInterval)
         {
             _lastHeartbeat[transferId] = now;
             await _stateStore.ExtendSessionExpiryAsync(transferId, now.Add(_sessionTtl)).ConfigureAwait(false);
