@@ -6,8 +6,6 @@ using TransportR.Client.Batching;
 using TransportR.Serialization.Arrow;
 using TransportR.Serialization.Json;
 using TransportR.Serialization.MessagePack;
-using TransportR.Serialization.Protobuf;
-using TransportR.Serialization.Protobuf.Services;
 
 namespace TransportR.Tests;
 
@@ -28,9 +26,9 @@ public class DecompressionBoundTests
     private const int ExpandedItems = 64;
     private const long Margin = 32L << 20;
 
-    public static TheoryData<string> ItemSerializers => ["messagepack", "json", "protobuf"];
+    public static TheoryData<string> ItemSerializers => ["messagepack", "json"];
 
-    public static TheoryData<string> CheckedBeforeCompression => ["json", "protobuf"];
+    public static TheoryData<string> CheckedBeforeCompression => ["json"];
 
     private static IBatchSerializer<string> Bounded(string kind, int bound = Bound)
     {
@@ -39,7 +37,6 @@ public class DecompressionBoundTests
         {
             "messagepack" => builder.WithMessagePackSerialization(),
             "json" => builder.WithJsonSerialization(),
-            "protobuf" => builder.WithProtobufSerialization(),
             _ => throw new ArgumentOutOfRangeException(nameof(kind)),
         }).ResolveSerializer();
     }
@@ -48,7 +45,6 @@ public class DecompressionBoundTests
     {
         "messagepack" => new MessagePackBatchSerializer<string>(),
         "json" => new JsonBatchSerializer<string>(),
-        "protobuf" => new ProtobufBatchSerializer<string>(),
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -91,9 +87,7 @@ public class DecompressionBoundTests
     {
         // Arrange: a batch whose size before compression is known to the byte.
         var items = Items(count: 1);
-        var expanded = kind == "json"
-            ? (await WriteAsync(new JsonBatchSerializer<string>(compress: false), items)).Length
-            : ProtobufLength(items);
+        var expanded = (await WriteAsync(new JsonBatchSerializer<string>(compress: false), items)).Length;
 
         // Act: the bound at that size, then one byte under it.
         var atSize = Bounded(kind, expanded);
@@ -104,13 +98,6 @@ public class DecompressionBoundTests
         // Assert
         Assert.Equal(items, received);
         Assert.Contains("WithMaxBatchBytes", failure.Message);
-    }
-
-    private static int ProtobufLength(List<string> items)
-    {
-        var buffer = new MemoryStream();
-        ProtoBuf.Serializer.Serialize(buffer, items);
-        return (int)buffer.Length;
     }
 
     [Fact]

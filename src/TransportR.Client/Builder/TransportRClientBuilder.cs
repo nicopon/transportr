@@ -127,9 +127,9 @@ public class TransportRClientBuilder<T>
     /// <c>WithSerializer</c> is not given this figure: see <see cref="WithSerializer"/>.
     /// </para>
     /// <para>
-    /// The sender's side of that bound is not the same for every serializer. The Json and Protobuf
-    /// serializers refuse, at serialization, a batch that is more than the bound before compression, so
-    /// a receiver at the same bound takes whatever they send. The MessagePack and Arrow serializers do
+    /// The sender's side of that bound is not the same for every serializer. The Json serializer
+    /// refuses, at serialization, a batch that is more than the bound before compression, so a
+    /// receiver at the same bound takes whatever it sends. The MessagePack and Arrow serializers do
     /// not: they send a batch that expands past the bound, and it is the receiver that refuses it and
     /// fails the transfer. The sender must therefore size its batches so that they do not. For Arrow, what
     /// counts against the bound is the compressed body of a batch plus every buffer once decompressed,

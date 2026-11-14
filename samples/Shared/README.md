@@ -24,9 +24,8 @@ Shared/
 
 ## 📊 Order Model
 
-`Models/Order.cs` holds the class. It carries both serializers' contracts, `[MessagePackObject]`/`[Key(n)]` and
-`[ProtoContract]`/`[ProtoMember(n)]`, which is what lets the samples switch serializer (`SERIALIZER_TYPE`)
-on the same type.
+`Models/Order.cs` holds the class. It carries the MessagePack contract, `[MessagePackObject]`/`[Key(n)]`, and JSON needs
+none, which is what lets the samples switch serializer (`SERIALIZER_TYPE`) on the same type.
 
 ### Fields
 

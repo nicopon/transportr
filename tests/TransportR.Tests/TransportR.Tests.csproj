@@ -40,7 +40,6 @@
     <ProjectReference Include="..\..\src\TransportR.Serialization.MessagePack\TransportR.Serialization.MessagePack.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Arrow\TransportR.Serialization.Arrow.csproj" />
     <ProjectReference Include="..\..\src\TransportR.Serialization.Json\TransportR.Serialization.Json.csproj" />
-    <ProjectReference Include="..\..\src\TransportR.Serialization.Protobuf\TransportR.Serialization.Protobuf.csproj" />
   </ItemGroup>
 
 </Project>

@@ -8,7 +8,6 @@ using TransportR;
 using TransportR.Client;
 using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension
-using TransportR.Serialization.Protobuf; // Extension
 
 // Configuration builder
 var configuration = new ConfigurationBuilder()
@@ -118,15 +117,7 @@ if (senderOptions.WriteTransport is { } writeTransport)
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 
-if (serializerType.Equals("Protobuf", StringComparison.OrdinalIgnoreCase))
-{
-    var levelStr = configuration["PROTOBUF_COMPRESSION_LEVEL"] ?? "-1";
-    int.TryParse(levelStr, out int compressionLevel);
-
-    logger.LogInformation("Serializer: Protobuf + Zstd (Level {Level})", compressionLevel);
-    clientBuilder.WithProtobufSerialization(compressionLevel);
-}
-else if (serializerType.Equals("Json", StringComparison.OrdinalIgnoreCase))
+if (serializerType.Equals("Json", StringComparison.OrdinalIgnoreCase))
 {
     var levelStr = configuration["JSON_COMPRESSION_LEVEL"] ?? "-1";
     int.TryParse(levelStr, out int compressionLevel);

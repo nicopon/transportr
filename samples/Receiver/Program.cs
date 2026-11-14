@@ -6,7 +6,6 @@ using Shared.Models;
 using TransportR.Client;
 using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension
-using TransportR.Serialization.Protobuf; // Extension
 
 // Note: BatchTimeoutMs is not used by the Receiver, but required by constructor.
 var batchTimeoutMs = 1000; // Default value, as it's not used by the receiver.
@@ -117,15 +116,7 @@ if (receiverOptions.ConsumeItemsPerSecond > 0)
 // Serializer Selection (Environment Variable or Config)
 var serializerType = configuration["SERIALIZER_TYPE"] ?? "MessagePack";
 
-if (serializerType.Equals("Protobuf", StringComparison.OrdinalIgnoreCase))
-{
-    var levelStr = configuration["PROTOBUF_COMPRESSION_LEVEL"] ?? "-1";
-    int.TryParse(levelStr, out int compressionLevel);
-
-    logger.LogInformation("Serializer: Protobuf + Zstd (Level {Level})", compressionLevel);
-    clientBuilder.WithProtobufSerialization(compressionLevel);
-}
-else if (serializerType.Equals("Json", StringComparison.OrdinalIgnoreCase))
+if (serializerType.Equals("Json", StringComparison.OrdinalIgnoreCase))
 {
     var levelStr = configuration["JSON_COMPRESSION_LEVEL"] ?? "-1";
     int.TryParse(levelStr, out int compressionLevel);
