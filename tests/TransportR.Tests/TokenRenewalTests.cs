@@ -6,7 +6,7 @@ using TransportR.Client;
 using TransportR.Client.Internal;
 using TransportR.Hub;
 using TransportR.Hub.Services;
-using TransportR.Serialization.MessagePack.Services;
+using TransportR.Serialization.MessagePack;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

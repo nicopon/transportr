@@ -4,7 +4,7 @@ using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using ZstdSharp;
 
-namespace TransportR.Serialization.Json.Services;
+namespace TransportR.Serialization.Json;
 
 /// <summary>
 /// Serializes batches with System.Text.Json, Zstd-compressed unless told otherwise.

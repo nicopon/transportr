@@ -1,6 +1,6 @@
 using System.Text;
 using TransportR.Client.Batching;
-using TransportR.Serialization.Json.Services;
+using TransportR.Serialization.Json;
 
 namespace TransportR.Tests;
 

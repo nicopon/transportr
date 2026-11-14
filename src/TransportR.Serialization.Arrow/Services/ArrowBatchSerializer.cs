@@ -4,8 +4,9 @@ using Apache.Arrow.Ipc;
 using Apache.Arrow.Memory;
 using TransportR.Client;
 using TransportR.Client.Configuration;
+using TransportR.Serialization.Arrow.Services;
 
-namespace TransportR.Serialization.Arrow.Services;
+namespace TransportR.Serialization.Arrow;
 
 /// <summary>
 /// Moves Apache Arrow <see cref="RecordBatch"/> payloads over TransportR, as Arrow IPC.

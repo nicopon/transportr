@@ -12,7 +12,7 @@ using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Hub;
 using TransportR.Protocol;
-using TransportR.Serialization.Json.Services;
+using TransportR.Serialization.Json;
 using TransportR.Serialization.MessagePack; // Extension
 using TransportR.Tests.Infrastructure;
 using Xunit.Abstractions;
@@ -342,7 +342,7 @@ public class TransferIntegrationTests
         using var host = TestHubServerFactory.CreateHost();
         var handler = host.GetTestServer().CreateHandler();
 
-        var inner = new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
+        var inner = new TransportR.Serialization.MessagePack.MessagePackBatchSerializer<string>();
         await using var sender = CreateClient(handler, "http://localhost", serializer: new FailingOn(inner, poison));
         await using var receiver = CreateClient(handler, "http://localhost");
 
@@ -1143,7 +1143,7 @@ public class TransferIntegrationTests
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
 
         var registry = new SessionRegistry<ClientSession<string>>(logger);
-        serializer ??= new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
+        serializer ??= new TransportR.Serialization.MessagePack.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = handler != null
             ? new HttpClient(handler) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan }

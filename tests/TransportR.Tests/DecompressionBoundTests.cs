@@ -4,11 +4,8 @@ using Apache.Arrow.Memory;
 using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Serialization.Arrow;
-using TransportR.Serialization.Arrow.Services;
 using TransportR.Serialization.Json;
-using TransportR.Serialization.Json.Services;
 using TransportR.Serialization.MessagePack;
-using TransportR.Serialization.MessagePack.Services;
 using TransportR.Serialization.Protobuf;
 using TransportR.Serialization.Protobuf.Services;
 

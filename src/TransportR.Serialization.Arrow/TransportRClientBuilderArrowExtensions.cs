@@ -1,7 +1,6 @@
 using Apache.Arrow;
 using Apache.Arrow.Memory;
 using TransportR.Client;
-using TransportR.Serialization.Arrow.Services;
 
 namespace TransportR.Serialization.Arrow;
 

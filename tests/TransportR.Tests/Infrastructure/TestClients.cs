@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
-using TransportR.Serialization.MessagePack.Services;
+using TransportR.Serialization.MessagePack;
 
 namespace TransportR.Tests.Infrastructure;
 

@@ -1,6 +1,5 @@
 using TransportR.Client;
 using TransportR.Serialization.MessagePack;
-using TransportR.Serialization.MessagePack.Services;
 
 namespace TransportR.ClientBench;
 

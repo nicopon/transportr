@@ -4,7 +4,7 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 
-namespace TransportR.Serialization.MessagePack.Services;
+namespace TransportR.Serialization.MessagePack;
 
 /// <summary>
 /// Serializes batches with MessagePack, compressed with LZ4, and reads them as untrusted data.
