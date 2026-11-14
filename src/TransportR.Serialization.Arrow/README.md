@@ -18,8 +18,8 @@ var client = new TransportRClientBuilder<RecordBatch>()
     .Build();
 ```
 
-`WithArrowSerialization` exists only on a builder carrying `RecordBatch`. Unlike the MessagePack,
-Protobuf and JSON packages, this serializer is not generic — Arrow carries record batches and
+`WithArrowSerialization` exists only on a builder carrying `RecordBatch`. Unlike the MessagePack and JSON
+packages, this serializer is not generic — Arrow carries record batches and
 nothing else — so a client built on the wrong item type does not compile rather than throwing on
 its first batch.
 

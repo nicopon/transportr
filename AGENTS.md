@@ -116,12 +116,12 @@ Version/Type/PayloadLen/BatchId/Count/TransferId) followed by an opaque payload.
 (`src/TransportR.Client/Protocol/ChunkIO.cs`) reads/writes this header; `ChunkType` values (`Batch`,
 `BatchAck`, `Complete`, `CompleteAck`, `Ping`, `Pong`, `Abort`, `StreamBatch`) are the whole vocabulary; `Abort`
 carries an `AbortReason` in `BatchId`, and `StreamBatch` is a `Batch` of a transfer without a serializer. Payload
-serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,
-Protobuf,Json,Arrow}` are interchangeable implementations; the hub never needs to know which one is
+serialization is fully decoupled behind `IBatchSerializer<T>` — `TransportR.Serialization.{MessagePack,Json,Arrow}`
+are interchangeable implementations; the hub never needs to know which one is
 in use because it never deserializes the payload. The item type sits on the interface, not on the
 call, so a serializer that cannot carry a client's item type (`WithArrowSerialization()` on anything
-but `RecordBatch`) is a compile error rather than a throw on the first batch — `MessagePack`,
-`Protobuf` and `Json` are generic over `T`, `Arrow` closes over `RecordBatch`.
+but `RecordBatch`) is a compile error rather than a throw on the first batch — `MessagePack` and `Json` are generic
+over `T`, `Arrow` closes over `RecordBatch`.
 
 ### Project layering
 
@@ -129,7 +129,7 @@ but `RecordBatch`) is a compile error rather than a throw on the first batch —
 src/TransportR                          # Protocol, interfaces, models — no ASP.NET Core/hub deps
 src/TransportR.Client                   # Client: TransportRClient<T>, ControlChannel, batching, OAuth2 client credentials
 src/TransportR.Hub                      # Hub: ClientController (control) + StreamController (data), BridgeManager, group flow control
-src/TransportR.Serialization.{MessagePack,Protobuf,Json,Arrow}  # IBatchSerializer<T> implementations
+src/TransportR.Serialization.{MessagePack,Json,Arrow}  # IBatchSerializer<T> implementations
 src/TransportR.Auth.SimpleIdp              # Embedded OpenIddict-based dev IdP (hub side, opt-in, non-packable)
 src/TransportR.Storage.Redis                # IStateStore backed by Redis, for HA
 ```

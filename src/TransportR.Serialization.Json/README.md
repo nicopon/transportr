@@ -19,7 +19,7 @@ var client = new TransportRClientBuilder<Order>()
 ```
 
 `WithJsonSerialization(compress: false)` puts plain UTF-8 JSON on the wire, which is the reason to
-use this package while debugging. It is about 20 % slower to produce than MessagePack or Protobuf on
+use this package while debugging. It is about 20 % slower to produce than MessagePack on
 the TransportR benchmark, and uncompressed it is about 2.8 times its compressed size on the wire.
 
 Both ends of a transfer must use the same serializer and settings, `compress` included: a batch the

@@ -6,7 +6,7 @@ The client of [TransportR](https://github.com/nicopon/TransportR): streams typed
 
 - **Efficient Streaming**: Stream large datasets in batches, with opt-in backpressure at both ends to bound memory.
 - **Resilience**: Automatic reconnection and resumption from the receiver's last batch, checked by fault-injection scenarios (see the repository's `scripts/README.md`).
-- **Serializer-agnostic**: MessagePack, Protobuf, JSON, Apache Arrow, or your own `IBatchSerializer<T>`.
+- **Serializer-agnostic**: MessagePack, JSON, Apache Arrow, or your own `IBatchSerializer<T>`.
 - **Built-in auth**: OAuth2 client credentials. MessagePack serialization ships in its own package, `TransportR.Serialization.MessagePack`.
 
 ## Installation
@@ -144,9 +144,9 @@ opening) and `TransferInfo.WriteTransportFallback` (why a transfer has no WebSoc
 the hub must relay the upgrade: see the hub's README.
 
 ### Serialization
-MessagePack is the recommended default: on par with Protobuf in our benchmark, and it takes any POCO
-without attributes or schema. Protobuf needs annotated contracts and produces the most compact payload;
-JSON can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`). Both ends of a
+MessagePack is the recommended default: it takes any POCO without attributes or schema. JSON is about 20 % slower
+to produce in our benchmark, and can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`).
+Both ends of a
 transfer must use the same serializer and settings: a batch the receiver cannot decode fails the transfer.
 Any other format is an `IBatchSerializer<T>` away.
 

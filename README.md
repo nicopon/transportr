@@ -166,7 +166,7 @@ Unit and in-process integration tests run in CI; the scenarios run on demand.
 ### Performance, and its conditions
 
 On one machine over loopback, the `default` scenario moves 2 million orders (about 500 bytes each as JSON) at
-450,000 to 630,000 items per second on the sender side, whichever of MessagePack, Protobuf or JSON carries them
+450,000 to 630,000 items per second on the sender side, whether MessagePack or JSON carries them
 (five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
 135,000 items per second. Over a real network, bandwidth and item size decide.
 
@@ -207,12 +207,11 @@ process.
 | Package | Format | Notes |
 |---|---|---|
 | `TransportR.Serialization.MessagePack` | Binary + LZ4 | Any POCO, no attributes or schema needed. Recommended default |
-| `TransportR.Serialization.Protobuf` | Binary + Zstd | Needs annotated contracts; the most compact payload |
 | `TransportR.Serialization.Json` | Text + Zstd | `compress: false` puts plain JSON on the wire, for debugging |
 | `TransportR.Serialization.Arrow` | Arrow IPC + LZ4 | Apache Arrow `RecordBatch` only; bound the receiver in bytes |
 | `new ByteStreamClientBuilder(batchBytes)`, in `TransportR.Client` | Raw bytes, never compressed | A client of its own: no serializer, no codec, no item type. A batch is cut at `batchBytes` bytes, so no boundary of the sender's calls reaches the receiver; feed the `ByteSend` it gives with `CopyFromAsync` or `WriteAsync`, read the `ByteReceive` with `CopyToAsync` or `ReadAsync` |
 
-MessagePack and Protobuf are on par in our benchmark; JSON is about 20 % slower to produce. Both ends of a
+JSON is about 20 % slower than MessagePack to produce in our benchmark. Both ends of a
 transfer must use the same serializer and settings, or both be `ByteStreamClient`s: a batch the receiver
 cannot decode fails the transfer, and so does a transfer whose ends are not of the same kind, on both sides.
 
