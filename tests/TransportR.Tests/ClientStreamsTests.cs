@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub.Services;
 using TransportR.Protocol;
 
@@ -12,6 +13,7 @@ public class ClientStreamsTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan Heartbeat = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan Presence = TimeSpan.FromSeconds(10);
 
     [Fact]
     public async Task AReplyAwaitedFromAReplacedStream_IsTaken_WhenTheClientHoldsAnotherStream()
@@ -42,6 +44,60 @@ public class ClientStreamsTests
         streams.Remove(successor);
 
         await Assert.ThrowsAsync<IOException>(() => answer.WaitAsync(Bound));
+    }
+
+    [Fact]
+    public async Task Touch_KeepsEveryStreamOfTheClientOpen_AndOnlyTheirs()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var streams = new ClientStreams(clock);
+        var clientId = Guid.NewGuid();
+        var first = streams.Open(clientId, Presence);
+        var second = streams.Open(clientId, Presence);
+        var stranger = streams.Open(Guid.NewGuid(), Presence);
+
+        // A stream ends once nothing has been heard for two presence intervals (20 s): at 34 s only
+        // the stranger's, heard from at 0 s, is past it; the client's, heard from at 15 s, has 1 s left.
+        clock.Advance(TimeSpan.FromSeconds(15));
+        streams.Touch(clientId);
+        clock.Advance(TimeSpan.FromSeconds(19));
+        var firstNext = await ReadPastRegistrationAsync(first);
+        var secondNext = await ReadPastRegistrationAsync(second);
+        var strangerNext = await ReadPastRegistrationAsync(stranger);
+
+        Assert.False(await strangerNext.WaitAsync(Bound));
+        Assert.NotNull(stranger.EndReason);
+        Assert.False(firstNext.IsCompleted, "a stream of the client that was heard from ended");
+        Assert.False(secondNext.IsCompleted, "a stream of the client that was heard from ended");
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.False(await firstNext.WaitAsync(Bound));
+        Assert.False(await secondNext.WaitAsync(Bound));
+    }
+
+    [Fact]
+    public async Task Touch_KeepsTheRemainingStreamOpen_WhenTheClientsOtherStreamWasRemoved()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var streams = new ClientStreams(clock);
+        var clientId = Guid.NewGuid();
+        var old = streams.Open(clientId, Presence);
+        var current = streams.Open(clientId, Presence);
+        streams.Remove(old);
+
+        clock.Advance(TimeSpan.FromSeconds(15));
+        streams.Touch(clientId);
+        clock.Advance(TimeSpan.FromSeconds(19));
+        var currentNext = await ReadPastRegistrationAsync(current);
+
+        Assert.False(currentNext.IsCompleted, "the remaining stream was not reached by the client's heartbeat");
+    }
+
+    private static async Task<Task<bool>> ReadPastRegistrationAsync(ClientStream stream)
+    {
+        var events = stream.ReadAllAsync(CancellationToken.None).GetAsyncEnumerator();
+        await events.MoveNextAsync();
+        return events.MoveNextAsync().AsTask();
     }
 
     private static (Task<CallbackOutcome> Answer, Guid RequestId) Ask(ClientStreams streams, ClientStream stream)

@@ -21,6 +21,11 @@ internal sealed class ClientStreams
 {
     private readonly ConcurrentDictionary<string, ClientStream> _streams = new();
     private readonly ConcurrentDictionary<Guid, PendingReply> _pending = new();
+
+    // A client holds more than one stream while it replaces one. The two maps change together under
+    // the gate, so that an open stream is always in both and a client with none has no entry here.
+    private readonly object _gate = new();
+    private readonly Dictionary<Guid, List<ClientStream>> _byClient = new();
     private readonly TimeProvider _time;
 
     public ClientStreams(TimeProvider timeProvider)
@@ -36,7 +41,17 @@ internal sealed class ClientStreams
     internal ClientStream Open(Guid clientId, TimeSpan heartbeatInterval)
     {
         var stream = new ClientStream(Guid.NewGuid().ToString("N"), clientId, heartbeatInterval, _time);
-        _streams[stream.ConnectionId] = stream;
+        lock (_gate)
+        {
+            _streams[stream.ConnectionId] = stream;
+            if (!_byClient.TryGetValue(clientId, out var held))
+            {
+                _byClient[clientId] = held = [];
+            }
+
+            held.Add(stream);
+        }
+
         return stream;
     }
 
@@ -46,12 +61,22 @@ internal sealed class ClientStreams
     /// </summary>
     internal void Remove(ClientStream stream)
     {
-        _streams.TryRemove(new KeyValuePair<string, ClientStream>(stream.ConnectionId, stream));
-        stream.Close();
-
         // A client replacing its stream opens the new one before it closes the old, and posts its reply
         // whichever stream carried the question: a reply names the client and the request, not a stream.
-        var successor = _streams.Values.FirstOrDefault(s => s.ClientId == stream.ClientId);
+        ClientStream? successor = null;
+        lock (_gate)
+        {
+            _streams.TryRemove(new KeyValuePair<string, ClientStream>(stream.ConnectionId, stream));
+            if (_byClient.TryGetValue(stream.ClientId, out var held))
+            {
+                held.Remove(stream);
+                if (held.Count == 0) _byClient.Remove(stream.ClientId);
+                else successor = held[^1];
+            }
+        }
+
+        // Outside the gate: cancelling runs the continuations of whoever waits on the stream.
+        stream.Close();
 
         foreach (var (requestId, pending) in _pending)
         {
@@ -124,9 +149,11 @@ internal sealed class ClientStreams
     /// <summary>Records that the client was heard from, which keeps its streams on this instance open.</summary>
     internal void Touch(Guid clientId)
     {
-        foreach (var stream in _streams.Values)
+        lock (_gate)
         {
-            if (stream.ClientId == clientId) stream.Touch();
+            if (!_byClient.TryGetValue(clientId, out var held)) return;
+
+            foreach (var stream in held) stream.Touch();
         }
     }
 
