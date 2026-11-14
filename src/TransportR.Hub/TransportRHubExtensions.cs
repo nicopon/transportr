@@ -7,11 +7,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub.Access;
 using TransportR.Hub.Controllers;
+using TransportR.Hub.Identity;
+using TransportR.Hub.Interfaces;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
-using TransportR.Identity;
-using TransportR.Interfaces;
-using TransportR.Services;
 
 namespace TransportR.Hub;
 

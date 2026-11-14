@@ -1,8 +1,7 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
-using TransportR.Hub;
 
-namespace TransportR.Identity;
+namespace TransportR.Hub.Identity;
 
 /// <summary>
 /// Development mode identity provider that accepts client-provided values.

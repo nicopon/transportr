@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Hub.Interfaces;
 
 /// <summary>
 /// Interface for the server-side data broker that bridges sender and receiver streams.

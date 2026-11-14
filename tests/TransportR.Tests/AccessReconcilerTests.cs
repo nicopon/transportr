@@ -4,7 +4,6 @@ using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Hub.Services;
-using TransportR.Services;
 
 namespace TransportR.Tests;
 

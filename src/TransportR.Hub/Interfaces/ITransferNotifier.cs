@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace TransportR.Interfaces;
+namespace TransportR.Hub.Interfaces;
 
 /// <summary>
 /// Abstraction for notifying clients about transfer lifecycle events (e.g. cancellation, shutdown).

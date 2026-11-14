@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Hub.Interfaces;
 
 /// <summary>
 /// Interface for managing active transfers and their statistics.

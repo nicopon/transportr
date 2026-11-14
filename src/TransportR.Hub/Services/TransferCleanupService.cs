@@ -1,10 +1,9 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Hub;
-using TransportR.Interfaces;
+using TransportR.Hub.Interfaces;
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 internal class TransferCleanupService : BackgroundService
 {

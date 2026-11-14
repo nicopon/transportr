@@ -1,11 +1,10 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Hub;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Models;
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 /// <summary>
 /// Cancels a bridge left short of <see cref="BridgeState.Active"/> for <c>BridgeTimeoutSeconds</c>,

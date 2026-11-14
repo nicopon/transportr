@@ -6,7 +6,7 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Sessions;
 using TransportR.Hub;
-using TransportR.Services;
+using TransportR.Hub.Services;
 using TransportR.Tests.Infrastructure;
 using TransportR.Tests.TestHelpers;
 

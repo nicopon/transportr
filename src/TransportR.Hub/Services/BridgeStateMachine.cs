@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Models;
+using TransportR.Hub.Models;
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 /// <summary>
 /// Owns the bridge lifecycle. Callers report what happened to a participant and the machine picks

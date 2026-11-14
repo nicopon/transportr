@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Models;
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 
 /// <summary>

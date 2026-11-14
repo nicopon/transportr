@@ -2,7 +2,7 @@ using System.Net;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Hub;
-using TransportR.Interfaces;
+using TransportR.Hub.Interfaces;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

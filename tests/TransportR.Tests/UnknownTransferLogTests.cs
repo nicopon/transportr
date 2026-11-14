@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub;
-using TransportR.Interfaces;
+using TransportR.Hub.Interfaces;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

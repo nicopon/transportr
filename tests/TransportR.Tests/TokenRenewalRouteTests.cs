@@ -16,7 +16,6 @@ using TransportR.Hub.Access;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
 using TransportR.Protocol;
-using TransportR.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

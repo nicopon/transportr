@@ -5,10 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
+using TransportR.Hub.Interfaces;
 using TransportR.Hub.Services;
-using TransportR.Interfaces;
 using TransportR.Protocol;
-using TransportR.Services;
 
 namespace TransportR.Hub.Controllers;
 

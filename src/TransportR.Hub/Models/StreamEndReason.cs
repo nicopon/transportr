@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Hub.Models;
 
 /// <summary>
 /// Indicates how a stream ended.

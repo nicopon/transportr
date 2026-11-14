@@ -3,8 +3,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
-using TransportR.Interfaces;
-using TransportR.Services;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Services;
 
 namespace TransportR.Tests;
 

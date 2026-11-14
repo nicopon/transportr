@@ -1,8 +1,8 @@
 using System.Buffers;
 using Microsoft.Extensions.Logging;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Models;
 using TransportR.Hub.Streams;
-using TransportR.Interfaces;
-using TransportR.Models;
 
 namespace TransportR.Hub.Services;
 

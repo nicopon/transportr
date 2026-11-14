@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Models;
+using TransportR.Hub.Models;
 
 namespace TransportR.Tests;
 

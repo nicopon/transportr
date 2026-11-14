@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
-using TransportR.Models;
+using TransportR.Hub.Models;
 
-namespace TransportR.Interfaces;
+namespace TransportR.Hub.Interfaces;
 
 /// <summary>
 /// Manages connection bridges for transfer streaming.

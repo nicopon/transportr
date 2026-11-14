@@ -1,9 +1,8 @@
 using System.Collections.Concurrent;
-using TransportR.Hub;
-using TransportR.Interfaces;
+using TransportR.Hub.Interfaces;
 
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 /// <summary>
 /// Manages active transfers and their statistics.

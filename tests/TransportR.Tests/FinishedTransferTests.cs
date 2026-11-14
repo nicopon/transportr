@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client;
 using TransportR.Client.Configuration;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Models;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
-using TransportR.Services;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Services;
 
-namespace TransportR.Models;
+namespace TransportR.Hub.Models;
 
 /// <summary>
 /// Represents a bridge between sender and receiver streams.

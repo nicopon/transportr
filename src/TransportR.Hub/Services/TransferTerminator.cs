@@ -1,10 +1,9 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Hub;
+using TransportR.Hub.Interfaces;
+using TransportR.Hub.Models;
 using TransportR.Hub.Streams;
-using TransportR.Interfaces;
-using TransportR.Models;
 
-namespace TransportR.Services;
+namespace TransportR.Hub.Services;
 
 internal class TransferTerminator : ITransferTerminator, ITransferRetirer
 {

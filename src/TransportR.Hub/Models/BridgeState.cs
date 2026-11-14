@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Hub.Models;
 
 /// <summary>
 /// Bridge state for lifecycle management.
