@@ -107,5 +107,5 @@ The hub never deserializes batch payloads:
 
 ## Dependencies
 
-- `TransportR` - Core interfaces
+- `TransportR` - The contract shared with the client
 - `Microsoft.AspNetCore.App` - ASP.NET Core framework

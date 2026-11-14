@@ -8,7 +8,7 @@
     
     <!-- NuGet Package Metadata -->
     <PackageId>TransportR</PackageId>
-    <Description>TransportR core: the wire protocol and the contracts shared by the client, the hub and the state stores, for moving record sets between .NET applications through a hub</Description>
+    <Description>TransportR core: the few types the client and the hub of a TransportR transfer both read, for moving record sets between .NET applications through a hub</Description>
     <PackageTags>transport;streaming;bulk-data</PackageTags>
   </PropertyGroup>
 

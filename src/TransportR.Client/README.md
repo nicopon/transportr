@@ -154,6 +154,46 @@ The builder carries the item type, so a serializer that cannot carry it is not a
 exists: `new TransportRClientBuilder<string>().WithArrowSerialization()` does not compile, rather
 than building a client that fails on its first batch.
 
+## Contracts
+
+### IBatchSerializer<T>
+
+```csharp
+public interface IBatchSerializer<T>
+{
+    Task SerializeBatchAsync(Stream destination, List<T> batch);
+    Task<List<T>?> DeserializeBatchAsync(Stream source);
+}
+```
+
+The item type is on the interface, not on the call. A per-call generic would claim that every
+implementation carries every type, which none can and one cannot at all: a serializer built on
+Apache Arrow carries record batches only, and on a generic contract it could reject anything else
+only by throwing at the first batch. Typed here, the mismatch is a compile error.
+
+### IDataSender<T> / IDataReceiver<T>
+
+```csharp
+public interface IDataSender<T> : IDataClient
+{
+    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
+    Task<List<ClientInfo>> GetReceiversAsync(CancellationToken ct = default);
+    event Func<Send<T>, Task> OnSendRequested;   // a transfer the hub's host opened
+}
+
+public interface IDataReceiver<T> : IDataClient
+{
+    event Func<Receive<T>, Task> OnTransferStarted;
+}
+```
+
+### ByteSend / ByteReceive
+
+The handles of a byte-stream transfer, which `ByteStreamClient` opens: raw bytes, no item type and no
+serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)` and `CompleteAsync`; `ByteReceive` has
+`ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are abstract, like `Send<T>` and `Receive<T>`, and
+are disposed once the transfer has ended.
+
 ## License
 
 MIT

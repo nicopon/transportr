@@ -11,7 +11,7 @@
 ### Core Projects
 
 ```
-TransportR/                              # Interfaces, protocols, abstractions
+TransportR/                              # Shared contract: routes, client description, write transport
 TransportR.Client/                       # Control requests, event stream and HTTP streaming client & OAuth2 auth
 TransportR.Hub/                          # HTTP API server (control and data planes) & group flow control
 TransportR.Serialization.MessagePack/    # MessagePack + Lz4 serializer
@@ -256,14 +256,14 @@ preferred affinity.**
 
 ---
 
-## Core Interfaces
+## Main Interfaces
 
 | Interface | Purpose | Location |
 |-----------|---------|----------|
-| `IDataSender<T>` | Initiate transfers, discover receivers | [ITransportRClient.cs](src/TransportR/Interfaces/ITransportRClient.cs) |
-| `IDataReceiver<T>` | Receive transfers via event | [ITransportRClient.cs](src/TransportR/Interfaces/ITransportRClient.cs) |
-| `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR/Interfaces/IBatchSerializer.cs) |
-| `IHubProgressMonitor` | Hub-side monitoring (bytes only) | [IHubProgressMonitor.cs](src/TransportR/Interfaces/IHubProgressMonitor.cs) |
+| `IDataSender<T>` | Initiate transfers, discover receivers | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
+| `IDataReceiver<T>` | Receive transfers via event | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
+| `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR.Client/Abstractions/IBatchSerializer.cs) |
+| `IHubProgressMonitor` | Hub-side monitoring (bytes only) | [IHubProgressMonitor.cs](src/TransportR.Hub/Abstractions/IHubProgressMonitor.cs) |
 
 > The hub operates as a "dumb-pipe" and only tracks bytes.
 

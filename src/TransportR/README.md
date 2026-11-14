@@ -1,51 +1,16 @@
 # TransportR
 
-Core library containing interfaces, protocols, and abstractions for the TransportR distributed data transfer solution.
+Core library of the TransportR distributed data transfer solution: the few types the client and the hub both read.
 
 ## Purpose
 
-This project defines the contracts and the binary protocol shared by the client, the hub and the state stores. It
-references no ASP.NET Core package and holds no hub service: those live in `TransportR.Hub`.
-
-## Key Interfaces
-
-### IBatchSerializer<T>
-
-```csharp
-public interface IBatchSerializer<T>
-{
-    Task SerializeBatchAsync(Stream destination, List<T> batch);
-    Task<List<T>?> DeserializeBatchAsync(Stream source);
-}
-```
-
-The item type is on the interface, not on the call. A per-call generic would claim that every
-implementation carries every type, which none can and one cannot at all: a serializer built on
-Apache Arrow carries record batches only, and on a generic contract it could reject anything else
-only by throwing at the first batch. Typed here, the mismatch is a compile error.
-
-### IDataSender<T> / IDataReceiver<T>
-
-```csharp
-public interface IDataSender<T> : IDataClient
-{
-    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
-    Task<List<ClientInfo>> GetReceiversAsync(CancellationToken ct = default);
-    event Func<Send<T>, Task> OnSendRequested;   // a transfer the hub's host opened
-}
-
-public interface IDataReceiver<T> : IDataClient
-{
-    event Func<Receive<T>, Task> OnTransferStarted;
-}
-```
-
-### ByteSend / ByteReceive
-
-The handles of a byte-stream transfer, which `ByteStreamClient` (in `TransportR.Client`) opens: raw bytes, no item type and no
-serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)` and `CompleteAsync`; `ByteReceive` has
-`ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are abstract, like `Send<T>` and `Receive<T>`, and
-are disposed once the transfer has ended.
+This project holds what both ends of a transfer share and neither keeps for itself, in the `TransportR` namespace:
+`WireRoutes`, the path segments of the hub's routes; `TokenRenewalResponse`, the answer to a token renewal; `ClientInfo`
+and `ConnectionType`, which describe a client and the stream it opens; `WriteTransport`, what carries a write stream; and
+`HubRequestFailedException`, raised on the hub by `ITransferInitiator` and on a client by each request it makes of the hub.
+The handles and contracts of the client (`Send<T>`, `IBatchSerializer<T>`, `IDataSender<T>`, ...) are in `TransportR.Client`;
+those of the application hosting the hub (`IStateStore`, `IFlowControlService`, `ITransferInitiator`, ...) are in
+`TransportR.Hub`. It references no ASP.NET Core package and holds no hub service.
 
 ## Protocols
 
