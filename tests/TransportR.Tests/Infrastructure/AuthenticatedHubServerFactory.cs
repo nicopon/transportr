@@ -37,16 +37,18 @@ public static class AuthenticatedHubServerFactory
     /// <summary>
     /// An in-memory host.
     /// <paramref name="configureServices"/> runs once the hub is built, so what it registers replaces
-    /// the hub's own (the identity provider, the state store). <paramref name="mapHub"/> maps the hub
-    /// in place of <c>MapDataHub(requireAuth: true)</c>.
+    /// the hub's own (the identity provider, the state store); <paramref name="configureBeforeHub"/>
+    /// runs ahead of <c>AddDataHub()</c>, so what it registers is what the hub finds there.
+    /// <paramref name="mapHub"/> maps the hub in place of <c>MapDataHub(requireAuth: true)</c>.
     /// </summary>
     public static IHost CreateHost(
         Action<DataHubBuilder>? configureHub = null,
         Action<IServiceCollection>? configureServices = null,
-        Action<IEndpointRouteBuilder>? mapHub = null)
+        Action<IEndpointRouteBuilder>? mapHub = null,
+        Action<IServiceCollection>? configureBeforeHub = null)
     {
         return new HostBuilder()
-            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub, configureServices, mapHub))
+            .ConfigureWebHost(webBuilder => Configure(webBuilder.UseTestServer(), configureHub, configureServices, mapHub, configureBeforeHub))
             .Start();
     }
 
@@ -72,7 +74,8 @@ public static class AuthenticatedHubServerFactory
         IWebHostBuilder webBuilder,
         Action<DataHubBuilder>? configureHub,
         Action<IServiceCollection>? configureServices = null,
-        Action<IEndpointRouteBuilder>? mapHub = null)
+        Action<IEndpointRouteBuilder>? mapHub = null,
+        Action<IServiceCollection>? configureBeforeHub = null)
     {
         webBuilder
             .ConfigureServices(services =>
@@ -83,9 +86,9 @@ public static class AuthenticatedHubServerFactory
                         .AddScheme<AuthenticationSchemeOptions, StubAuthHandler>(Scheme, _ => { });
                 services.AddAuthorization();
 
+                configureBeforeHub?.Invoke(services);
                 var builder = services.AddDataHub();
                 configureHub?.Invoke(builder);
-                builder.Build();
                 configureServices?.Invoke(services);
             })
             .Configure(app =>

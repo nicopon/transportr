@@ -11,8 +11,7 @@ Provides `RedisStateStore`, an `IStateStore` implementation that stores client r
 ```csharp
 builder.Services.AddDataHub()
     .UseRedisStore("localhost:6379")
-    .UseAffinityHandoff()
-    .Build();
+    .UseAffinityHandoff();
 ```
 
 ## Features

@@ -51,8 +51,7 @@ public static class TestHubServerFactory
                         {
                             options.AllowAnonymous = true;
                             options.DefaultGroups = ["test"];
-                        })
-                        .Build();
+                        });
 
                 configureServices?.Invoke(services);
             })

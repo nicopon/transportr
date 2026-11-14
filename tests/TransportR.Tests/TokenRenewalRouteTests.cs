@@ -153,7 +153,7 @@ public class TokenRenewalRouteTests
                 .UseTestServer()
                 .ConfigureServices(services =>
                 {
-                    services.AddDataHub().UseDevMode(options => options.DefaultGroups = ["test"]).Build();
+                    services.AddDataHub().UseDevMode(options => options.DefaultGroups = ["test"]);
                 })
                 .Configure(app =>
                 {

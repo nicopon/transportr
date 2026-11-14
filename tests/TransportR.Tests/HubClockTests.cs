@@ -22,7 +22,7 @@ public class HubClockTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TimeProvider>(clock);
-        services.AddDataHub().UseDevMode().Build();
+        services.AddDataHub().UseDevMode();
         await using var provider = services.BuildServiceProvider();
 
         var transfers = provider.GetRequiredService<ITransferManager>();

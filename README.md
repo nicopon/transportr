@@ -77,8 +77,7 @@ using TransportR.Hub;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDataHub()
-    .UseDevMode()   // trusts client-provided identity — see the Security guide before production
-    .Build();
+    .UseDevMode();   // trusts client-provided identity — see the Security guide before production
 
 var app = builder.Build();
 app.MapDataHub();

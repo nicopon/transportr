@@ -18,7 +18,7 @@ public class AccessOptionsOrderTests
         var services = new ServiceCollection();
 
         if (setBefore) services.Configure<AccessOptions>(o => o.ClientsMayOpenTransfers = false);
-        services.AddDataHub().UseDevMode().Build();
+        services.AddDataHub().UseDevMode();
         if (!setBefore) services.Configure<AccessOptions>(o => o.ClientsMayOpenTransfers = false);
 
         using var provider = services.BuildServiceProvider();

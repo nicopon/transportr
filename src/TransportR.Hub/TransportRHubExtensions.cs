@@ -20,8 +20,6 @@ namespace TransportR.Hub;
 public class DataHubBuilder
 {
     public IServiceCollection Services { get; }
-    internal bool IsDevMode { get; private set; }
-    internal DevIdentityOptions? DevOptions { get; private set; }
 
     internal DataHubBuilder(IServiceCollection services)
     {
@@ -31,11 +29,17 @@ public class DataHubBuilder
     /// <summary>
     /// Enables development mode which trusts client-provided identity values.
     /// </summary>
+    /// <remarks>
+    /// Replaces the identity provider registered so far: the token-validating one <c>AddDataHub()</c> adds
+    /// by default, or one the host registered before it. A provider the host registers afterwards
+    /// replaces this one in turn.
+    /// </remarks>
     public DataHubBuilder UseDevMode(Action<DevIdentityOptions>? configure = null)
     {
-        IsDevMode = true;
-        DevOptions = new DevIdentityOptions();
-        configure?.Invoke(DevOptions);
+        var options = new DevIdentityOptions();
+        configure?.Invoke(options);
+        Services.Replace(ServiceDescriptor.Singleton(options));
+        Services.Replace(ServiceDescriptor.Singleton<IClientIdentityProvider, DevIdentityProvider>());
         return this;
     }
 
@@ -138,9 +142,13 @@ public static class TransportRHubExtensions
         services.AddSingleton<ITransportRServer, TransportRServer>();
         services.AddSingleton<UploadEpochs>();
 
-        // TransportRServer requires an IHubProgressMonitor; TryAdd so a host that registers its
-        // own before Build() keeps seeing it used, whichever order that registration happens in.
+        // TransportRServer requires an IHubProgressMonitor. TryAdd, so a monitor the host registered
+        // before this call is kept; one it registers afterwards is the last, and wins.
         services.TryAddSingleton<IHubProgressMonitor, NoopHubProgressMonitor>();
+
+        // Tokens are validated unless the host says otherwise: UseDevMode replaces this provider, and a
+        // provider the host registered before this call is kept.
+        services.TryAddSingleton<IClientIdentityProvider, JwtIdentityProvider>();
 
         // The data plane (StreamController) and the control plane (ClientController).
         services.AddControllers()
@@ -151,46 +159,21 @@ public static class TransportRHubExtensions
     }
 
     /// <summary>
-    /// Finalizes DataHub configuration and registers the identity provider.
-    /// Must be called after the builder is configured.
-    /// </summary>
-    internal static void FinalizeDataHub(this IServiceCollection services, DataHubBuilder builder)
-    {
-        if (builder.IsDevMode)
-        {
-            var options = builder.DevOptions ?? new DevIdentityOptions();
-            services.AddSingleton(options);
-            services.AddSingleton<IClientIdentityProvider, DevIdentityProvider>();
-        }
-        else
-        {
-            services.AddSingleton<IClientIdentityProvider, JwtIdentityProvider>();
-        }
-    }
-
-    /// <summary>
     /// Maps the StreamController and ClientController endpoints: the data plane and the control plane.
     /// </summary>
     /// <param name="requireAuth">
-    /// Whether authorization is armed on both planes. Left null, it follows the mode <c>Build()</c>
-    /// chose: armed for a hub that validates tokens, not for one in dev mode. Armed, the host must have
-    /// called <c>UseAuthentication()</c> and <c>UseAuthorization()</c>. Not armed, the data plane is open
-    /// to anyone who knows a transfer id, which is the documented meaning of dev mode; a hub that
-    /// validates tokens and is mapped that way logs a warning when it starts, as a hub in dev mode does.
+    /// Whether authorization is armed on both planes. Left null, it follows the identity provider
+    /// registered: armed for a hub that validates tokens or has a provider of the host's own, not for
+    /// one in dev mode. Armed, the host must have called <c>UseAuthentication()</c> and
+    /// <c>UseAuthorization()</c>. Not armed, the data plane is open to anyone who knows a transfer id,
+    /// which is the documented meaning of dev mode; a hub that validates tokens and is mapped that way
+    /// logs a warning when it starts, as a hub in dev mode does.
     /// </param>
     public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool? requireAuth = null)
     {
-        // AddDataHub() registers everything except the identity provider, which only Build() knows
-        // how to choose. Skipping Build() therefore yields a hub that starts, accepts connections
-        // and fails on the first one — at the far end of a scenario, in a resolution error naming a
-        // type the host never mentioned. Refusing here names the missing call instead.
-        var identityProvider = endpoints.ServiceProvider.GetService<IClientIdentityProvider>()
-            ?? throw new InvalidOperationException(
-                "TransportR is not fully configured: AddDataHub() must be followed by Build().");
-
-        // Read from the provider Build() registered rather than from the requests: a request without a
+        // Read from the provider registered rather than from the requests: a request without a
         // token looks the same on a hub in dev mode and on one that validates tokens.
-        var devMode = identityProvider is DevIdentityProvider;
+        var devMode = endpoints.ServiceProvider.GetRequiredService<IClientIdentityProvider>() is DevIdentityProvider;
         var armed = requireAuth ?? !devMode;
 
         var logger = endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(TransportRHubExtensions));
@@ -224,20 +207,5 @@ public static class TransportRHubExtensions
         }
 
         return endpoints;
-    }
-}
-
-/// <summary>
-/// Extension to complete DataHub registration after builder configuration.
-/// </summary>
-public static class DataHubBuilderExtensions
-{
-    /// <summary>
-    /// Completes the DataHub configuration by registering the identity provider.
-    /// </summary>
-    public static IServiceCollection Build(this DataHubBuilder builder)
-    {
-        builder.Services.FinalizeDataHub(builder);
-        return builder.Services;
     }
 }

@@ -17,7 +17,7 @@ public class DataHubProgressMonitorTests
         var hostMonitor = new RecordingProgressMonitor();
         services.AddSingleton<IHubProgressMonitor>(hostMonitor);
 
-        services.AddDataHub().UseDevMode().Build();
+        services.AddDataHub().UseDevMode();
 
         using var provider = services.BuildServiceProvider();
         Assert.Same(hostMonitor, provider.GetRequiredService<IHubProgressMonitor>());

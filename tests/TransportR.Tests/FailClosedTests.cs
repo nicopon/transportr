@@ -210,7 +210,7 @@ public class FailClosedTests
                 .UseTestServer()
                 .ConfigureServices(services =>
                 {
-                    services.AddDataHub().UseDevMode(o => o.DefaultGroups = ["test"]).Build();
+                    services.AddDataHub().UseDevMode(o => o.DefaultGroups = ["test"]);
                     services.Configure<AccessOptions>(o => o.AccessSweepIntervalSeconds = 1);
                 })
                 .Configure(app =>

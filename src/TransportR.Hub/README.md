@@ -52,14 +52,14 @@ var builder = WebApplication.CreateBuilder(args);
 
 // The hub forwards opaque chunks and never deserializes a payload, so it registers no
 // serializer: that is a client-side decision between the two ends of a transfer.
-// Build() is required: it registers the identity provider (JWT by default, UseDevMode() for development).
-builder.Services.AddDataHub().Build();
+// Tokens are validated by default; UseDevMode() trusts the client's claims for development, and an
+// IClientIdentityProvider the host registers, before or after this call, is the one that serves.
+builder.Services.AddDataHub();
 
 // For HA deployment (Redis + Affinity):
 // builder.Services.AddDataHub()
 //     .UseRedisStore("localhost:6379")
-//     .UseAffinityHandoff()
-//     .Build();
+//     .UseAffinityHandoff();
 
 var app = builder.Build();
 
@@ -86,7 +86,7 @@ using var host = new HostBuilder()
         .ConfigureServices(services =>
         {
             services.AddSingleton<TimeProvider>(clock);
-            services.AddDataHub().UseDevMode().Build();
+            services.AddDataHub().UseDevMode();
         })
         .Configure(app =>
         {

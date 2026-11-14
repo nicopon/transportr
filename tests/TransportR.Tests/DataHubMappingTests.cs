@@ -8,8 +8,8 @@ using TransportR.Tests.Infrastructure;
 namespace TransportR.Tests;
 
 /// <summary>
-/// What <c>MapDataHub()</c> arms when the host says nothing: the mode <c>Build()</c> chose, so a hub
-/// that validates tokens does not serve its data plane to callers that present none.
+/// What <c>MapDataHub()</c> arms when the host says nothing: what its identity provider implies, so a
+/// hub that validates tokens does not serve its data plane to callers that present none.
 /// </summary>
 public class DataHubMappingTests
 {

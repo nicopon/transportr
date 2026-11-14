@@ -277,7 +277,7 @@ public class TransferIntegrationTests
     public async Task The_Readme_Quick_Start_Configuration_Delivers()
     {
         // The hub exactly as the README's Quick Start builds it: UseDevMode() with no default group.
-        using var host = CreateHost(services => services.AddDataHub().UseDevMode().Build());
+        using var host = CreateHost(services => services.AddDataHub().UseDevMode());
         var handler = host.GetTestServer().CreateHandler();
 
         await using var sender = CreateClient(handler, "http://localhost");
@@ -319,7 +319,7 @@ public class TransferIntegrationTests
     [Fact]
     public async Task A_Client_The_Hub_Refused_Stays_Disconnected_Until_It_Connects_Again()
     {
-        using var host = CreateHost(services => services.AddDataHub().UseDevMode().Build());
+        using var host = CreateHost(services => services.AddDataHub().UseDevMode());
         await using var client = CreateClient(host.GetTestServer().CreateHandler(), "http://localhost");
 
         await Assert.ThrowsAsync<HubRequestFailedException>(() => client.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10)));
@@ -418,8 +418,7 @@ public class TransferIntegrationTests
                                 {
                                     options.AllowAnonymous = true;
                                     options.DefaultGroups = ["test"];
-                                })
-                                .Build();
+                                });
                     })
                     .Configure(app =>
                     {

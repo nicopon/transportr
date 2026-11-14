@@ -113,19 +113,14 @@ else
     Console.WriteLine("StateStore: InMemory (Default)");
 }
 
-if (enableAuth)
+// Production mode keeps the JWT identity provider AddDataHub registers; development mode trusts the client's identity.
+if (!enableAuth)
 {
-    // Production mode: Use JWT identity provider (registered by default)
-    dataHubBuilder.Build();
-}
-else
-{
-    // Development mode: Trust client-provided identity
     dataHubBuilder.UseDevMode(options =>
     {
         options.DefaultGroups = new List<string> { "dev" };
         options.AllowAnonymous = false;
-    }).Build();
+    });
 }
 
 // Flow Control Configuration (environment-driven)
