@@ -330,8 +330,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
             return null;
         }
 
-        var delay = TimeSpan.FromTicks(Math.Min(FirstRetry.Ticks << Math.Min(failures - 1, 6), MaxRetry.Ticks));
-        return DateTime.UtcNow + delay * (0.5 + Random.Shared.NextDouble() * 0.5);
+        return DateTime.UtcNow + Backoff.Jittered(Backoff.Ceiling(FirstRetry, MaxRetry, failures));
     }
 
     public async ValueTask DisposeAsync()

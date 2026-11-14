@@ -429,14 +429,13 @@ internal sealed class ControlChannel : IAsyncDisposable
 
     private async Task ReopenAsync(EventStream lost, CancellationToken cancellationToken)
     {
-        var delay = FirstReopenDelay;
+        var failures = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
+            var ceiling = Backoff.Ceiling(FirstReopenDelay, MaxReopenDelay, failures + 1);
             try
             {
-                // Half to full delay: a fleet cut off together, by an identity provider that went down,
-                // must not come back in step.
-                await Task.Delay(delay * (0.5 + Random.Shared.NextDouble() * 0.5), cancellationToken);
+                await Task.Delay(Backoff.Jittered(ceiling), cancellationToken);
 
                 await ReopenOnceAsync(lost, token: null, cancellationToken);
                 return;
@@ -448,8 +447,8 @@ internal sealed class ControlChannel : IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogWarning("Could not open the stream of events again, next attempt in at most {Delay}s: {Message}",
-                    delay.TotalSeconds, ex.Message);
-                delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxReopenDelay.Ticks));
+                    ceiling.TotalSeconds, ex.Message);
+                failures++;
             }
         }
     }

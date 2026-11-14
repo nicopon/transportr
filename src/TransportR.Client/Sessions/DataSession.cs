@@ -33,6 +33,17 @@ internal class DataSession : IDataSession
     // Bounds a heartbeat, so that one sent to a hub out of reach gives way to the next.
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(5);
 
+    // The pause after a probe the hub did not answer starts at the first and doubles with each miss of
+    // an episode, so that a hub that stays down is asked a few times a minute and not every other
+    // second. The maximum is the longest a hub that comes back waits to be found, and has to stay well
+    // below the hub's TransferInactivityTimeoutSeconds, past which it ends a transfer nobody works on.
+    private static readonly TimeSpan FirstProbePause = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan MaxProbePause = TimeSpan.FromSeconds(15);
+
+    // The pause after an unexpected error of the session loop, which would otherwise repeat as fast
+    // as it fails.
+    private static readonly TimeSpan LoopErrorPause = TimeSpan.FromSeconds(1);
+
     private const string ReleasedBeforeCompletion =
         "The transfer handle was released before the transfer completed; the transfer was abandoned.";
 
@@ -608,18 +619,20 @@ internal class DataSession : IDataSession
 
     #region Streams Management
 
-    // Half to full delay: sessions cut together, by a hub that restarted, must not retry in step.
-    private static TimeSpan Jittered(TimeSpan delay) => delay * (0.5 + Random.Shared.NextDouble() * 0.5);
-
     private async Task RunSessionLoop(CancellationToken token)
     {
         _config.Logger.LogInformation("Session Loop {TransferId} Starting. IsSender={IsSender}", TransferId, IsSender);
 
+        var missedProbes = 0;
         while (!token.IsCancellationRequested && !IsStopped)
         {
             try
             {
-                switch (_fsm.CurrentState)
+                var state = _fsm.CurrentState;
+                // A probe the hub answers ends the episode, and so does any other way out of Reconnecting.
+                if (state != SessionState.Reconnecting) missedProbes = 0;
+
+                switch (state)
                 {
                     case SessionState.Starting:
                     case SessionState.Streaming:
@@ -641,8 +654,8 @@ internal class DataSession : IDataSession
                         }
                         else
                         {
-                            // Wait before retrying probe
-                            await Task.Delay(Jittered(TimeSpan.FromSeconds(2)), token);
+                            missedProbes++;
+                            await Task.Delay(Backoff.Jittered(Backoff.Ceiling(FirstProbePause, MaxProbePause, missedProbes)), token);
                         }
                         break;
 
@@ -669,7 +682,7 @@ internal class DataSession : IDataSession
             catch (Exception ex)
             {
                 _config.Logger.LogError(ex, "Session Loop Error");
-                await Task.Delay(Jittered(TimeSpan.FromSeconds(1)), token);
+                await Task.Delay(Backoff.Jittered(LoopErrorPause), token);
             }
         }
 
