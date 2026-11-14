@@ -7,9 +7,9 @@ using TransportR.Hub.Models;
 namespace TransportR.Hub.Services;
 
 /// <summary>
-/// Cancels a bridge left short of <see cref="BridgeState.Active"/> for <c>BridgeTimeoutSeconds</c>,
-/// which releases the requests parked on it, and ends its transfer through
-/// <see cref="ITransferTerminator"/>.
+/// Ends the transfer of a bridge left short of <see cref="BridgeState.Active"/> for
+/// <c>BridgeTimeoutSeconds</c> through <see cref="ITransferTerminator"/>, which cancels the bridge and
+/// so releases the requests parked on it.
 /// </summary>
 internal class BridgeCleanupService : BackgroundService
 {
@@ -68,8 +68,8 @@ internal class BridgeCleanupService : BackgroundService
         {
             var bridge = kvp.Value;
 
-            // If the bridge is Active, we assume it's healthy (or managed by TCP keepalives)
-            // We only cleanup bridges that are stuck waiting for a peer or idle.
+            // An Active bridge is judged by TransferCleanupService, on the bytes its streams carry and
+            // the transfer's heartbeats; this sweep only ends a bridge stuck waiting for a peer.
             if (bridge.State == BridgeState.Active)
                 continue;
 
@@ -80,7 +80,6 @@ internal class BridgeCleanupService : BackgroundService
             _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Ending its transfer.",
                 bridge.BridgeKey, idleTime.TotalSeconds);
 
-            bridge.Cancel();
             await _terminator.TerminateAsync(bridge.TransferId, ct).ConfigureAwait(false);
         }
     }
