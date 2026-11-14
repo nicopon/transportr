@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client.Configuration;
 using TransportR.Client.Sessions;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using TransportR.Models;
 using TransportR.Services;
 using TransportR.Tests.Infrastructure;

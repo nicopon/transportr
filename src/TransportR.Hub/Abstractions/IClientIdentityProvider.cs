@@ -1,6 +1,4 @@
-using TransportR.Models;
-
-namespace TransportR.Interfaces;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Provides client identity resolution from connection context.

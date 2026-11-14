@@ -2,8 +2,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 

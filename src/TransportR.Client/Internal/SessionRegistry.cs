@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 
 namespace TransportR.Client.Internal;
 

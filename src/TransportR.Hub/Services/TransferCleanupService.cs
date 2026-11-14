@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
+using TransportR.Hub;
 using TransportR.Interfaces;
 
 namespace TransportR.Services;

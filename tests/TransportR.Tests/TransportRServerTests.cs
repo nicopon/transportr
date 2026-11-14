@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
+using TransportR.Hub;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;

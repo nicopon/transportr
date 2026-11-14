@@ -5,9 +5,9 @@ using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Internal;
+using TransportR.Hub;
 using TransportR.Hub.Configuration;
 using TransportR.Hub.Services;
-using TransportR.Interfaces;
 using TransportR.Serialization.MessagePack.Services;
 using TransportR.Tests.Infrastructure;
 

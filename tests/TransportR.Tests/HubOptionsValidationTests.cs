@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using TransportR.Configuration;
+using TransportR.Hub;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

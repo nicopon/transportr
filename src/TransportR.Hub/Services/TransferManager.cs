@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
+using TransportR.Hub;
 using TransportR.Interfaces;
 
-using TransportR.Models;
 
 namespace TransportR.Services;
 

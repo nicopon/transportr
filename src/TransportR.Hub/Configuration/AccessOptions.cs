@@ -31,7 +31,7 @@ public class AccessOptions
     /// <summary>
     /// Whether a client may look for receivers and open a transfer itself. Default: true. When
     /// false, a client asking for either is refused with an error, and only the host opens
-    /// transfers, through <see cref="Interfaces.ITransferInitiator"/>.
+    /// transfers, through <see cref="ITransferInitiator"/>.
     /// </summary>
     public bool ClientsMayOpenTransfers { get; set; } = true;
 }

@@ -1,4 +1,4 @@
-namespace TransportR.Configuration;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Controls how long a client registration survives in the state store.

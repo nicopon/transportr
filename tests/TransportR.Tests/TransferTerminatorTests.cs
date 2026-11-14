@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Hub;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Services;
 
 namespace TransportR.Tests;

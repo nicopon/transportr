@@ -4,7 +4,6 @@ using TransportR.Abstractions;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
 using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Protocol;
 
 namespace TransportR.Hub.Services;

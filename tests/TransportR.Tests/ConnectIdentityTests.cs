@@ -1,6 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

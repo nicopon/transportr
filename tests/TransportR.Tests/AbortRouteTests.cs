@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using TransportR.Hub;
 using TransportR.Interfaces;
-using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
 

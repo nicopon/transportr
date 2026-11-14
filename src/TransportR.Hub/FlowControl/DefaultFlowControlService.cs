@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace TransportR.FlowControl;
 

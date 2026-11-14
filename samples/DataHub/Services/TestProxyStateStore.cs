@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace DataHub.Services;
 

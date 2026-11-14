@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Configuration;
-using TransportR.Interfaces;
-using TransportR.Models;
 
 namespace TransportR.Hub.Access;
 

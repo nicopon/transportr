@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace TransportR.Identity;
 

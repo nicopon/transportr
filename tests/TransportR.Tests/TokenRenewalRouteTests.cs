@@ -18,7 +18,6 @@ using TransportR.Hub.Configuration;
 using TransportR.Hub.Controllers;
 using TransportR.Hub.Services;
 using TransportR.Identity;
-using TransportR.Interfaces;
 using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Services;

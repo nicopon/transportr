@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Ends a transfer unilaterally: state removed, bridges removed, both participants told to cancel.

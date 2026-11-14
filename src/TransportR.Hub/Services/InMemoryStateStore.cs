@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
-using TransportR.Configuration;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace TransportR.Services;
 

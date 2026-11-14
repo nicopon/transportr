@@ -1,5 +1,3 @@
-using TransportR.Interfaces;
-
 namespace TransportR.Hub.Services;
 
 /// <summary>

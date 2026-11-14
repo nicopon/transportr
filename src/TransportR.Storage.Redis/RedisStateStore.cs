@@ -1,9 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
-using TransportR.Configuration;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 
 namespace TransportR.Storage.Redis;
 

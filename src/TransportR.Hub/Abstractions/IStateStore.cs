@@ -1,6 +1,4 @@
-using TransportR.Models;
-
-namespace TransportR.Interfaces;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Interface for persisting hub state (clients, transfer sessions).

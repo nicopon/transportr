@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Receives the bytes the hub forwards, as they cross it.

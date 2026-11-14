@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Represents the persistent session state of a transfer for High Availability.

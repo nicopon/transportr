@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Registration data for a connected client, stored in state store.

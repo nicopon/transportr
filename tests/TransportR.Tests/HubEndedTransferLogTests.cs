@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TransportR.Abstractions;
 using TransportR.Client.Configuration;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

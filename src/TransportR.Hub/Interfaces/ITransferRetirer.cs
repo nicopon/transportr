@@ -5,7 +5,7 @@ namespace TransportR.Interfaces;
 /// cleanly, the one signal that a transfer is over.
 /// </summary>
 /// <remarks>
-/// Kept off <see cref="ITransferTerminator"/>, which a host resolves: a host calling it would drop a
+/// Kept off <see cref="TransportR.Hub.ITransferTerminator"/>, which a host resolves: a host calling it would drop a
 /// live transfer without either client hearing of it.
 /// </remarks>
 internal interface ITransferRetirer

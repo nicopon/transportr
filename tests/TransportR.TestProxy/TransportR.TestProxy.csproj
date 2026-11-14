@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TransportR\TransportR.csproj" />
+    <ProjectReference Include="..\..\src\TransportR.Hub\TransportR.Hub.csproj" />
   </ItemGroup>
 
 </Project>

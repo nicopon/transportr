@@ -1,4 +1,4 @@
-namespace TransportR.Models;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Represents a resolved client identity.

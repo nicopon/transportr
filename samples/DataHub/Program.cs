@@ -9,7 +9,6 @@ using Serilog;
 using TransportR.Auth.SimpleIdp;
 using TransportR.FlowControl;
 using TransportR.Hub;
-using TransportR.Interfaces;
 using TransportR.Storage.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -85,7 +84,7 @@ builder.Services.AddCors(options =>
 // Services
 builder.Services.AddSingleton<ProgressMonitorService>();
 builder.Services.AddSingleton<DataProxyMetrics>();
-builder.Services.AddSingleton<TransportR.Interfaces.IHubProgressMonitor, ProgressMonitorAdapter>();
+builder.Services.AddSingleton<TransportR.Hub.IHubProgressMonitor, ProgressMonitorAdapter>();
 
 // Register Serializer (required before AddDataHub)
 

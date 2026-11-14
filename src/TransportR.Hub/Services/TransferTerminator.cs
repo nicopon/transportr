@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using TransportR.Hub;
 using TransportR.Hub.Streams;
 using TransportR.Interfaces;
 using TransportR.Models;

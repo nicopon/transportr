@@ -1,6 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Hub;
-using TransportR.Interfaces;
 
 namespace TransportR.Tests;
 

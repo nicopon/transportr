@@ -8,7 +8,6 @@ using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Hub.Configuration;
-using TransportR.Interfaces;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

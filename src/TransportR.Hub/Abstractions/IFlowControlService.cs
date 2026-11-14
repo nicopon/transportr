@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Hub;
 
 /// <summary>
 /// Service for controlling data flow permissions between groups.

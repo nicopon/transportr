@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
-using TransportR.Configuration;
-using TransportR.Models;
+using TransportR.Hub;
 using TransportR.Storage.Redis;
 
 namespace TransportR.Tests;

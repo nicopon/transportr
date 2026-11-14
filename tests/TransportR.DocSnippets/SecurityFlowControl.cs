@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.FlowControl;
-using TransportR.Interfaces;
+using TransportR.Hub;
 
 namespace TransportR.DocSnippets;
 

@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using StackExchange.Redis;
 using TransportR.Hub;
-using TransportR.Interfaces;
 
 namespace TransportR.Storage.Redis;
 

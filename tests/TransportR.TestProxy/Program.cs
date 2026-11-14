@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using Microsoft.AspNetCore.Mvc;
-using TransportR.Interfaces;
-using TransportR.Models;
+using TransportR.Hub;
 using Yarp.ReverseProxy.Configuration;
 using Yarp.ReverseProxy.Forwarder;
 

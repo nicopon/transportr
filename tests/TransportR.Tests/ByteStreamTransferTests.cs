@@ -9,7 +9,7 @@ using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 using TransportR.Client.Services;
-using TransportR.Interfaces;
+using TransportR.Hub;
 using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
