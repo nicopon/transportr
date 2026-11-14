@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Sessions;
 

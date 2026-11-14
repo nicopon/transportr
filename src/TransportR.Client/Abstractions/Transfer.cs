@@ -1,4 +1,4 @@
-namespace TransportR.Abstractions;
+namespace TransportR.Client;
 
 /// <summary>
 /// Base class for transfer handles, providing the transfer identifier.

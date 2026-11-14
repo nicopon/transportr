@@ -3,7 +3,6 @@ using TransportR.Auth.ClientCredentials;
 using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Sessions;
-using TransportR.Models;
 
 namespace TransportR.Tests;
 

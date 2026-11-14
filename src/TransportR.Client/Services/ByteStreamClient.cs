@@ -5,7 +5,6 @@ using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;
-using TransportR.Interfaces;
 using TransportR.Models;
 
 namespace TransportR.Client.Services;

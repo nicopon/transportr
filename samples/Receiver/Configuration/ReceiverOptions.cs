@@ -1,4 +1,4 @@
-using TransportR.Models;
+using TransportR.Client;
 
 namespace Receiver.Configuration;
 

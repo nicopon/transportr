@@ -2,8 +2,8 @@ using Apache.Arrow;
 using Apache.Arrow.Compression;
 using Apache.Arrow.Ipc;
 using Apache.Arrow.Memory;
+using TransportR.Client;
 using TransportR.Client.Configuration;
-using TransportR.Interfaces;
 
 namespace TransportR.Serialization.Arrow.Services;
 

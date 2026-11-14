@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
 using TransportR.Client.Protocol;
-using TransportR.Interfaces;
 
 namespace TransportR.Client.Batching;
 

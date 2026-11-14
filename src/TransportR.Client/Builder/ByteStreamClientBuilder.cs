@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
-using TransportR.Models;
 
 namespace TransportR.Client;
 

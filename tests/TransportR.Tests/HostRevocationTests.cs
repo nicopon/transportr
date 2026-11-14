@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;

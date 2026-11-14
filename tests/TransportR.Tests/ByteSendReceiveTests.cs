@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;

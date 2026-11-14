@@ -2,7 +2,7 @@
 using TransportR.Abstractions;
 using TransportR.Models;
 
-namespace TransportR.Interfaces;
+namespace TransportR.Client;
 
 /// <summary>
 /// Base interface for TransportR clients that can connect to and disconnect from a hub.

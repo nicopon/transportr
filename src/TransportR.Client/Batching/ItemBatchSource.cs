@@ -1,6 +1,5 @@
 using Microsoft.IO;
 using TransportR.Client.Protocol;
-using TransportR.Interfaces;
 
 namespace TransportR.Client.Batching;
 

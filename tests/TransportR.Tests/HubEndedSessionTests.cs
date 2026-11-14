@@ -1,6 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;

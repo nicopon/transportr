@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Interfaces;
 using TransportR.Models;

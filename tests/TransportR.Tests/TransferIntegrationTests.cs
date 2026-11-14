@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
@@ -1142,7 +1143,7 @@ public class TransferIntegrationTests
         HttpMessageHandler? networkHandler = null, IBatchSerializer<string>? serializer = null)
     {
         // These transfers run on segments; a WebSocket has its own, in WebSocketTransferTests.
-        var options = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
+        var options = new ClientOptions { WriteTransportPolicy = TransportR.Client.WriteTransportPolicy.SegmentsOnly };
         configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
 

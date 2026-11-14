@@ -1,7 +1,7 @@
 using System.Buffers;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;

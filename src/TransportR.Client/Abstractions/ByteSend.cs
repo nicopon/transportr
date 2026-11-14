@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace TransportR.Abstractions;
+namespace TransportR.Client;
 
 /// <summary>
 /// Handle for sending a stream of bytes through a transfer.

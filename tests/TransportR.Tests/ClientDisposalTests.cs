@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.TestHost;
-using TransportR.Abstractions;
-using TransportR.Models;
+using TransportR.Client;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;

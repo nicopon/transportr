@@ -1,5 +1,3 @@
-using TransportR.Models;
-
 namespace TransportR.Client.Configuration;
 
 /// <summary>

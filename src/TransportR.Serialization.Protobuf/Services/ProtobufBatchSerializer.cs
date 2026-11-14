@@ -1,7 +1,7 @@
 using ProtoBuf;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
-using TransportR.Interfaces;
 using ZstdSharp;
 
 namespace TransportR.Serialization.Protobuf.Services;

@@ -1,4 +1,6 @@
-namespace TransportR.Models;
+using TransportR.Models;
+
+namespace TransportR.Client;
 
 /// <summary>
 /// Direction of a data transfer from the client's perspective.

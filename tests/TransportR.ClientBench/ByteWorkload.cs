@@ -1,4 +1,3 @@
-using TransportR.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Services;
 

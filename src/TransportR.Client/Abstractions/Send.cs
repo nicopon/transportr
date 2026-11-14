@@ -1,4 +1,4 @@
-namespace TransportR.Abstractions;
+namespace TransportR.Client;
 
 /// <summary>
 /// Handle for sending items through a transfer.

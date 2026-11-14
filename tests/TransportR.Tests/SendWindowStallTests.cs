@@ -1,4 +1,4 @@
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;

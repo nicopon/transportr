@@ -1,4 +1,4 @@
-namespace TransportR.Interfaces;
+namespace TransportR.Client;
 
 /// <summary>
 /// Defines the contract for serializing and deserializing batches of <typeparamref name="T"/>.

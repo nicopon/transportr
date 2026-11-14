@@ -147,7 +147,7 @@ public class HttpStreamManagerTests
             DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrHigher,
         };
         var context = new StubSessionContext(client);
-        context.Options.WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.PreferWebSocket;
+        context.Options.WriteTransportPolicy = TransportR.Client.WriteTransportPolicy.PreferWebSocket;
         await using var manager = new HttpStreamManager(context, context, _transferId, "http://test/data", affinity: null);
 
         manager.StartStreams(
@@ -217,7 +217,7 @@ public class HttpStreamManagerTests
 
         public int BatchFlushIntervalMs => 50;
         public RecyclableMemoryStreamManager StreamManager { get; } = new RecyclableMemoryStreamManager();
-        public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = TransportR.Models.WriteTransportPolicy.SegmentsOnly };
+        public ClientOptions Options { get; } = new ClientOptions { WriteTransportPolicy = TransportR.Client.WriteTransportPolicy.SegmentsOnly };
         public StubSessionContext(HttpClient httpClient)
         {
             HttpClient = httpClient;

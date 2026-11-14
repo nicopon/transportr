@@ -1,4 +1,4 @@
-namespace TransportR.Abstractions;
+namespace TransportR.Client;
 
 /// <summary>
 /// Thrown when a transfer ends without delivering its data.

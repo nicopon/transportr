@@ -3,7 +3,6 @@ using Apache.Arrow;
 using Apache.Arrow.Memory;
 using TransportR.Client;
 using TransportR.Client.Batching;
-using TransportR.Interfaces;
 using TransportR.Serialization.Arrow;
 using TransportR.Serialization.Arrow.Services;
 using TransportR.Serialization.Json;

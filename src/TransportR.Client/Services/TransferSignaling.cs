@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Client.Sessions;

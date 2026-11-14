@@ -1,4 +1,4 @@
-namespace TransportR.Abstractions;
+namespace TransportR.Client;
 
 /// <summary>
 /// Handle for receiving the stream of bytes of a transfer.

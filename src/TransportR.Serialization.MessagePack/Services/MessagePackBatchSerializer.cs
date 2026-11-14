@@ -1,8 +1,8 @@
 using MessagePack;
 using MessagePack.Resolvers;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
-using TransportR.Interfaces;
 
 namespace TransportR.Serialization.MessagePack.Services;
 

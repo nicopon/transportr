@@ -2,8 +2,8 @@ using System.Buffers;
 using Apache.Arrow;
 using Apache.Arrow.Memory;
 using Apache.Arrow.Types;
+using TransportR.Client;
 using TransportR.Client.Batching;
-using TransportR.Interfaces;
 using TransportR.Serialization.Arrow.Services;
 
 namespace TransportR.Tests;

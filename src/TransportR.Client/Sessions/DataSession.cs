@@ -1,7 +1,6 @@
 using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using TransportR.Abstractions;
 using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;

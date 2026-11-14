@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;

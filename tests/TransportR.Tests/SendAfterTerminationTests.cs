@@ -1,5 +1,5 @@
 using System.Net;
-using TransportR.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Sessions;
 using TransportR.Models;
 using TransportR.Tests.TestHelpers;

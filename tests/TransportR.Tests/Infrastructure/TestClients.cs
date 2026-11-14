@@ -1,9 +1,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Services;
-using TransportR.Models;
 using TransportR.Protocol;
 using TransportR.Serialization.MessagePack.Services;
 
