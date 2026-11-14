@@ -35,6 +35,14 @@ public static class WireRoutes
     public const string AbortSegment = "abort";
 
     /// <summary>
+    /// The segment that stands for a transfer id in <c>{StreamBase}/probe/send</c>: the write-transport
+    /// probe, a WebSocket's <c>GET</c> or an empty <c>POST</c> with no transfer behind it, by which a
+    /// registered client proves what the path carries before it has a transfer. Of a write stream's form,
+    /// so that a front end judges both alike; no transfer id is ever this literal.
+    /// </summary>
+    public const string ProbeSegment = "probe";
+
+    /// <summary>
     /// The control plane's base path, relative to the hub's base URL. Every request of a client hangs
     /// off it as <c>{clientId}/…</c>, the renewal of its token (<see cref="TokenSegment"/>) as much as
     /// the other segments below. A reverse proxy that filters by path has to let it through as it does

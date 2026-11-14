@@ -2,8 +2,8 @@ namespace TransportR.Protocol;
 
 /// <summary>
 /// The names on the data plane that are not paths: those of the segments a write stream is sent
-/// in, and the close statuses of one carried by a WebSocket. Shared for the reason
-/// <see cref="WireRoutes"/> is.
+/// in and of the write-transport probe, and the close statuses of a stream carried by a WebSocket.
+/// Shared for the reason <see cref="WireRoutes"/> is.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -58,6 +58,12 @@ internal static class DataPlane
     /// written to the peer. The client sends again from there what is not covered.
     /// </summary>
     public const string RelayedHeader = "TransportR-Relayed";
+
+    /// <summary>
+    /// The query parameter of the write-transport probe naming the stream of events the client is
+    /// registered on, which is all the probe is admitted on.
+    /// </summary>
+    public const string ConnectionParameter = "connection";
 
     /// <summary>
     /// The status of the <c>Close</c> that ends a write stream carried by a WebSocket: the client's when

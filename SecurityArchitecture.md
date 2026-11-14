@@ -65,6 +65,7 @@ Both planes are stated separately, because they are armed separately.
 | Unauthenticated access to the control plane | JWT required when auth enabled |
 | Unauthenticated access to the data plane | JWT required when auth enabled; **open in dev mode** |
 | A third party streaming into or out of a transfer, or ending it (`POST /api/stream/{id}/abort`) | The caller's token subject must match a participant that registered, checked when a write stream opens (a WebSocket's upgrade, or an epoch's first segment); each later segment must come from the identity that opened its epoch |
+| A write-transport probe announced in another client's name (`/api/stream/probe/send`) | A route with no transfer, admitted as the client registered on the events stream its `connection` names, by the presence heartbeat's rule: the token must attest that client's id and subject; in dev mode the registration suffices |
 | A client acting under another's id on the control plane | On every control route the `clientId` of the path must be the identity the request's token attests; refused with a 404 otherwise |
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | The flow control rules, when the host registers them; without them any group reaches any other |

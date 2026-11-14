@@ -187,8 +187,8 @@ internal class ClientController : ControllerBase
     {
         // Resolving the client by its stream is itself the keep-alive: a store with server-side
         // expiry pushes the registration's TTL back on this lookup.
-        var client = await _stateStore.GetClientByConnectionIdAsync(connectionId);
-        if (client == null || client.ClientId != clientId || !Attests(client))
+        var client = await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, User, connectionId, named: clientId);
+        if (client == null)
         {
             _logger.LogInformation("Heartbeat from {ClientId} on stream {ConnectionId}, which holds no registration. Asking the client to register again.",
                 clientId, connectionId);
@@ -387,7 +387,7 @@ internal class ClientController : ControllerBase
     private async Task<ClientRegistration?> AdmitAsync(Guid clientId)
     {
         var client = await _stateStore.GetClientAsync(clientId);
-        if (client == null || !Attests(client))
+        if (client == null || !RegisteredCaller.Attests(_identityProvider, User, client))
         {
             _logger.LogWarning("Request of {ClientId} refused: {Reason}", clientId,
                 client == null ? "no registration" : "the caller does not attest its subject");
@@ -411,18 +411,6 @@ internal class ClientController : ControllerBase
         }
 
         return participants;
-    }
-
-    // Dev mode arms no authorization here, and an unauthenticated caller attests nothing to compare.
-    // Past that, an authenticated caller must have been attested, as on the data plane.
-    private bool Attests(ClientRegistration client)
-    {
-        if (User?.Identity?.IsAuthenticated != true) return true;
-
-        var caller = _identityProvider.ResolveIdentity(User, client.ClientId, providedGroups: null);
-        return caller?.Subject != null
-            && caller.ClientId == client.ClientId
-            && AccessPolicy.SameIdentity(client.Subject, caller.Subject) == AccessVerdict.Allowed;
     }
 
     private bool RefuseIfOnlyTheHostOpensTransfers(Guid clientId, string request)

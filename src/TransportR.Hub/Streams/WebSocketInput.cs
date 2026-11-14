@@ -5,8 +5,9 @@ using TransportR.Protocol;
 namespace TransportR.Hub.Streams;
 
 /// <summary>
-/// One opening of a write stream carried by a WebSocket: answers its probe, presents its binary messages
-/// as the stream a bridge copies from, one reader, and says how it ended with a <c>Close</c>.
+/// One opening of a write stream carried by a WebSocket, or of the write-transport probe: answers its
+/// probe, presents its binary messages as the stream a bridge copies from, one reader, and says how it
+/// ended with a <c>Close</c>.
 /// </summary>
 /// <remarks>
 /// Nothing cancels the socket's own read. A token on it would kill the socket, and a stream the hub gives
@@ -184,6 +185,27 @@ internal sealed class WebSocketInput : Stream
             while (_socket.State == WebSocketState.CloseSent)
             {
                 await ReceiveAsync(bound.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is WebSocketException or IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            _logger.LogDebug("BRIDGE: The WebSocket of {BridgeKey} ended without closing ({Message})", _bridgeKey, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Ends a socket that came only to prove the path, its probe answered: waits for the client's
+    /// <c>Close</c>, within <see cref="CloseBound"/>, and answers it. Never throws, as <see cref="EndAsync"/>.
+    /// </summary>
+    public async Task EndProbeAsync()
+    {
+        try
+        {
+            using var bound = new CancellationTokenSource(CloseBound, _time);
+            var received = await ReceiveAsync(bound.Token).ConfigureAwait(false);
+            if (received.MessageType == WebSocketMessageType.Close)
+            {
+                await _socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, bound.Token).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is WebSocketException or IOException or OperationCanceledException or ObjectDisposedException)

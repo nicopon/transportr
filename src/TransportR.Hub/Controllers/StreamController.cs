@@ -292,6 +292,70 @@ internal class StreamController : ControllerBase
     }
 
     /// <summary>
+    /// The write-transport probe over a WebSocket: the opening of a write stream with no transfer behind
+    /// it, which tells the host before any transfer that the path carries one. Admitted as the presence
+    /// heartbeat is, on the client's stream of events; the hub answers the probe, announces the WebSocket,
+    /// and closes once the client does. Answered 426, and nothing announced, when it is not an upgrade.
+    /// </summary>
+    [HttpGet(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment)]
+    [MiddlewareFilter(typeof(WebSocketPipeline))]
+    public async Task ProbeOverWebSocket([FromQuery(Name = DataPlane.ConnectionParameter)] string? connection)
+    {
+        if (!HttpContext.WebSockets.IsWebSocketRequest)
+        {
+            _logger.LogWarning("Write-transport probe on stream {ConnectionId} not made over a WebSocket: the request reached the hub without an upgrade", connection);
+            Response.Headers.Upgrade = "websocket";
+            Response.StatusCode = StatusCodes.Status426UpgradeRequired;
+            return;
+        }
+
+        if (await AdmitProbeAsync(connection) is not { } clientId)
+        {
+            this.Refuse();
+            return;
+        }
+
+        using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
+        using var input = new WebSocketInput(socket, $"the write-transport probe of client {clientId}", heartbeatInterval: null, _time, _logger);
+        if (!await input.AnswerProbeAsync(HttpContext.RequestAborted))
+        {
+            return;
+        }
+
+        AnnounceProbe(clientId, WriteTransport.WebSocket);
+        await input.EndProbeAsync();
+    }
+
+    /// <summary>
+    /// The write-transport probe over segments: an empty <c>POST</c>, admitted as
+    /// <see cref="ProbeOverWebSocket"/> is, announced and answered 204.
+    /// </summary>
+    [HttpPost(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment)]
+    public async Task<IActionResult> ProbeOverSegments([FromQuery(Name = DataPlane.ConnectionParameter)] string? connection)
+    {
+        if (await AdmitProbeAsync(connection) is not { } clientId)
+        {
+            return this.Refuse();
+        }
+
+        AnnounceProbe(clientId, WriteTransport.Segments);
+        return NoContent();
+    }
+
+    // No transfer stands behind a probe, so the client's registration is all there is to admit it on.
+    private async Task<Guid?> AdmitProbeAsync(string? connection)
+    {
+        if (connection is { Length: > 0 }
+            && await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, User, connection) is { } client)
+        {
+            return client.ClientId;
+        }
+
+        _logger.LogInformation("Write-transport probe on stream {ConnectionId} refused: the stream holds no registration of the caller", connection);
+        return null;
+    }
+
+    /// <summary>
     /// Opens the epoch a segment names when this hub holds none by that id: the transfer is checked
     /// and the caller admitted here, once per epoch. Returns null once the response is written.
     /// </summary>
@@ -364,6 +428,24 @@ internal class StreamController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning("The progress monitor failed on the opening of the write stream of {BridgeKey} ({Message}); the stream goes on", bridgeKey, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Says, to the log and to the monitor, what carried a client's write-transport probe: what the hub
+    /// saw, not what the client says.
+    /// </summary>
+    private void AnnounceProbe(Guid clientId, WriteTransport transport)
+    {
+        _logger.LogInformation("Write-transport probe of client {ClientId}: the path to the hub carries {Transport}", clientId, transport);
+
+        try
+        {
+            _progressMonitor.OnWriteTransportProbed(new WriteTransportProbed(clientId, transport));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("The progress monitor failed on the write-transport probe of client {ClientId} ({Message}); the probe is answered all the same", clientId, ex.Message);
         }
     }
 

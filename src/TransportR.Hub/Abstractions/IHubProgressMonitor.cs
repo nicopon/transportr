@@ -1,7 +1,8 @@
 namespace TransportR.Hub;
 
 /// <summary>
-/// Receives the bytes the hub forwards, as they cross it, and the transport that carries each write stream.
+/// Receives the bytes the hub forwards, as they cross it, and the transport that carries each write stream
+/// or a client's write-transport probe.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -36,4 +37,13 @@ public interface IHubProgressMonitor
     /// that throws is logged and the stream goes on. The hub does not say why a client chose the transport.
     /// </summary>
     void OnWriteStreamOpened(WriteStreamOpened opened) { }
+
+    /// <summary>
+    /// Called once per write-transport probe the hub admits, with what carried it: a client that enables
+    /// the probe makes one after each registration of its stream of events, so a reconnection calls again.
+    /// It runs on the probe's request, so an implementation stays short; one that throws is logged and the
+    /// probe is answered all the same. It informs and decides nothing: each transfer still finds its own
+    /// transport when its stream opens, and the probe does not see a front end that holds bytes back after it.
+    /// </summary>
+    void OnWriteTransportProbed(WriteTransportProbed probed) { }
 }

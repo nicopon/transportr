@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -132,6 +133,43 @@ public class DataPlaneAuthorizationTests
         using var response = await SendAsync(client, HttpMethod.Get, "receive", ConnectionType.Data, ReceiverSubject);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private sealed class ProbeRecorder : IHubProgressMonitor
+    {
+        public ConcurrentQueue<WriteTransportProbed> Probed { get; } = new();
+
+        public void OnBytesTransferred(long bytes) { }
+
+        public void OnWriteTransportProbed(WriteTransportProbed probed) => Probed.Enqueue(probed);
+    }
+
+    [Fact]
+    public async Task AWriteTransportProbe_NamingAnotherClientsStream_IsRefused_AndAnnouncesNothing()
+    {
+        var monitor = new ProbeRecorder();
+        using var host = AuthenticatedHubServerFactory.CreateHost(configureServices: services => services.AddSingleton<IHubProgressMonitor>(monitor));
+        var store = host.Services.GetRequiredService<IStateStore>();
+        await store.SaveClientAsync(NewRegistration(SenderId, "conn-sender", SenderSubject));
+        await store.SaveClientAsync(NewRegistration(ReceiverId, "conn-receiver", ReceiverSubject));
+        using var client = host.GetTestClient();
+
+        // The same request on the caller's own stream is admitted: the refusal below is about the stream it names.
+        using var own = await ProbeAsync(client, "conn-sender", SenderSubject);
+        using var other = await ProbeAsync(client, "conn-receiver", SenderSubject);
+
+        Assert.Equal(HttpStatusCode.NoContent, own.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, other.StatusCode);
+        Assert.True(other.Headers.Contains(WireRoutes.RefusedHeader));
+        Assert.Equal([new WriteTransportProbed(SenderId, WriteTransport.Segments)], monitor.Probed);
+    }
+
+    private static Task<HttpResponseMessage> ProbeAsync(HttpClient client, string connectionId, string subject)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            $"http://localhost{WireRoutes.StreamBase}/{WireRoutes.ProbeSegment}/{WireRoutes.SendSegment}?{DataPlane.ConnectionParameter}={connectionId}");
+        request.Headers.Add("Authorization", $"{AuthenticatedHubServerFactory.Scheme} {subject}");
+        return client.SendAsync(request).WaitAsync(TimeSpan.FromSeconds(30));
     }
 
     [Fact]

@@ -44,8 +44,8 @@ requests by method in front of the hub must let both through. For a client to us
 and `Connection` and the socket's bytes as they come, both ways; a front end that does not relay the upgrade, or holds
 back the opening proof, makes the client use segments. The route brings `UseWebSockets` with it, so the host's pipeline
 needs nothing. See "Data Plane Transport" in `TransportRArchitecture.md`. The hub logs the transport
-of each write stream it takes on, and hands it to `IHubProgressMonitor.OnWriteStreamOpened`: that is where to
-read what a client obtained.
+of each write stream it takes on, and of each client's write-transport probe, and hands them to
+`IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`: that is where to read what a client obtained.
 
 ## Integration
 
