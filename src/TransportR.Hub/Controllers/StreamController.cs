@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
+using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Protocol;
 
@@ -22,7 +23,7 @@ internal class StreamController : ControllerBase
     private readonly ITransferManager _transferManager;
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;
-    private readonly IBridgeManager _bridgeManager;
+    private readonly BridgeManager _bridgeManager;
     private readonly AccessPolicy _policy;
     private readonly ITransferTerminator _terminator;
     private readonly UploadEpochs _epochs;
@@ -35,7 +36,7 @@ internal class StreamController : ControllerBase
         ITransferManager transferManager,
         IStateStore stateStore,
         IClientIdentityProvider identityProvider,
-        IBridgeManager bridgeManager,
+        BridgeManager bridgeManager,
         AccessPolicy policy,
         ITransferTerminator terminator,
         UploadEpochs epochs,
@@ -162,7 +163,7 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        var bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        var bridgeKey = BridgeManager.KeyFor(transferId, type);
         if (epoch is not { } epochId || offset is not >= 0 || !_epochs.TryGet(bridgeKey, epochId, out var upload))
         {
             upload = await OpenEpochAsync(transferId, type, bridgeKey, epoch, offset, heartbeatMs);
@@ -239,7 +240,7 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        var bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        var bridgeKey = BridgeManager.KeyFor(transferId, type);
         if (!AnnouncedHeartbeat.TryAccept(heartbeatMs, _inactivityTimeout, out var heartbeat))
         {
             _logger.LogWarning("WebSocket of {BridgeKey} refused: its opening announces no heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
@@ -363,8 +364,8 @@ internal class StreamController : ControllerBase
         // participants' connections that are to be told are on it. Behind a proxy with affinity, a request
         // that lost its cookie reaches another replica, which knows the transfer from the shared state
         // alone; acting there would delete that state and tell nobody.
-        if (!_bridgeManager.Bridges.ContainsKey(IBridgeManager.KeyFor(transferId, ConnectionType.Data))
-            && !_bridgeManager.Bridges.ContainsKey(IBridgeManager.KeyFor(transferId, ConnectionType.Control)))
+        if (!_bridgeManager.Bridges.ContainsKey(BridgeManager.KeyFor(transferId, ConnectionType.Data))
+            && !_bridgeManager.Bridges.ContainsKey(BridgeManager.KeyFor(transferId, ConnectionType.Control)))
         {
             _logger.LogWarning("Abort request for transfer {TransferId} refused: this hub holds none of its bridges, so the request did not follow its streams", transferId);
             return this.Refuse();
@@ -423,7 +424,7 @@ internal class StreamController : ControllerBase
     }
 
     private bool DataStreamFinished(string transferId) =>
-        _bridgeManager.Bridges.TryGetValue(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
+        _bridgeManager.Bridges.TryGetValue(BridgeManager.KeyFor(transferId, ConnectionType.Data), out var bridge)
         && bridge.State == BridgeState.Completed;
 
     // Matched by name: Enum.TryParse also takes a number, defined or not, and a comma-separated list

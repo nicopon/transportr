@@ -8,7 +8,7 @@ namespace TransportR.Hub.Services;
 internal class TransferTerminator : ITransferTerminator, ITransferRetirer
 {
     private readonly ITransferManager _transferManager;
-    private readonly IBridgeManager _bridgeManager;
+    private readonly BridgeManager _bridgeManager;
     private readonly IStateStore _stateStore;
     private readonly ITransferNotifier _notifier;
     private readonly UploadEpochs _epochs;
@@ -16,7 +16,7 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
 
     public TransferTerminator(
         ITransferManager transferManager,
-        IBridgeManager bridgeManager,
+        BridgeManager bridgeManager,
         IStateStore stateStore,
         ITransferNotifier notifier,
         UploadEpochs epochs,
@@ -82,8 +82,8 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
         await _transferManager.RemoveTransferAsync(transferId);
 
         var removed = new List<ConnectionBridge>(2);
-        if (_bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Data), out var data)) removed.Add(data);
-        if (_bridgeManager.TryRemove(IBridgeManager.KeyFor(transferId, ConnectionType.Control), out var control)) removed.Add(control);
+        if (_bridgeManager.TryRemove(BridgeManager.KeyFor(transferId, ConnectionType.Data), out var data)) removed.Add(data);
+        if (_bridgeManager.TryRemove(BridgeManager.KeyFor(transferId, ConnectionType.Control), out var control)) removed.Add(control);
         return removed;
     }
 

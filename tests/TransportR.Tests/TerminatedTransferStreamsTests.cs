@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
 using TransportR.Hub.Interfaces;
+using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
@@ -49,7 +50,7 @@ public class TerminatedTransferStreamsTests
 
         Assert.Equal(0, await received.ReadAsync(buffer).AsTask().WaitAsync(Bound));
         Assert.False(
-            host.Services.GetRequiredService<UploadEpochs>().TryGet(IBridgeManager.KeyFor(TransferId, ConnectionType.Data), epoch, out _),
+            host.Services.GetRequiredService<UploadEpochs>().TryGet(BridgeManager.KeyFor(TransferId, ConnectionType.Data), epoch, out _),
             "the sender's write stream outlived the transfer");
     }
 

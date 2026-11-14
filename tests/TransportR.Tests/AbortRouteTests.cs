@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TransportR.Hub;
 using TransportR.Hub.Interfaces;
+using TransportR.Hub.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
@@ -204,7 +205,7 @@ public class AbortRouteTests
 
         if (holdsTheBridges)
         {
-            var bridges = host.Services.GetRequiredService<IBridgeManager>();
+            var bridges = host.Services.GetRequiredService<BridgeManager>();
             bridges.GetOrCreate(TransferId, ConnectionType.Data);
             bridges.GetOrCreate(TransferId, ConnectionType.Control);
         }

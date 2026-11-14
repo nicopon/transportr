@@ -78,7 +78,7 @@ public static class TransportRHubExtensions
         services.AddSingleton<ITransferManager, TransferManager>();
 
         // BridgeManager (manages HTTP stream bridges)
-        services.AddSingleton<IBridgeManager, BridgeManager>();
+        services.AddSingleton<BridgeManager>();
 
         // Affinity options (disabled by default)
         services.Configure<AffinityOptions>(options => options.Enabled = false);

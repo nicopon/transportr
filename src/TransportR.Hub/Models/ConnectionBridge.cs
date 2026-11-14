@@ -52,7 +52,7 @@ internal class ConnectionBridge
     public ConnectionBridge(string transferId, ConnectionType type, ILogger logger, TimeProvider? timeProvider = null)
     {
         TransferId = transferId;
-        BridgeKey = IBridgeManager.KeyFor(transferId, type);
+        BridgeKey = BridgeManager.KeyFor(transferId, type);
         _fsm = new BridgeStateMachine(BridgeKey, logger);
         _time = timeProvider ?? TimeProvider.System;
         _type = type;

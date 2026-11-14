@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
 using TransportR.Hub.Interfaces;
+using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
@@ -85,7 +86,7 @@ public class DataPlaneAuthorizationTests
         // own — that is what it is for. Cancelling the bridge is how it stops in production too.
         await WithTimeoutAsync(receiver);
 
-        host.Services.GetRequiredService<IBridgeManager>()
+        host.Services.GetRequiredService<BridgeManager>()
             .Bridges[$"{TransferId}:{nameof(ConnectionType.Control)}"]
             .Cancel();
 
@@ -276,7 +277,7 @@ public class DataPlaneAuthorizationTests
     private static readonly TimeSpan SilenceWait = TimeSpan.FromSeconds(45);
 
     private static bool HoldsEpoch(IHost host, ConnectionType type, Guid epoch) =>
-        host.Services.GetRequiredService<UploadEpochs>().TryGet(IBridgeManager.KeyFor(TransferId, type), epoch, out _);
+        host.Services.GetRequiredService<UploadEpochs>().TryGet(BridgeManager.KeyFor(TransferId, type), epoch, out _);
 
     private static async Task UntilAsync(Func<bool> condition)
     {

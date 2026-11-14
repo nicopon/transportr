@@ -3,6 +3,7 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
+using TransportR.Hub.Services;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
@@ -63,7 +64,7 @@ public class FinishedTransferTests
     private static async Task AssertForgottenAsync(LoopbackHost host, params string[] transferIds)
     {
         var transfers = host.Services.GetRequiredService<ITransferManager>();
-        var bridges = host.Services.GetRequiredService<IBridgeManager>();
+        var bridges = host.Services.GetRequiredService<BridgeManager>();
 
         // The inactivity sweep acts after a minute of silence; a hub that forgets the transfer when
         // it ends does so within moments.
@@ -82,13 +83,13 @@ public class FinishedTransferTests
                 + $"known to the inactivity sweep = {transfers.GetTransfer(id) is not null}")));
     }
 
-    private static bool Held(ITransferManager transfers, IBridgeManager bridges, string transferId) =>
+    private static bool Held(ITransferManager transfers, BridgeManager bridges, string transferId) =>
         Listed(transfers, transferId) || HeldBridges(bridges, transferId).Any();
 
     private static bool Listed(ITransferManager transfers, string transferId) =>
         transfers.GetAllParticipants().ContainsKey(transferId);
 
-    private static IEnumerable<KeyValuePair<string, ConnectionBridge>> HeldBridges(IBridgeManager bridges, string transferId) =>
+    private static IEnumerable<KeyValuePair<string, ConnectionBridge>> HeldBridges(BridgeManager bridges, string transferId) =>
         bridges.Bridges.Where(b => b.Key.StartsWith(transferId + ":", StringComparison.Ordinal));
 
     /// <param name="releaseSenderAtOnce">

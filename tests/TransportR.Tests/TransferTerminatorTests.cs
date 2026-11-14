@@ -33,8 +33,8 @@ public class TransferTerminatorTests
         await _stateStore.SaveClientAsync(new ClientRegistration(receiverId, "conn-receiver", ["receivers"], null, null, DateTime.UtcNow));
         await _transferManager.RegisterParticipantsAsync(transferId, senderId, receiverId);
 
-        var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
-        var controlKey = IBridgeManager.KeyFor(transferId, ConnectionType.Control);
+        var dataKey = BridgeManager.KeyFor(transferId, ConnectionType.Data);
+        var controlKey = BridgeManager.KeyFor(transferId, ConnectionType.Control);
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Control);
 
@@ -65,8 +65,8 @@ public class TransferTerminatorTests
         await _stateStore.SaveClientAsync(new ClientRegistration(receiverId, "conn-receiver", ["receivers"], null, null, DateTime.UtcNow));
         await _transferManager.RegisterParticipantsAsync(transferId, senderId, receiverId);
 
-        var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
-        var controlKey = IBridgeManager.KeyFor(transferId, ConnectionType.Control);
+        var dataKey = BridgeManager.KeyFor(transferId, ConnectionType.Data);
+        var controlKey = BridgeManager.KeyFor(transferId, ConnectionType.Control);
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Data);
         _bridgeManager.GetOrCreate(transferId, ConnectionType.Control);
 
@@ -85,7 +85,7 @@ public class TransferTerminatorTests
         // A stream that reopens between the two must find the transfer gone. Were the bridges to go
         // first it would be handed a new one, and wait for a peer that is not coming.
         const string transferId = "transfer-1";
-        var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
+        var dataKey = BridgeManager.KeyFor(transferId, ConnectionType.Data);
         var bridgesWhenTheStateWasRemoved = new List<string>();
         var transfers = new TransferManagerSpy(_transferManager, () =>
             bridgesWhenTheStateWasRemoved.AddRange(_bridgeManager.Bridges.Keys));
@@ -106,7 +106,7 @@ public class TransferTerminatorTests
         // The bridges stay, completed, and the idle sweep finds them: a retirement is not worth
         // failing the data stream's last request over.
         const string transferId = "transfer-1";
-        var dataKey = IBridgeManager.KeyFor(transferId, ConnectionType.Data);
+        var dataKey = BridgeManager.KeyFor(transferId, ConnectionType.Data);
         var transfers = new TransferManagerSpy(_transferManager, () => throw new IOException("the store is down"));
         var terminator = new TransferTerminator(
             transfers, _bridgeManager, _stateStore, _notifier, _epochs, NullLogger<TransferTerminator>.Instance);

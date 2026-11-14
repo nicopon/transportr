@@ -15,7 +15,7 @@ internal class BridgeCleanupService : BackgroundService
 {
     private readonly ILogger<BridgeCleanupService> _logger;
     private readonly ITransferTerminator _terminator;
-    private readonly IBridgeManager _bridgeManager;
+    private readonly BridgeManager _bridgeManager;
     private readonly DataPlaneConfiguration _config;
     private readonly TimeProvider _time;
     private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(5);
@@ -23,7 +23,7 @@ internal class BridgeCleanupService : BackgroundService
     public BridgeCleanupService(
         ILogger<BridgeCleanupService> logger,
         ITransferTerminator terminator,
-        IBridgeManager bridgeManager,
+        BridgeManager bridgeManager,
         IOptions<DataPlaneConfiguration> config,
         TimeProvider? timeProvider = null)
     {

@@ -13,14 +13,14 @@ internal class TransportRServer : ITransportRServer
     private readonly ILogger<TransportRServer> _logger;
     private readonly ITransferManager _transferManager;
     private readonly IHubProgressMonitor _progressMonitor;
-    private readonly IBridgeManager _bridgeManager;
+    private readonly BridgeManager _bridgeManager;
     private readonly ITransferRetirer _retirer;
 
     public TransportRServer(
         ILogger<TransportRServer> logger,
         IHubProgressMonitor progressMonitor,
         ITransferManager transferManager,
-        IBridgeManager bridgeManager,
+        BridgeManager bridgeManager,
         ITransferRetirer retirer)
     {
         _logger = logger;
@@ -33,7 +33,7 @@ internal class TransportRServer : ITransportRServer
     public async Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
     {
         Guid connectionId = Guid.NewGuid();
-        string bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        string bridgeKey = BridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Source Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
 
         var transfer = await _transferManager.TrackAsync(transferId).ConfigureAwait(false);
@@ -184,7 +184,7 @@ internal class TransportRServer : ITransportRServer
     public async Task HandleReceiveAsync(string transferId, ConnectionType type, Stream output, CancellationToken cancellationToken = default)
     {
         Guid connectionId = Guid.NewGuid();
-        string bridgeKey = IBridgeManager.KeyFor(transferId, type);
+        string bridgeKey = BridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: Sink Connecting {BridgeKey} (ID={ConnectionId})", bridgeKey, connectionId);
 
         // Admitted a moment ago, so a transfer missing now ended in between. The response ends empty,

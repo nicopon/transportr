@@ -164,7 +164,7 @@ public class TransportRServerTests
     {
         var hub = new Harness();
         var epochs = new UploadEpochs(TimeProvider.System, NullLogger<UploadEpochs>.Instance);
-        var bridgeKey = IBridgeManager.KeyFor(TransferId, ConnectionType.Data);
+        var bridgeKey = BridgeManager.KeyFor(TransferId, ConnectionType.Data);
         Func<Stream, CancellationToken, Task> handle = (input, token) =>
             hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, token);
         var fed = new MemoryStream();
@@ -201,7 +201,7 @@ public class TransportRServerTests
         var receive = hub.Server.HandleReceiveAsync(TransferId, ConnectionType.Data, fed, CancellationToken.None);
 
         var bytes = Enumerable.Range(0, 100).Select(i => (byte)i).ToArray();
-        var epoch = epochs.Open(IBridgeManager.KeyFor(TransferId, ConnectionType.Data), Guid.NewGuid(), null, null,
+        var epoch = epochs.Open(BridgeManager.KeyFor(TransferId, ConnectionType.Data), Guid.NewGuid(), null, null,
             (input, token) => hub.Server.HandleSendAsync(TransferId, ConnectionType.Data, input, token));
         await epoch.AcceptAsync(0, new MemoryStream(bytes[..60]), final: false, CancellationToken.None).WaitAsync(Patience);
         await epoch.AcceptAsync(60, new MemoryStream(bytes[60..]), final: true, CancellationToken.None).WaitAsync(Patience);
