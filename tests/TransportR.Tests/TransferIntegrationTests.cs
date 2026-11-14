@@ -1146,7 +1146,7 @@ public class TransferIntegrationTests
         configure?.Invoke(options);
         var logger = NullLogger.Instance; // Can use XunitLogger if needed
 
-        var registry = new SessionRegistry<TransferSession<string>>(logger);
+        var registry = new SessionRegistry<ClientSession<string>>(logger);
         serializer ??= new TransportR.Serialization.MessagePack.Services.MessagePackBatchSerializer<string>();
         var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = handler != null

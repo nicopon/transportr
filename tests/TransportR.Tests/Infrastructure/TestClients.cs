@@ -46,7 +46,7 @@ internal static class TestClients
 
         return new TransportRClient<string>(
             channel,
-            new SessionRegistry<TransferSession<string>>(logger),
+            new SessionRegistry<ClientSession<string>>(logger),
             new MessagePackBatchSerializer<string>(),
             logger,
             defaultBatchSize: 100,

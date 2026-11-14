@@ -24,7 +24,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     // Dependencies
     private readonly ClientConnection _connection;
-    private readonly SessionRegistry<TransferSession<T>> _sessionRegistry;
+    private readonly SessionRegistry<ClientSession<T>> _sessionRegistry;
     private readonly IBatchSerializer<T> _serializer;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
@@ -40,12 +40,12 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
 
     public event Func<Send<T>, Task>? OnSendRequested;
 
-    private readonly TransferSignaling<TransferSession<T>, Send<T>, Receive<T>> _signaling;
+    private readonly TransferSignaling<ClientSession<T>, Send<T>, Receive<T>> _signaling;
 
     // Internal so that only the builder instantiates it.
     internal TransportRClient(
         ControlChannel channel,
-        SessionRegistry<TransferSession<T>> sessionRegistry,
+        SessionRegistry<ClientSession<T>> sessionRegistry,
         IBatchSerializer<T> serializer,
         ILogger logger,
         int defaultBatchSize,
@@ -65,7 +65,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
         _streamManager = streamManager;
 
         // SRP: Extract signaling logic
-        _signaling = new TransferSignaling<TransferSession<T>, Send<T>, Receive<T>>(
+        _signaling = new TransferSignaling<ClientSession<T>, Send<T>, Receive<T>>(
             channel,
             sessionRegistry,
             NewSession,
@@ -181,11 +181,11 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, ISe
     /// <summary>
     /// A session with the sending and receiving ends the client builds for it.
     /// </summary>
-    private TransferSession<T> NewSession(string transferId, int batchSize, string? affinity)
+    private ClientSession<T> NewSession(string transferId, int batchSize, string? affinity)
     {
         var (send, receive) = SessionPorts.Create(_options, _serializer, _streamManager, batchSize);
         var session = new DataSession(this, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
-        return new TransferSession<T>(session, send, receive);
+        return new ClientSession<T>(session, send, receive);
     }
 
     internal IBatchSerializer<T> Serializer => _serializer;

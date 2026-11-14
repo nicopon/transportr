@@ -38,13 +38,13 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
     internal ControlChannel Channel => _connection.Channel;
 
     private readonly ClientConnection _connection;
-    private readonly SessionRegistry<ByteTransferSession> _sessionRegistry;
+    private readonly SessionRegistry<ByteClientSession> _sessionRegistry;
     private readonly ILogger _logger;
     private readonly ClientOptions _options;
     private readonly int _batchBytes;
     private readonly string _dataUrl;
     private readonly RecyclableMemoryStreamManager _streamManager;
-    private readonly TransferSignaling<ByteTransferSession, ByteSend, ByteReceive> _signaling;
+    private readonly TransferSignaling<ByteClientSession, ByteSend, ByteReceive> _signaling;
 
     /// <summary>
     /// Event fired when a new transfer is initiated targeting this receiver.
@@ -71,7 +71,7 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
     // Internal so that only the builder instantiates it.
     internal ByteStreamClient(
         ControlChannel channel,
-        SessionRegistry<ByteTransferSession> sessionRegistry,
+        SessionRegistry<ByteClientSession> sessionRegistry,
         ILogger logger,
         int batchBytes,
         ClientOptions options,
@@ -87,7 +87,7 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
         _dataUrl = dataUrl;
         _streamManager = streamManager;
 
-        _signaling = new TransferSignaling<ByteTransferSession, ByteSend, ByteReceive>(
+        _signaling = new TransferSignaling<ByteClientSession, ByteSend, ByteReceive>(
             channel,
             sessionRegistry,
             NewSession,
@@ -152,12 +152,12 @@ public sealed class ByteStreamClient : IDataClient, ISessionContext, IAsyncDispo
 
     // --- Internal Logic ---
 
-    private ByteTransferSession NewSession(string transferId, int batchSize, string? affinity)
+    private ByteClientSession NewSession(string transferId, int batchSize, string? affinity)
     {
         var send = new ByteBatchSource(_batchBytes, _options.BatchFlushIntervalMs, _streamManager);
         var receive = new ByteReceivePort(_options.ReceiveBufferCapacity);
         var session = new DataSession(this, transferId, batchSize, _dataUrl, affinity, send, receive.OpenSink);
-        return new ByteTransferSession(session, send, receive);
+        return new ByteClientSession(session, send, receive);
     }
 
     #region ISessionContext Implementation

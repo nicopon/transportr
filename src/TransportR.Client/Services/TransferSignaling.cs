@@ -20,7 +20,7 @@ namespace TransportR.Client.Services;
 /// <typeparam name="TSend">The handle a sender is given.</typeparam>
 /// <typeparam name="TReceive">The handle a receiver is given.</typeparam>
 internal class TransferSignaling<TSession, TSend, TReceive>
-    where TSession : TransferSession
+    where TSession : ClientSession
     where TSend : IAsyncDisposable
 {
     private readonly ControlChannel _channel;

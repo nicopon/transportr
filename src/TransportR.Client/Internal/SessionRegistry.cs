@@ -10,24 +10,24 @@ namespace TransportR.Client.Internal;
 /// A data session with the ends of it that a client builds for the kind of transfer it carries, which
 /// a second handle for the same transfer has to find again.
 /// </summary>
-internal abstract record TransferSession(IDataSession Session);
+internal abstract record ClientSession(IDataSession Session);
 
 /// <summary>
 /// A session of items: the ends that carry the item type.
 /// </summary>
-internal sealed record TransferSession<T>(IDataSession Session, ISendPort<T> Send, IReceivePort<T> Receive)
-    : TransferSession(Session);
+internal sealed record ClientSession<T>(IDataSession Session, ISendPort<T> Send, IReceivePort<T> Receive)
+    : ClientSession(Session);
 
 /// <summary>
 /// A session of bytes: the ends that cut a stream into batches and hand them back as they arrived.
 /// </summary>
-internal sealed record ByteTransferSession(IDataSession Session, ByteBatchSource Send, ByteReceivePort Receive)
-    : TransferSession(Session);
+internal sealed record ByteClientSession(IDataSession Session, ByteBatchSource Send, ByteReceivePort Receive)
+    : ClientSession(Session);
 
 /// <summary>
 /// Manages active Data sessions for a client.
 /// </summary>
-internal class SessionRegistry<TSession> : IAsyncDisposable where TSession : TransferSession
+internal class SessionRegistry<TSession> : IAsyncDisposable where TSession : ClientSession
 {
     private readonly ConcurrentDictionary<string, TSession> _sessions = new();
     private readonly ILogger _logger;

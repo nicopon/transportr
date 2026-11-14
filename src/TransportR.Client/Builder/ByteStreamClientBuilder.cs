@@ -136,7 +136,7 @@ public sealed class ByteStreamClientBuilder
 
         return new ByteStreamClient(
             wiring.Channel,
-            new SessionRegistry<ByteTransferSession>(logger),
+            new SessionRegistry<ByteClientSession>(logger),
             logger,
             _batchBytes,
             wiring.Options,

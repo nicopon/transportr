@@ -17,10 +17,10 @@ internal class StubSessionContext : ISessionContext
     public IBatchSerializer<string> Serializer { get; } = new StubBatchSerializer();
     public (ISendPort<string> Send, IReceivePort<string> Receive) CreatePorts(int batchSize) =>
         SessionPorts.Create(Options, Serializer, StreamManager, batchSize);
-    public TransferSession<string> NewTransferSession(string transferId, int batchSize, string dataUrl, string? affinity)
+    public ClientSession<string> NewClientSession(string transferId, int batchSize, string dataUrl, string? affinity)
     {
         var (send, receive) = CreatePorts(batchSize);
-        return new TransferSession<string>(
+        return new ClientSession<string>(
             new DataSession(this, transferId, batchSize, dataUrl, affinity, send.Source, receive.OpenSink), send, receive);
     }
     public HttpClient HttpClient { get; }

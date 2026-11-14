@@ -248,7 +248,7 @@ public class TransportRClientBuilder<T>
 
         return new TransportRClient<T>(
             wiring.Channel,
-            new SessionRegistry<TransferSession<T>>(logger),
+            new SessionRegistry<ClientSession<T>>(logger),
             serializer,
             logger,
             _batchSize,
