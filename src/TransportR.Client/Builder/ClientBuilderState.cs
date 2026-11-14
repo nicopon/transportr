@@ -23,6 +23,8 @@ internal sealed record ClientWiring(
 /// </summary>
 internal sealed class ClientBuilderState
 {
+    private static readonly TimeSpan LongestBatchTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+
     private string? _url;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
@@ -38,7 +40,17 @@ internal sealed class ClientBuilderState
 
     public void SetUrl(string url) => _url = url;
 
-    public void SetBatchTimeout(int timeoutMs) => _batchFlushIntervalMs = timeoutMs;
+    public void SetBatchTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(timeout));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(timeout, LongestBatchTimeout, nameof(timeout));
+        if (timeout.Ticks % TimeSpan.TicksPerMillisecond != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout), timeout, "The batch timeout must be a whole number of milliseconds.");
+        }
+
+        _batchFlushIntervalMs = (int)timeout.TotalMilliseconds;
+    }
 
     public void SetMaxInFlightBatches(int max)
     {

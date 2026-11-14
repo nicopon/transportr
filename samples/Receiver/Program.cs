@@ -89,9 +89,9 @@ if (receiverOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
 var clientBuilder = new TransportRClientBuilder<Order>()
     .WithUrl(hubBaseUrl)
     .WithBatchSize(receiverOptions.BatchSize)
-    .WithBatchTimeout(batchTimeoutMs)
+    .WithBatchTimeout(TimeSpan.FromMilliseconds(batchTimeoutMs))
     .WithLoggerFactory(loggerFactory)
-    .WithBatchTimeout(batchTimeoutMs)
+    .WithBatchTimeout(TimeSpan.FromMilliseconds(batchTimeoutMs))
     .WithLoggerFactory(loggerFactory);
 
 // Receive capacity: unbounded unless a scenario asks for one.

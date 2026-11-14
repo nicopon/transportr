@@ -40,7 +40,7 @@ public class ByteStreamClientBuilderTests
     {
         await using var client = new ByteStreamClientBuilder(4096)
             .WithUrl("http://localhost:1")
-            .WithBatchTimeout(250)
+            .WithBatchTimeout(TimeSpan.FromMilliseconds(250))
             .WithMaxInFlightBatches(4)
             .WithReceiveCapacity(maxBytes: 1 << 20)
             .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
@@ -62,6 +62,34 @@ public class ByteStreamClientBuilderTests
         var refused = Assert.Throws<InvalidOperationException>(() => new ByteStreamClientBuilder(1024).Build());
 
         Assert.Equal("Hub URL must be configured using WithUrl().", refused.Message);
+    }
+
+    public static TheoryData<TimeSpan> RefusedBatchTimeouts => new()
+    {
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(-5),
+        TimeSpan.FromTicks(TimeSpan.TicksPerMillisecond / 2),
+        TimeSpan.FromTicks(TimeSpan.TicksPerMillisecond + 1),
+        TimeSpan.FromMilliseconds((double)int.MaxValue + 1),
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedBatchTimeouts))]
+    public void WithBatchTimeout_RefusesAtTheCall_WhatIsNotAWholePositiveNumberOfMilliseconds(TimeSpan timeout)
+    {
+        var builder = Builder();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithBatchTimeout(timeout));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public void WithBatchTimeout_AcceptsTheShortestAndTheLongestInterval(int milliseconds)
+    {
+        var builder = Builder().WithBatchTimeout(TimeSpan.FromMilliseconds(milliseconds));
+
+        Assert.NotNull(builder);
     }
 
     [Fact]

@@ -41,11 +41,16 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Sets the batch accumulation timeout.
+    /// Sets how long a partial batch waits before it is flushed.
     /// </summary>
-    public TransportRClientBuilder<T> WithBatchTimeout(int timeoutMs)
+    /// <param name="timeout">A whole number of milliseconds, at least one and at most <see cref="int.MaxValue"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="timeout"/> is none of those. It is refused here, not rounded and not left for the
+    /// first transfer to find.
+    /// </exception>
+    public TransportRClientBuilder<T> WithBatchTimeout(TimeSpan timeout)
     {
-        _state.SetBatchTimeout(timeoutMs);
+        _state.SetBatchTimeout(timeout);
         return this;
     }
 

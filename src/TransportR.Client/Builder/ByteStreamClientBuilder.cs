@@ -46,9 +46,9 @@ public sealed class ByteStreamClientBuilder
     }
 
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithBatchTimeout"/>
-    public ByteStreamClientBuilder WithBatchTimeout(int timeoutMs)
+    public ByteStreamClientBuilder WithBatchTimeout(TimeSpan timeout)
     {
-        _state.SetBatchTimeout(timeoutMs);
+        _state.SetBatchTimeout(timeout);
         return this;
     }
 

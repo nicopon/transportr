@@ -51,7 +51,7 @@ internal sealed class ItemWorkload : Workload
         _receiver = new TransportRClientBuilder<Item>()
             .WithUrl(hubUrl)
             .WithBatchSize(_batchItems)
-            .WithBatchTimeout(FlushIntervalMs)
+            .WithBatchTimeout(TimeSpan.FromMilliseconds(FlushIntervalMs))
             .WithMessagePackSerialization(useAnnotations: false)
             .Build();
         _receiver.OnTransferStarted += transfer =>
@@ -64,7 +64,7 @@ internal sealed class ItemWorkload : Workload
         _sender = new TransportRClientBuilder<Item>()
             .WithUrl(hubUrl)
             .WithBatchSize(_batchItems)
-            .WithBatchTimeout(FlushIntervalMs)
+            .WithBatchTimeout(TimeSpan.FromMilliseconds(FlushIntervalMs))
             .WithMaxInFlightBatches(sendWindow)
             .WithMessagePackSerialization(useAnnotations: false)
             .Build();

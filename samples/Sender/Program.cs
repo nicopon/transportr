@@ -96,7 +96,7 @@ else
 var clientBuilder = new TransportRClientBuilder<Order>()
     .WithUrl(hubBaseUrl)
     .WithBatchSize(batchSize)
-    .WithBatchTimeout(batchTimeoutMs)
+    .WithBatchTimeout(TimeSpan.FromMilliseconds(batchTimeoutMs))
     .WithLoggerFactory(loggerFactory);
 
 if (senderOptions.MaxInFlightBatches is { } maxInFlight)
@@ -281,7 +281,7 @@ static async Task RunByteStreamAsync(
 
     var clientBuilder = new ByteStreamClientBuilder(batchBytes)
         .WithUrl(options.HubUrl)
-        .WithBatchTimeout(options.BatchTimeoutMs)
+        .WithBatchTimeout(TimeSpan.FromMilliseconds(options.BatchTimeoutMs))
         .WithLoggerFactory(loggerFactory);
     logger.LogInformation("Byte-stream mode: batches cut at {BatchBytes} bytes", batchBytes);
 

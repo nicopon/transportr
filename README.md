@@ -194,7 +194,7 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | Builder call | Default | What it sets |
 |---|---|---|
 | `WithBatchSize(n)` | `1000` | Items per batch |
-| `WithBatchTimeout(ms)` | `1000` | Flush a partial batch after this long |
+| `WithBatchTimeout(timeout)` | `1 s` | Flush a partial batch after this long: a whole number of milliseconds, at least one |
 | `WithMaxInFlightBatches(n)` | unbounded | Sender-side backpressure, in batches |
 | `WithReceiveCapacity(items, bytes)` | unbounded | Receiver-side backpressure, first bound reached wins |
 
