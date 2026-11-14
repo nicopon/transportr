@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using TransportR.Client;
 using TransportR.Client.Configuration;
-using TransportR.Client.Services;
 using TransportR.Hub.Interfaces;
 using TransportR.Tests.Infrastructure;
 

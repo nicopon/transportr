@@ -3,9 +3,10 @@ using Microsoft.IO;
 using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
+using TransportR.Client.Services;
 using TransportR.Client.Sessions;
 
-namespace TransportR.Client.Services;
+namespace TransportR.Client;
 
 /// <summary>
 /// Client for sending and receiving a stream of bytes: the transfer carries the bytes as they are, with

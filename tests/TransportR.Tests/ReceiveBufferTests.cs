@@ -1,6 +1,6 @@
 using System.Threading.Channels;
+using TransportR.Client;
 using TransportR.Client.Batching;
-using TransportR.Client.Configuration;
 
 namespace TransportR.Tests;
 

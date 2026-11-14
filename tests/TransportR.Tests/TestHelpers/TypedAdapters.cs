@@ -79,7 +79,7 @@ internal sealed class TestBatchProcessor<T>(
 
 /// <summary>
 /// A <see cref="BatchProcessor"/> with the calls the tests make on it for a stream of bytes, through the
-/// ends a <see cref="TransportR.Client.Services.ByteStreamClient"/> would build for it.
+/// ends a <see cref="TransportR.Client.ByteStreamClient"/> would build for it.
 /// </summary>
 internal sealed class TestByteBatchProcessor(
     ISessionContext context, string transferId, ByteBatchSource send, ByteReceivePort receive)

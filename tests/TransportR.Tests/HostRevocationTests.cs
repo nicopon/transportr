@@ -3,7 +3,6 @@ using System.Security.Claims;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TransportR.Client;
-using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Tests.Infrastructure;

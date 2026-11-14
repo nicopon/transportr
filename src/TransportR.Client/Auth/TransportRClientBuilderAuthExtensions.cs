@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Client;
+using TransportR.Auth.ClientCredentials;
 
-namespace TransportR.Auth.ClientCredentials;
+namespace TransportR.Client;
 
 /// <summary>
 /// Extension methods for configuring OAuth2 client credentials authentication on TransportRClientBuilder.

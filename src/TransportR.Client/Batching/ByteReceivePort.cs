@@ -1,5 +1,3 @@
-using TransportR.Client.Configuration;
-
 namespace TransportR.Client.Batching;
 
 /// <summary>

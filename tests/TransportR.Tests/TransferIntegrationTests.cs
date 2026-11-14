@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
-using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Protocol;
 using TransportR.Serialization.Json.Services;

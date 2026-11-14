@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TransportR.Client;
-using TransportR.Client.Configuration;
 using TransportR.Client.Sessions;
 using TransportR.Hub;
 using TransportR.Hub.Services;

@@ -1,4 +1,4 @@
-namespace TransportR.Client.Configuration;
+namespace TransportR.Client;
 
 /// <summary>
 /// How much a transfer buffer may hold before the side filling it is made to wait, expressed in

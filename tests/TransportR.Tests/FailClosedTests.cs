@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TransportR.Client;
-using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Hub.Access;
 using TransportR.Tests.Infrastructure;

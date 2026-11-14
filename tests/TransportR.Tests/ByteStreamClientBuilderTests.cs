@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using TransportR.Auth.ClientCredentials;
 using TransportR.Client;
-using TransportR.Client.Configuration;
 using TransportR.Client.Sessions;
 
 namespace TransportR.Tests;

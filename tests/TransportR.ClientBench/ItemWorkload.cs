@@ -1,5 +1,4 @@
 using TransportR.Client;
-using TransportR.Client.Services;
 using TransportR.Serialization.MessagePack;
 using TransportR.Serialization.MessagePack.Services;
 

@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging;
 using Receiver.Configuration;
 using Serilog;
 using Shared.Models;
-using TransportR.Auth.ClientCredentials; // Extension
 using TransportR.Client;
 using TransportR.Serialization.Json; // Extension
 using TransportR.Serialization.MessagePack; // Extension

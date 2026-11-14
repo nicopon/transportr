@@ -7,7 +7,6 @@ using TransportR.Client;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
-using TransportR.Client.Services;
 using TransportR.Hub;
 using TransportR.Serialization.MessagePack.Services;
 using TransportR.Tests.Infrastructure;

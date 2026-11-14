@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using TransportR.Client.Configuration;
 
 namespace TransportR.Client.Batching;
 
