@@ -3,8 +3,7 @@ using System.Buffers;
 namespace TransportR.Client.Protocol;
 
 /// <summary>
-/// Chunk I/O operations for reading and writing protocol messages.
-/// Replaces ProtoProtocol with zero external dependencies.
+/// Reads and writes chunks: a <see cref="ChunkHeader"/> followed by the payload it announces.
 /// </summary>
 internal static class ChunkIO
 {
