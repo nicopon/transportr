@@ -19,10 +19,10 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// <param name="cancellationToken">Token to cancel the send operation.</param>
     /// <exception cref="TransferFailedException">
     /// The transfer has ended without completing: the send window was full and the receiver
-    /// acknowledged nothing for the client's completion stall bound (fixed, see Key Timings in
-    /// <c>ResilienceArchitecture.md</c>), the peer or the hub ended it, or this handle was
-    /// released. That holds for a call made after the ending as for one parked when it came. The
-    /// handle is dead; dispose it.
+    /// acknowledged nothing for the client's acknowledgement timeout
+    /// (<see cref="TransportRClientBuilder{T}.WithAcknowledgementTimeout"/>, 60 s by default), the
+    /// peer or the hub ended it, or this handle was released. That holds for a call made after the
+    /// ending as for one parked when it came. The handle is dead; dispose it.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// <see cref="CompleteAsync"/> has been called: a completed transfer carries nothing more, and
@@ -53,9 +53,9 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     /// compare after the fact to learn whether the receiver got everything.
     /// </remarks>
     /// <exception cref="TransferFailedException">
-    /// The receiver stopped acknowledging for the client's completion stall bound (fixed, see Key
-    /// Timings in <c>ResilienceArchitecture.md</c>), or the session failed. The handle is dead;
-    /// dispose it.
+    /// The receiver stopped acknowledging for the client's acknowledgement timeout
+    /// (<see cref="TransportRClientBuilder{T}.WithAcknowledgementTimeout"/>, 60 s by default), or the
+    /// session failed. The handle is dead; dispose it.
     /// </exception>
     public abstract Task CompleteAsync(CancellationToken cancellationToken = default);
 

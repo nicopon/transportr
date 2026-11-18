@@ -23,6 +23,9 @@ internal sealed class ClientBuilderState
 {
     private static readonly TimeSpan LongestBatchTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
 
+    // The longest wait Task.WaitAsync and Task.Delay take, which is how a session waits on this delay.
+    private static readonly TimeSpan LongestAcknowledgementTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     private string? _url;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
@@ -30,6 +33,7 @@ internal sealed class ClientBuilderState
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
     private TimeSpan? _tokenRefreshThreshold;
+    private TimeSpan? _acknowledgementTimeout;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
     private bool _probeWriteTransport;
 
@@ -49,6 +53,13 @@ internal sealed class ClientBuilderState
         }
 
         _batchFlushIntervalMs = (int)timeout.TotalMilliseconds;
+    }
+
+    public void SetAcknowledgementTimeout(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(timeout));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(timeout, LongestAcknowledgementTimeout, nameof(timeout));
+        _acknowledgementTimeout = timeout;
     }
 
     public void SetMaxInFlightBatches(int max)
@@ -124,6 +135,7 @@ internal sealed class ClientBuilderState
         options.ReceiveBufferCapacity = ReceiveCapacity;
         options.MaxBatchBytes = MaxBatchBytes;
         if (_tokenRefreshThreshold is { } threshold) options.TokenRefreshThreshold = threshold;
+        if (_acknowledgementTimeout is { } acknowledgementTimeout) options.CompleteStallTimeout = acknowledgementTimeout;
 
         // Neither end bounded is a supported configuration and the right one for a consumer that
         // keeps up, so this is a warning and not a refusal. It is loud because the failure it

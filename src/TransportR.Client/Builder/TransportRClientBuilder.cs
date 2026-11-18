@@ -55,6 +55,34 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Sets how long a sender tolerates a receiver that acknowledges nothing before it fails the
+    /// transfer. Default: 60 seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It bounds <c>CompleteAsync</c> and a producer parked on a full <see cref="WithMaxInFlightBatches"/>
+    /// window. The clock counts silence: each acknowledgement restarts it, so a receiver that is slow but
+    /// alive never trips it. When it runs out the call throws <see cref="TransferFailedException"/>.
+    /// </para>
+    /// <para>
+    /// Raise it for a consumer that can stall for longer than a minute on one write (a commit, a lock).
+    /// A receiver client uses the same figure for another wait: once it has accepted the sender's
+    /// <c>Complete</c>, how long it waits for the transfer to close before its handle throws
+    /// <see cref="TransferFailedException"/> where the data ends.
+    /// </para>
+    /// </remarks>
+    /// <param name="timeout">Greater than zero and at most 4,294,967,294 milliseconds, the longest wait the runtime's timers take.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="timeout"/> is none of those. It is refused here, not left for the first transfer
+    /// to find.
+    /// </exception>
+    public TransportRClientBuilder<T> WithAcknowledgementTimeout(TimeSpan timeout)
+    {
+        _state.SetAcknowledgementTimeout(timeout);
+        return this;
+    }
+
+    /// <summary>
     /// Bounds how many batches may be in flight — flushed but not yet acknowledged — before the
     /// producer is made to wait. Unbounded by default.
     /// </summary>

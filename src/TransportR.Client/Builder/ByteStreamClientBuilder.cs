@@ -52,6 +52,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithAcknowledgementTimeout"/>
+    public ByteStreamClientBuilder WithAcknowledgementTimeout(TimeSpan timeout)
+    {
+        _state.SetAcknowledgementTimeout(timeout);
+        return this;
+    }
+
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithMaxInFlightBatches"/>
     public ByteStreamClientBuilder WithMaxInFlightBatches(int max)
     {

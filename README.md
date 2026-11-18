@@ -206,6 +206,7 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 |---|---|---|
 | `WithBatchSize(n)` | `1000` | Items per batch |
 | `WithBatchTimeout(timeout)` | `1 s` | Flush a partial batch after this long: a whole number of milliseconds, at least one |
+| `WithAcknowledgementTimeout(timeout)` | `60 s` | How long a sender tolerates a receiver that acknowledges nothing before it fails the transfer: above zero, at most 4,294,967,294 milliseconds |
 | `WithMaxInFlightBatches(n)` | unbounded | Sender-side backpressure, in batches |
 | `WithReceiveCapacity(items, bytes)` | unbounded | Receiver-side backpressure, first bound reached wins |
 | `WithMaxBatchBytes(bytes)` | `256 MiB` | The largest batch on the wire, at both ends: a receiver fails the transfer on a larger one |

@@ -27,7 +27,7 @@ says: a builder method on the client, an options class on the hub.
 | client | `DataSession.CompletingPhaseRetryMs` | 500 ms | **fixed** | Receiver: pause between two attempts to reopen a stream once it has received `Complete` |
 | client | `DataSession.LoopErrorPause` | 0.5 to 1 s | **fixed** | Pause after an unexpected error in the session loop: half to full delay |
 | client | `DataSession.CompleteRetryMs` | 5 s | **fixed** | Interval between two `Complete` signals while nothing acknowledges |
-| client | `ClientOptions.CompleteStallTimeout` | 60 s | **fixed** | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window |
+| client | `ClientOptions.CompleteStallTimeout` | 60 s | `WithAcknowledgementTimeout` | Silence tolerated, since the last acknowledgement, by `CompleteAsync` and by a producer parked on a full send window; and, for a receiver that has accepted `Complete`, how long it waits for the transfer to close |
 | client | `DataSession.AbortWriteTimeout` | 2 s | **fixed** | Wait for `Abort` to reach the wire when a handle is released |
 | client | `DataSession.AbortRequestTimeout` | 2 s | **fixed** | The `POST /api/stream/{id}/abort` sent when the `Abort` could not be written |
 | client | `HttpStreamManager.ReadSideEndTimeout` | 2 s | **fixed** | Wait for the hub to end the read stream: after it refused the write stream, before the attempt ends; when a completed receiver's handle is released |
@@ -80,10 +80,12 @@ says: a builder method on the client, an options class on the hub.
   The hub checks only that its own value is positive.
 - The hub's keepalive (15 s) is half the client's silence limit (30 s), so a stream is abandoned only after two keepalives went missing. Nothing
   compares them, nor either with the idle timeout of a proxy in front of the hub, which has to be above the keepalive.
-- The completion stall bound (60 s, fixed) is the client's own (`ClientOptions.CompleteStallTimeout`), and at the hub's defaults it is reached
-  first. While `CompleteAsync` waits, the sender's per-transfer heartbeats keep the transfer active, so `TransferInactivityTimeoutSeconds` does
-  not end it. The hub ends the transfer of a receiver that went away no sooner than `BridgeTimeoutSeconds` (300 s) later, and that of a receiver
-  still connected but no longer reading only on `StalledProgressTimeoutSeconds`, where it is set. Nothing compares the client's bound with them.
+- The completion stall bound (60 s by default, `WithAcknowledgementTimeout`) is the client's own (`ClientOptions.CompleteStallTimeout`), and at its
+  default and the hub's defaults it is reached first. While `CompleteAsync` waits, the sender's per-transfer heartbeats keep the transfer active, so
+  `TransferInactivityTimeoutSeconds` does not end it. The hub ends the transfer of a receiver that went away no sooner than `BridgeTimeoutSeconds`
+  (300 s) later, and that of a receiver still connected but no longer reading only on `StalledProgressTimeoutSeconds`, where it is set. Nothing
+  compares the client's bound with them: set above the one that applies, it leaves the hub to end the transfer first, and the sender fails on that
+  ending rather than on its own bound.
 - A client renews `min(TokenRefreshThreshold, half of what is left)` before its token's expiry (`TokenRenewer.Advance`); the hub closes it at most
   `AccessSweepIntervalSeconds` after the expiry plus `TokenExpiryMarginSeconds` (`AccessOptions`). Nothing compares the two.
 

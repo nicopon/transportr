@@ -41,6 +41,7 @@ public class ByteStreamClientBuilderTests
         await using var client = new ByteStreamClientBuilder(4096)
             .WithUrl("http://localhost:1")
             .WithBatchTimeout(TimeSpan.FromMilliseconds(250))
+            .WithAcknowledgementTimeout(TimeSpan.FromSeconds(30))
             .WithMaxInFlightBatches(4)
             .WithReceiveCapacity(maxBytes: 1 << 20)
             .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
@@ -50,6 +51,7 @@ public class ByteStreamClientBuilderTests
 
         var options = client.Connection.Options;
         Assert.Equal(250, options.BatchFlushIntervalMs);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.CompleteStallTimeout);
         Assert.Equal(4, options.MaxInFlightBatches);
         Assert.Equal(BufferCapacity.Bytes(1 << 20), options.ReceiveBufferCapacity);
         Assert.Equal(WriteTransportPolicy.SegmentsOnly, options.WriteTransportPolicy);
@@ -88,6 +90,33 @@ public class ByteStreamClientBuilderTests
     public void WithBatchTimeout_AcceptsTheShortestAndTheLongestInterval(int milliseconds)
     {
         var builder = Builder().WithBatchTimeout(TimeSpan.FromMilliseconds(milliseconds));
+
+        Assert.NotNull(builder);
+    }
+
+    // The longest wait the runtime's timers take, which is how the session waits on the delay.
+    private static readonly TimeSpan LongestAcknowledgementTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
+    public static TheoryData<TimeSpan> RefusedAcknowledgementTimeouts => new()
+    {
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(-5),
+        LongestAcknowledgementTimeout + TimeSpan.FromMilliseconds(1),
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedAcknowledgementTimeouts))]
+    public void WithAcknowledgementTimeout_RefusesAtTheCall_WhatIsNotPositiveOrIsPastTheLongestWait(TimeSpan timeout)
+    {
+        var builder = Builder();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithAcknowledgementTimeout(timeout));
+    }
+
+    [Fact]
+    public void WithAcknowledgementTimeout_AcceptsTheLongestWait()
+    {
+        var builder = Builder().WithAcknowledgementTimeout(LongestAcknowledgementTimeout);
 
         Assert.NotNull(builder);
     }
