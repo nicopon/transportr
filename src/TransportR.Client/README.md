@@ -43,7 +43,7 @@ await client.ConnectAsync();
 
 // 3. Send Data
 var receivers = await client.GetReceiversAsync();
-await using var transfer = await client.InitTransferAsync(receivers[0].ClientId);
+await using var transfer = await client.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 // ... send each item with transfer.SendAsync(item) ...
 await transfer.CompleteAsync();
 
@@ -66,10 +66,10 @@ var sender = new ByteStreamClientBuilder(batchBytes: 1 << 20)
     .Build();
 await sender.ConnectAsync(new[] { "senders" });
 var receivers = await sender.GetReceiversAsync();
-await using var send = await sender.InitTransferAsync(receivers[0].ClientId);
+await using var send = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 await using var source = File.OpenRead("data.bin");
 await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), which copies them before it returns
-await send.CompleteAsync();               // returns once the receiver has acknowledged everything
+await send.CompleteAsync();               // returns once the receiver has acknowledged everything (buffered, not yet consumed)
 
 // Receiver
 var receiver = new ByteStreamClientBuilder(batchBytes: 1 << 20)

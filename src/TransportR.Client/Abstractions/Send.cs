@@ -44,7 +44,8 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
     }
 
     /// <summary>
-    /// Signals that all items have been sent and waits for acknowledgment.
+    /// Signals that all items have been sent and waits for the receiver's acknowledgment, which says the
+    /// batches are in its buffer, not that its consumer has taken them.
     /// </summary>
     /// <param name="cancellationToken">Token to cancel the completion wait.</param>
     /// <remarks>

@@ -11,6 +11,9 @@ both sides call out to, resuming after network cuts, with bounded memory.**
 
 TransportR is a library, not a broker: a sender streams typed records to one receiver, the hub relays the
 bytes without decoding or keeping them, and the sender learns that the receiver acknowledged every batch.
+An acknowledged batch is in the receiver's buffer, not yet taken by the code that consumes it: a receiver that
+dies once `CompleteAsync` has returned loses what it had not consumed, and confirming that a batch was
+processed is left to the application.
 
 ---
 
@@ -37,7 +40,9 @@ by every sender: N × M paths.          only the hub is reachable: N + M paths.
 - **Other languages than .NET** — the client exists for .NET only.
 - **Fan-out or pub/sub** — a transfer has one sender and one receiver.
 - **Persistence or replay** — the hub stores nothing; until the receiver acknowledges a batch, only the
-  sender holds it. Use Kafka or RabbitMQ for that.
+  sender holds it. A sender that dies takes its transfer with it: resilience covers network cuts, not the death
+  of a process, and resuming means a new transfer from the start ([Resilience](./ResilienceArchitecture.md)).
+  Use Kafka or RabbitMQ for that.
 
 ### Compared with what you may use today
 
@@ -105,7 +110,7 @@ await sender.ConnectAsync(["senders"]);
 
 // Find a receiver and start transfer
 var receivers = await sender.GetReceiversAsync();
-await using var transfer = await sender.InitTransferAsync(receivers[0].ClientId);
+await using var transfer = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 
 // Stream data (auto-batched, auto-compressed)
 foreach (var order in GetOrders())
