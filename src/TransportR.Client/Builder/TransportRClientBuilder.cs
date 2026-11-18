@@ -273,8 +273,7 @@ public class TransportRClientBuilder<T>
             _batchSize,
             wiring.Options,
             wiring.DataUrl,
-            wiring.HttpClient,
-            wiring.Streams
+            wiring.HttpClient
         );
     }
 }

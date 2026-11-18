@@ -22,6 +22,9 @@ internal sealed class ItemBatchSource<T>(
 
     public IBatchSource Source => this;
 
+    /// <summary>The manager that serves this session's batch bodies. Internal so that the tests can see whose it is.</summary>
+    internal RecyclableMemoryStreamManager Streams => streams;
+
     public ChunkType BatchType => ChunkType.Batch;
 
     private BatchAccumulator<T> Accumulator =>

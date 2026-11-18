@@ -1,9 +1,12 @@
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.IO;
 using TransportR.Client;
+using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
@@ -39,35 +42,35 @@ public class ByteStreamTransferTests
     }
 
     private static ByteStreamClient CreateByteClient(
-        HttpMessageHandler handler, int batchBytes, Action<ClientOptions>? configure = null)
+        HttpMessageHandler handler, int batchBytes, Action<ClientOptions>? configure = null,
+        SessionRegistry<ByteClientSession>? sessions = null)
     {
         var (channel, httpClient, options, logger) = Parts(handler, configure);
 
         return new ByteStreamClient(
             channel,
-            new SessionRegistry<ByteClientSession>(logger),
+            sessions ?? new SessionRegistry<ByteClientSession>(logger),
             logger,
             batchBytes,
             options,
             "http://localhost" + WireRoutes.StreamBase,
-            httpClient,
-            new Microsoft.IO.RecyclableMemoryStreamManager());
+            httpClient);
     }
 
-    private static TransportRClient<byte[]> CreateItemClient(HttpMessageHandler handler)
+    private static TransportRClient<byte[]> CreateItemClient(
+        HttpMessageHandler handler, SessionRegistry<ClientSession<byte[]>>? sessions = null)
     {
         var (channel, httpClient, options, logger) = Parts(handler, configure: null);
 
         return new TransportRClient<byte[]>(
             channel,
-            new SessionRegistry<ClientSession<byte[]>>(logger),
+            sessions ?? new SessionRegistry<ClientSession<byte[]>>(logger),
             new MessagePackBatchSerializer<byte[]>(),
             logger,
             defaultBatchSize: 100,
             options,
             "http://localhost" + WireRoutes.StreamBase,
-            httpClient,
-            new Microsoft.IO.RecyclableMemoryStreamManager());
+            httpClient);
     }
 
     /// <summary>Opens a transfer between two byte-stream clients and hands back both handles.</summary>
@@ -103,6 +106,21 @@ public class ByteStreamTransferTests
         TransportRClient<byte[]> sender, ByteStreamClient receiver, int senderBatchSize)
     {
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var send = await sender.InitTransferAsync(receiver.ClientId, senderBatchSize);
+        var receive = await receiveHandle.Task.WaitAsync(Bound);
+        return (send, receive);
+    }
+
+    /// <summary>Opens a transfer between two clients of items and hands back both handles.</summary>
+    private static async Task<(Send<byte[]> Send, Receive<byte[]> Receive)> OpenAsync(
+        TransportRClient<byte[]> sender, TransportRClient<byte[]> receiver, int senderBatchSize)
+    {
+        var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
 
         await sender.ConnectAsync();
@@ -521,6 +539,108 @@ public class ByteStreamTransferTests
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task AFinishedTransfer_LeavesItsSenderHoldingNoStreamManager_OfBytesOrOfItems()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        var byteSessions = new SessionRegistry<ByteClientSession>(NullLogger.Instance);
+        var itemSessions = new SessionRegistry<ClientSession<byte[]>>(NullLogger.Instance);
+        await using var byteSender = CreateByteClient(handler, batchBytes: 1000, sessions: byteSessions);
+        await using var byteReceiver = CreateByteClient(handler, batchBytes: 1000);
+        await using var itemSender = CreateItemClient(handler, itemSessions);
+        await using var itemReceiver = CreateItemClient(handler);
+
+        var ofBytes = await CarryBytesAsync(byteSender, byteSessions, byteReceiver);
+        var ofItems = await CarryItemsAsync(itemSender, itemSessions, itemReceiver);
+
+        // The senders are still alive here: it is the finished transfer that has to hold nothing, not the client.
+        var bytesCollected = await IsCollectedAsync(ofBytes);
+        var itemsCollected = await IsCollectedAsync(ofItems);
+        Assert.True(bytesCollected, "A byte-stream client still holds the stream manager of a transfer that has finished.");
+        Assert.True(itemsCollected, "A client of items still holds the stream manager of a transfer that has finished.");
+    }
+
+    /// <summary>
+    /// Carries bytes to the end and releases both handles. Returns only a weak reference to the manager that
+    /// served the sender's session, so that nothing of the session stays reachable from the caller.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference> CarryBytesAsync(
+        ByteStreamClient sender, SessionRegistry<ByteClientSession> sessions, ByteStreamClient receiver)
+    {
+        var (send, receive) = await OpenAsync(sender, receiver);
+        var consumer = Task.Run(() => receive.CopyToAsync(Stream.Null));
+        await send.CopyFromAsync(new MemoryStream(Payload(7321)));
+        await send.CompleteAsync().WaitAsync(Bound);
+        await consumer.WaitAsync(Bound);
+
+        Assert.True(sessions.TryGetSession(sessions.Sessions.Single().TransferId, out var session));
+        var manager = session!.Send.Streams;
+        AssertServed(manager);
+
+        await send.DisposeAsync();
+        await receive.DisposeAsync();
+        await AssertRetiredAsync(() => sessions.Count);
+        return new WeakReference(manager);
+    }
+
+    /// <summary>As <see cref="CarryBytesAsync"/>, for a sender of items.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference> CarryItemsAsync(
+        TransportRClient<byte[]> sender, SessionRegistry<ClientSession<byte[]>> sessions, TransportRClient<byte[]> receiver)
+    {
+        var (send, receive) = await OpenAsync(sender, receiver, senderBatchSize: 5);
+        var consumer = Task.Run(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync()) { }
+        });
+        await send.SendAsync(Enumerable.Range(0, 20).Select(i => new byte[] { (byte)i, 1, 2 }));
+        await send.CompleteAsync().WaitAsync(Bound);
+        await consumer.WaitAsync(Bound);
+
+        Assert.True(sessions.TryGetSession(sessions.Sessions.Single().TransferId, out var session));
+        var manager = ((ItemBatchSource<byte[]>)session!.Send).Streams;
+        AssertServed(manager);
+
+        await send.DisposeAsync();
+        await receive.DisposeAsync();
+        await AssertRetiredAsync(() => sessions.Count);
+        return new WeakReference(manager);
+    }
+
+    /// <summary>
+    /// The manager gave bodies out and took them back: without this, a weak reference to a manager that
+    /// was never used would pass, whoever holds the one that was.
+    /// </summary>
+    private static void AssertServed(RecyclableMemoryStreamManager manager) =>
+        Assert.True(manager.SmallPoolFreeSize + manager.SmallPoolInUseSize + manager.LargePoolFreeSize + manager.LargePoolInUseSize > 0,
+            "The sender's session never drew a body from the manager under test.");
+
+    private static async Task AssertRetiredAsync(Func<int> remaining)
+    {
+        for (var attempt = 0; attempt < 200 && remaining() > 0; attempt++)
+            await Task.Delay(50);
+        Assert.Equal(0, remaining());
+    }
+
+    /// <summary>
+    /// Collects until the object is gone or the bound is spent: a session's last tasks may still be
+    /// unwinding when its handle's disposal returns, and a leak never gets there.
+    /// </summary>
+    private static async Task<bool> IsCollectedAsync(WeakReference reference)
+    {
+        for (var attempt = 0; attempt < 200 && reference.IsAlive; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            await Task.Delay(50);
+        }
+
+        return !reference.IsAlive;
     }
 
     /// <summary>Holds the segments of a client's write stream while closed, and lets them through when opened.</summary>

@@ -146,7 +146,6 @@ public sealed class ByteStreamClientBuilder
             _batchBytes,
             wiring.Options,
             wiring.DataUrl,
-            wiring.HttpClient,
-            wiring.Streams);
+            wiring.HttpClient);
     }
 }

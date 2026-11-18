@@ -1,7 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.IO;
 using TransportR.Client.Configuration;
 using TransportR.Client.Internal;
 
@@ -14,8 +13,7 @@ internal sealed record ClientWiring(
     ControlChannel Channel,
     ClientOptions Options,
     string DataUrl,
-    HttpClient HttpClient,
-    RecyclableMemoryStreamManager Streams);
+    HttpClient HttpClient);
 
 /// <summary>
 /// The settings the builders of both kinds of client share, with their checks, and the assembly of what
@@ -142,8 +140,6 @@ internal sealed class ClientBuilderState
         var hubUrl = _url!.TrimEnd('/');
         var dataUrl = hubUrl + WireRoutes.StreamBase;
 
-        var streamManager = new RecyclableMemoryStreamManager();
-
         // No cookie container: the control channel sets each request's cookies itself, since a
         // transfer's requests carry another affinity than the client's own.
         var httpHandler = new SocketsHttpHandler
@@ -166,6 +162,6 @@ internal sealed class ClientBuilderState
             _accessToken,
             _tokenProvider);
 
-        return new ClientWiring(channel, options, dataUrl, httpClient, streamManager);
+        return new ClientWiring(channel, options, dataUrl, httpClient);
     }
 }

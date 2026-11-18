@@ -32,9 +32,6 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
 
-    // Infrastructure
-    private readonly RecyclableMemoryStreamManager _streamManager;
-
     public event Func<Receive<T>, Task>? OnTransferStarted;
 
     public event Func<Send<T>, Task>? OnSendRequested;
@@ -50,8 +47,7 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
         int defaultBatchSize,
         ClientOptions options,
         string dataUrl,
-        HttpClient httpClient,
-        RecyclableMemoryStreamManager streamManager)
+        HttpClient httpClient)
     {
         _connection = new ClientConnection(channel, logger, options, httpClient, dataUrl, sessionRegistry, () => sessionRegistry.Sessions,
             transferId => sessionRegistry.TryRemove(transferId, out _));
@@ -60,8 +56,6 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
         _defaultBatchSize = defaultBatchSize;
         _options = options;
         _dataUrl = dataUrl;
-
-        _streamManager = streamManager;
 
         // SRP: Extract signaling logic
         _signaling = new TransferSignaling<ClientSession<T>, Send<T>, Receive<T>>(
@@ -178,11 +172,12 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     // --- Internal Logic ---
 
     /// <summary>
-    /// A session with the sending and receiving ends the client builds for it.
+    /// A session with the sending and receiving ends the client builds for it, and the stream manager that
+    /// serves its batches: the session holds the only reference, so the memory it pooled goes with it.
     /// </summary>
     private ClientSession<T> NewSession(string transferId, int batchSize, string? affinity)
     {
-        var (send, receive) = SessionPorts.Create(_options, _serializer, _streamManager, batchSize);
+        var (send, receive) = SessionPorts.Create(_options, _serializer, new RecyclableMemoryStreamManager(), batchSize);
         var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
         return new ClientSession<T>(session, send, receive);
     }

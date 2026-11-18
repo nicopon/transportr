@@ -50,8 +50,7 @@ internal static class TestClients
             defaultBatchSize: 100,
             options,
             baseUrl + WireRoutes.StreamBase,
-            httpClient,
-            new Microsoft.IO.RecyclableMemoryStreamManager());
+            httpClient);
     }
 }
 

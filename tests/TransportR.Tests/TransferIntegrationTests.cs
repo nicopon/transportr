@@ -1362,7 +1362,6 @@ public class TransferIntegrationTests
 
         var registry = new SessionRegistry<ClientSession<string>>(logger);
         serializer ??= new TransportR.Serialization.MessagePack.MessagePackBatchSerializer<string>();
-        var streamManager = new Microsoft.IO.RecyclableMemoryStreamManager();
         var httpClient = handler != null
             ? new HttpClient(handler) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan }
             : new HttpClient(networkHandler ?? new SocketsHttpHandler { UseCookies = false }) { BaseAddress = new Uri(url), Timeout = Timeout.InfiniteTimeSpan };
@@ -1376,8 +1375,7 @@ public class TransferIntegrationTests
             defaultBatchSize: 100,
             options,
             url + WireRoutes.StreamBase,
-            httpClient,
-            streamManager
+            httpClient
         );
     }
 

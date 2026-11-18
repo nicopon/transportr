@@ -14,6 +14,9 @@ internal sealed class ByteBatchSource(
 {
     private ByteStreamAccumulator? _accumulator;
 
+    /// <summary>The manager that serves this session's batch bodies. Internal so that the tests can see whose it is.</summary>
+    internal RecyclableMemoryStreamManager Streams => streams;
+
     public ChunkType BatchType => ChunkType.StreamBatch;
 
     private ByteStreamAccumulator Accumulator =>
