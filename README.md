@@ -92,9 +92,11 @@ The hub picks no serializer: it forwards opaque bytes and never decodes a payloa
 using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
+var hubUrl = "http://localhost:5252";
+
 // Connect to hub
 var sender = new TransportRClientBuilder<Order>()
-    .WithUrl("http://localhost:5252")
+    .WithUrl(hubUrl)
     .WithMessagePackSerialization()
     .Build();
 
@@ -121,8 +123,12 @@ otherwise.
 using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
+var hubUrl = "http://localhost:5252";
+using var stop = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
+
 var receiver = new TransportRClientBuilder<Order>()
-    .WithUrl("http://localhost:5252")
+    .WithUrl(hubUrl)
     .WithMessagePackSerialization()
     .Build();
 
@@ -141,7 +147,7 @@ receiver.OnTransferStarted += async transfer =>
 };
 
 await receiver.ConnectAsync(["receivers"]);
-await Task.Delay(Timeout.Infinite); // Keep listening
+await Task.Delay(Timeout.Infinite, stop.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing); // Keep listening until Ctrl+C
 ```
 
 ---

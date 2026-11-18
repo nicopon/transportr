@@ -1,8 +1,11 @@
+using System.Runtime.CompilerServices;
 using MessagePack;
 using Microsoft.AspNetCore.Builder;
 using TransportR.Client;
 using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
+
+[assembly: InternalsVisibleTo("TransportR.Tests")]
 
 namespace TransportR.DocSnippets;
 
@@ -37,11 +40,13 @@ internal static class ReadmeQuickStart
     }
 
     // 2. Send Data (Sender Client)
-    public static async Task Sender()
+    // The README declares hubUrl as a variable here; the snippet takes it as a parameter so that a
+    // test can point it at its own hub.
+    public static async Task Sender(string hubUrl)
     {
         // Connect to hub
         var sender = new TransportRClientBuilder<Order>()
-            .WithUrl("http://localhost:5252")
+            .WithUrl(hubUrl)
             .WithMessagePackSerialization()
             .Build();
 
@@ -60,10 +65,12 @@ internal static class ReadmeQuickStart
     }
 
     // 3. Receive Data (Receiver Client)
-    public static async Task Receiver()
+    // The README declares hubUrl and a source cancelled by Ctrl+C here; the snippet takes the url and
+    // that source's token as parameters so that a test can point it at its own hub and end its wait.
+    public static async Task Receiver(string hubUrl, CancellationToken stop)
     {
         var receiver = new TransportRClientBuilder<Order>()
-            .WithUrl("http://localhost:5252")
+            .WithUrl(hubUrl)
             .WithMessagePackSerialization()
             .Build();
 
@@ -82,10 +89,14 @@ internal static class ReadmeQuickStart
         };
 
         await receiver.ConnectAsync(["receivers"]);
-        await Task.Delay(Timeout.Infinite); // Keep listening
+        await Task.Delay(Timeout.Infinite, stop).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing); // Keep listening until Ctrl+C
     }
 
-    private static IEnumerable<Order> GetOrders() => [];
+    /// <summary>How many orders <see cref="Sender"/> sends: a count the test can check what arrived against.</summary>
+    internal const int OrderCount = 1_000;
+
+    // The README leaves GetOrders to the reader's own data.
+    private static IEnumerable<Order> GetOrders() => Enumerable.Range(0, OrderCount).Select(id => new Order { Id = id });
 }
 
 /// <summary>Stands in for the reader's own item type.</summary>
