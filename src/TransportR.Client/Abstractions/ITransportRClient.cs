@@ -46,9 +46,20 @@ public interface IDataReceiver<T> : IDataClient
     /// Event fired when a new transfer is initiated targeting this receiver.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The handler consumes items from the transfer's <see cref="Receive{T}.ReceiveAsync"/> method
     /// and owns the handle it is given: nothing else disposes it, and a handle left alive keeps its
     /// session registered with the client and reporting to the hub for as long as the client lives.
+    /// </para>
+    /// <para>
+    /// The client answers the hub once the handler has returned its task, not once that task has
+    /// ended: the handler may consume in its body, or hand the handle off and return. An exception
+    /// thrown before it returns, or a task already faulted or cancelled when it does, refuses the
+    /// transfer, and the call that opened it fails. A task that faults or is cancelled later fails the
+    /// transfer instead: the client logs it and releases the handle in the handler's place, which
+    /// abandons a transfer that has not ended, and the sender fails with
+    /// <see cref="TransferFailedException"/>. A transfer that has ended keeps its outcome.
+    /// </para>
     /// </remarks>
     event Func<Receive<T>, Task> OnTransferStarted;
 }
@@ -77,9 +88,16 @@ public interface IDataSender<T> : IDataClient
     /// </summary>
     /// <remarks>
     /// The handler owns the handle it is given, as with <c>OnTransferStarted</c>: it sends through
-    /// it, completes it and disposes it. It runs inside the handshake, which is bounded by a
-    /// timeout, so it hands the handle off and returns rather than sending from within. With no
-    /// handler attached the client refuses such transfers, and the host's request fails.
+    /// it, completes it and disposes it. The client answers the hub once the handler has returned
+    /// its task, not once that task has ended, so the handshake's timeout bounds only what the
+    /// handler does before it returns: it may send in its body, or hand the handle off and return.
+    /// An exception thrown before it returns, or a task already faulted or cancelled when it does,
+    /// refuses the transfer: the client releases the handle, and the host's request fails. A task
+    /// that faults or is cancelled later fails the transfer instead: the client logs it and releases
+    /// the handle in the handler's place, which abandons a transfer that has not ended, and the
+    /// receiver fails with <see cref="TransferFailedException"/>. A transfer that has ended keeps its
+    /// outcome. With no handler attached the client refuses such transfers, and the host's request
+    /// fails.
     /// </remarks>
     event Func<Send<T>, Task> OnSendRequested;
 

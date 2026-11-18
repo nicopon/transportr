@@ -28,7 +28,7 @@ public sealed class ReadmeQuickStartTests(ITestOutputHelper output)
 {
     private static readonly TimeSpan Ceiling = TimeSpan.FromSeconds(60);
 
-    [Fact(Skip = "the client awaits an OnTransferStarted handler to completion before it answers the hub, so a handler that consumes ReceiveAsync in its body times out the handshake")]
+    [Fact]
     public async Task The_Readme_Sender_And_Receiver_Deliver_Every_Order()
     {
         const int expected = ReadmeQuickStart.OrderCount;

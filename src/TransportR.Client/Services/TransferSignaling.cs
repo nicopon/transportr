@@ -21,6 +21,7 @@ namespace TransportR.Client.Services;
 internal class TransferSignaling<TSession, TSend, TReceive>
     where TSession : ClientSession
     where TSend : IAsyncDisposable
+    where TReceive : IAsyncDisposable
 {
     private readonly ControlChannel _channel;
     private readonly SessionRegistry<TSession> _sessionRegistry;
@@ -132,7 +133,7 @@ internal class TransferSignaling<TSession, TSend, TReceive>
             var transfer = _makeReceive(session);
             if (_onTransferStarted != null)
             {
-                await _onTransferStarted(transfer);
+                Watch(_onTransferStarted(transfer), transfer, ready.TransferId);
             }
 
             outcome = CallbackOutcome.Accepted;
@@ -206,7 +207,7 @@ internal class TransferSignaling<TSession, TSend, TReceive>
         var transfer = _makeSend(session);
         try
         {
-            await handler(transfer);
+            Watch(handler(transfer), transfer, request.TransferId);
         }
         catch
         {
@@ -218,6 +219,52 @@ internal class TransferSignaling<TSession, TSend, TReceive>
         }
 
         return CallbackOutcome.Accepted;
+    }
+
+    /// <summary>
+    /// Reads the task a handler returned as it stands when the handler returns, which is when the
+    /// hub is answered: a handler may consume or send in its body without holding the handshake.
+    /// </summary>
+    /// <remarks>
+    /// A task already faulted or cancelled is raised here, and the transfer refused. A task still
+    /// running cannot be refused any more if it fails or is cancelled later: the failure is logged and
+    /// the handle released in the handler's place, which abandons a transfer that has not ended, and
+    /// the peer fails on it. A transfer that has ended keeps its outcome, and releasing a handle the
+    /// handler had released already does nothing.
+    /// </remarks>
+    private void Watch(Task handled, IAsyncDisposable handle, string transferId)
+    {
+        if (handled.IsCompleted)
+        {
+            // Raises the fault, or the cancellation as a TaskCanceledException.
+            handled.GetAwaiter().GetResult();
+            return;
+        }
+
+        _ = ReleaseOnFailureAsync(handled, handle, transferId);
+    }
+
+    private async Task ReleaseOnFailureAsync(Task handled, IAsyncDisposable handle, string transferId)
+    {
+        try
+        {
+            await handled;
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "The handler of Transfer {TransferId} failed after it returned; releasing its handle", transferId);
+        }
+
+        // Nobody awaits this task: what the release raises would go unobserved.
+        try
+        {
+            await handle.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Releasing the handle of Transfer {TransferId} failed", transferId);
+        }
     }
 
     private async Task ReplyAsync(Guid requestId, string transferId, CallbackOutcome outcome, string? affinity)

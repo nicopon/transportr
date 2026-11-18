@@ -361,6 +361,71 @@ public class ByteStreamTransferTests
     }
 
     [Fact]
+    public async Task AHostInitiatedTransfer_ToASenderWhoseHandlerSendsInItsBody_DeliversEveryByte()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1000);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
+
+        var source = Payload(7321);
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += async send =>
+        {
+            await using (send)
+            {
+                await send.CopyFromAsync(new MemoryStream(source));
+                await send.CompleteAsync();
+            }
+            sent.TrySetResult();
+        };
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(5)).WaitAsync(Bound);
+
+        await using var receive = await receiveHandle.Task.WaitAsync(Bound);
+        var received = new MemoryStream();
+        await receive.CopyToAsync(received).WaitAsync(Bound);
+        await sent.Task.WaitAsync(Bound);
+
+        Assert.True(source.AsSpan().SequenceEqual(received.ToArray()));
+    }
+
+    [Fact]
+    public async Task AReceiverWhoseHandlerCopiesInItsBody_GetsEveryByte()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1000, o => o.HandshakeTimeout = TimeSpan.FromSeconds(5));
+        await using var receiver = CreateByteClient(handler, batchBytes: 1000);
+
+        var received = new MemoryStream();
+        var copied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += async receive =>
+        {
+            await using (receive)
+            {
+                await receive.CopyToAsync(received);
+            }
+            copied.TrySetResult();
+        };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId).WaitAsync(Bound);
+        var source = Payload(7321);
+        await send.CopyFromAsync(new MemoryStream(source));
+        await send.CompleteAsync().WaitAsync(Bound);
+        await copied.Task.WaitAsync(Bound);
+
+        Assert.True(source.AsSpan().SequenceEqual(received.ToArray()));
+    }
+
+    [Fact]
     public async Task CopyToAsync_DoesNotReturn_WhileTheHubHasNotHeardTheReceiversAnswerToComplete()
     {
         using var host = TestHubServerFactory.CreateHost();

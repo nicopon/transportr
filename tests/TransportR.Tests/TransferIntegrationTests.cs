@@ -126,9 +126,11 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var asked = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var answer = new ManualResetEventSlim();
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += async send => { asked.TrySetResult(send); await answer.Task; };
+        // The client answers the hub once the handler returns: blocking before the return is what
+        // holds the answer.
+        sender.OnSendRequested += send => { asked.TrySetResult(send); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
         receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -139,7 +141,7 @@ public class TransferIntegrationTests
         await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(send.TransferId);
-        answer.SetResult();
+        answer.Set();
 
         await Assert.ThrowsAsync<HubRequestFailedException>(() => init.WaitAsync(TimeSpan.FromSeconds(10)));
     }
@@ -871,6 +873,136 @@ public class TransferIntegrationTests
 
         Assert.Empty(sender.GetTransfers());
         await AssertEventuallyEmptyAsync(receiver);
+    }
+
+    [Fact]
+    public async Task HostInitiatedTransfer_DeliversEveryItem_WhenTheSendersHandlerSendsInItsBody()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var expected = Enumerable.Range(0, 250).Select(i => $"item-{i}").ToList();
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += async send =>
+        {
+            await using (send)
+            {
+                await send.SendAsync(expected);
+                await send.CompleteAsync();
+            }
+            sent.TrySetResult();
+        };
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(5))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var items = new List<string>();
+        await foreach (var item in receive.ReceiveAsync(ceiling.Token))
+        {
+            items.Add(item);
+        }
+
+        Assert.Equal(expected, items);
+        await sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("faulted")]
+    [InlineData("cancelled")]
+    public async Task SenderInitiatedTransfer_IsRefused_WhenTheReceiversHandlerHasFailedByTheTimeItReturns(string how)
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost", o => o.HandshakeTimeout = TimeSpan.FromSeconds(5));
+        await using var receiver = CreateClient(handler, "http://localhost");
+        receiver.OnTransferStarted += _ => how switch
+        {
+            "throws" => throw new InvalidOperationException("no room for another transfer"),
+            "faulted" => Task.FromException(new InvalidOperationException("no room for another transfer")),
+            _ => Task.FromCanceled(new CancellationToken(canceled: true)),
+        };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
+            () => sender.InitTransferAsync(receiver.ClientId).WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.Contains("failed to prepare", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SenderInitiatedTransfer_FailsAtTheSender_WhenTheReceiversHandlerFailsAfterItReturned()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost", o => o.HandshakeTimeout = TimeSpan.FromSeconds(5));
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fail = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += async receive =>
+        {
+            receiveHandle.TrySetResult(receive);
+            await fail.Task;
+            throw new InvalidOperationException("the handler failed after it returned");
+        };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId).WaitAsync(TimeSpan.FromSeconds(20));
+        var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await send.SendAsync("item-0");
+        fail.SetResult();
+
+        // The sender has not completed, so the receiver's session can only end by the release of its
+        // handle; once it has, the sender cannot be acknowledged a completion.
+        await Assert.ThrowsAsync<TransferFailedException>(() => receive.WaitForCompletionAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAsync<TransferFailedException>(() => send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task HostInitiatedTransfer_FailsAtTheReceiver_WhenTheSendersHandlerFailsAfterItReturned()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var fail = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += async send =>
+        {
+            await send.SendAsync("item-0");
+            await fail.Task;
+            throw new InvalidOperationException("the handler failed after it returned");
+        };
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(5))
+            .WaitAsync(TimeSpan.FromSeconds(15));
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        fail.SetResult();
+
+        // The handler never completed the transfer: the receiver's loop can end only on a failure.
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            await foreach (var _ in receive.ReceiveAsync(ceiling.Token))
+            {
+            }
+        });
     }
 
     [Fact]

@@ -5,8 +5,11 @@ namespace TransportR.Client;
 /// </summary>
 /// <typeparam name="T">The type of items to receive.</typeparam>
 /// <remarks>
-/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it: until it does,
-/// the session stays registered with its client, which is what keeps its outcome reportable.
+/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it; the client
+/// disposes it in the handler's place only when the handler's task faults or is cancelled after the
+/// handler has returned.
+/// Until it is disposed, the session stays registered with its client, which is what keeps its
+/// outcome reportable.
 /// <see cref="ReceiveAsync"/> itself does not return until the transfer has reached an outcome, so
 /// disposing right after the loop is the correct, evident form; disposing before that — a <c>break</c>,
 /// or a release from another task while the loop is still running — abandons the transfer, and every

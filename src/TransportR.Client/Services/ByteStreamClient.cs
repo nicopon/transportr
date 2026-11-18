@@ -52,7 +52,9 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// <remarks>
     /// The handler reads the transfer from the handle it is given and owns it: nothing else disposes it,
     /// and a handle left alive keeps its session registered with the client and reporting to the hub for
-    /// as long as the client lives.
+    /// as long as the client lives. The client answers the hub once the handler has returned its task,
+    /// so the handler may read in its body; what a failure of the handler does, before it returns or
+    /// after, is as for <see cref="IDataReceiver{T}.OnTransferStarted"/>.
     /// </remarks>
     public event Func<ByteReceive, Task>? OnTransferStarted;
 
@@ -62,9 +64,10 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// The handler owns the handle it is given, as with <see cref="OnTransferStarted"/>: it sends through
-    /// it, completes it and disposes it. It runs inside the handshake, which is bounded by a
-    /// timeout, so it hands the handle off and returns rather than sending from within. With no
-    /// handler attached the client refuses such transfers, and the host's request fails.
+    /// it, completes it and disposes it. The client answers the hub once the handler has returned its
+    /// task, so the handler may send in its body; what a failure of the handler does, before it returns
+    /// or after, is as for <see cref="IDataSender{T}.OnSendRequested"/>. With no handler attached the
+    /// client refuses such transfers, and the host's request fails.
     /// </remarks>
     public event Func<ByteSend, Task>? OnSendRequested;
 

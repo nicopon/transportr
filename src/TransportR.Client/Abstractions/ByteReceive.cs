@@ -5,8 +5,11 @@ namespace TransportR.Client;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it: until it does,
-/// the session stays registered with its client, which is what keeps its outcome reportable. A read
+/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it; the client
+/// disposes it in the handler's place only when the handler's task faults or is cancelled after the
+/// handler has returned.
+/// Until it is disposed, the session stays registered with its client, which is what keeps its
+/// outcome reportable. A read
 /// that returns 0 and a <see cref="CopyToAsync"/> that returns both come only once the transfer has
 /// reached its outcome, so disposing right after them is the correct form; disposing before that
 /// abandons the transfer, and every wait on the handle, pending or later, then throws
