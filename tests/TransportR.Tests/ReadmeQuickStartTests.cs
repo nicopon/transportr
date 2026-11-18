@@ -54,7 +54,7 @@ public sealed class ReadmeQuickStartTests(ITestOutputHelper output)
         {
             var receiver = Task.Run(() => ReadmeQuickStart.Receiver(hub.BaseUrl, stop.Token));
 
-            // The sender picks the first receiver the hub lists: it must already be registered.
+            // The sender takes the first receiver that is not disconnected and throws if none: the receiver must already be registered.
             await Task.WhenAny(store.ReceiverRegistered, receiver).WaitAsync(ceiling.Token);
             if (receiver.IsCompleted)
             {
