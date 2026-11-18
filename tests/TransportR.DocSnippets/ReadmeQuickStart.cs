@@ -14,10 +14,10 @@ namespace TransportR.DocSnippets;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Nothing here runs, and nothing here is a test: this project exists so that an example which
-/// stops compiling fails the build instead of waiting for a reader to try it. The hub snippet had
-/// been calling a client-side extension and omitting <c>Build()</c> since the day it was written,
-/// and no gate had anything to say about it.
+/// This project compiles them, so an example that stops compiling fails the build. The sender and
+/// the receiver also run: <c>ReadmeQuickStartTests</c>, in <c>TransportR.Tests</c>, points both at a
+/// local hub and checks that every order arrives. The hub snippet is only compiled; the
+/// configuration it builds runs in an integration test.
 /// </para>
 /// <para>
 /// <b>Edit these bodies and the README together.</b> A snippet that compiles but no longer matches

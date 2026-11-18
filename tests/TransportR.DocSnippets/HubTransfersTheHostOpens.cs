@@ -24,7 +24,7 @@ internal static class HubTransfersTheHostOpens
     {
         sender.OnSendRequested += send =>
         {
-            _ = SendOrdersAsync(send);   // the handler runs inside the handshake: hand the handle off and return
+            _ = SendOrdersAsync(send);   // or send here: the hub is answered once the handler returns, not once its task ends
             return Task.CompletedTask;
         };
 
