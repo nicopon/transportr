@@ -291,8 +291,61 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 | Pong | 0x06 | Connection probe response; `BatchId` carries the receiver's next expected batch, the resume point |
 | Abort | 0x07 | One end gave up; `BatchId` carries an `AbortReason` |
 | StreamBatch | 0x08 | Data payload of a transfer without a serializer (raw bytes); `Count` is the payload's size in bytes |
+| SealedBatch | 0x09 | `Batch` sealed end to end (*End-to-End Encryption*, below) |
+| SealedStreamBatch | 0x0A | `StreamBatch` sealed end to end; `Count` is the plaintext's size in bytes |
 
 > **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. A batch body the receiver cannot decode fails its session instead of being resent: it arrived whole, and a resend would decode no better.
+
+### End-to-End Encryption
+
+`WithEndToEndEncryption()`, on both builders, seals every batch so that the hub forwards bytes it cannot read;
+`WithEndToEndEncryption(Func<Guid, byte[]?> preSharedKey)` also mixes a 32-byte pre-shared key (PSK) into the keys. Both
+ends are built alike, and `Build()` refuses where `AesGcm.IsSupported` is false. What each level protects, and against
+whom, is under "End-to-End Encryption" in [SecurityArchitecture.md](./SecurityArchitecture.md#end-to-end-encryption).
+One suite, never negotiated, all in the BCL: ECDH on P-256, HKDF-SHA256, AES-256-GCM, HMAC-SHA256.
+
+- **Shares.** Each end draws an ephemeral P-256 key pair per session, kept across its reconnections and erased once the
+  keys are derived. The sender's share is the payload of every `Ping`, the handshake's and the keepalive's: 65 bytes,
+  the uncompressed point (`0x04`, X, Y). The receiver's share followed by the key confirmation is the payload of every
+  `Pong`, 97 bytes; a `Pong`'s `BatchId` keeps the resume point. A share that is not a point of the curve, or differs
+  from the first one a session accepted, is refused. The `Ping` heads every stream the sender opens, so the receiver
+  holds the keys before the first batch; the sender seals nothing, and signs no `Complete`, before a `Pong` whose
+  confirmation holds.
+- **Keys.** The transcript `T` is the mode (1 byte: `0x00`, `0x01` with a PSK), the `TransferId` (16 bytes, as in the
+  header), the sender's share and the receiver's. `PRK = HKDF-Extract(salt = PSK or 32 zero bytes, IKM = the ECDH
+  secret, its X coordinate)`, and each 32-byte key is `HKDF-Expand(PRK, label ‖ T)`, with the ASCII labels
+  `transportr e2e batch`, `transportr e2e confirmation`, `transportr e2e sender receipt` and
+  `transportr e2e receiver receipt`. The confirmation is `HMAC-SHA256(confirmation key, T)`, all 32 bytes, as for both
+  receipts: they cross once per stream opening or transfer, and an untruncated MAC needs no rule of its own. The mode
+  in `T` keeps an all-zero PSK from passing for none.
+- **Sealed batches.** AES-256-GCM under the batch key. The nonce is the header's `BatchId` as written there (4 bytes,
+  little-endian) followed by 8 zero bytes; the associated data is the 30-byte header as written on the wire, its type
+  and sealed length included; the payload is the ciphertext then the 16-byte tag. A `BatchId` is spent once per
+  session, never wraps (an encrypted transfer carries at most 2³¹ batches), and a resend replays the sealed bytes: no
+  nonce covers two plaintexts.
+- **Receipts.** `Complete` carries `HMAC-SHA256(sender receipt key, TransferId ‖ BatchId)`, the `BatchId` being the
+  last one (int32, little-endian); `CompleteAck` carries the same under the receiver receipt key, for the `BatchId` of
+  the `Complete` it accepted, and its header keeps `BatchId` 0. The sender signs only its final `BatchId`, once every
+  batch is registered, so no `Complete` for fewer batches exists; the receiver checks the receipt before it judges a
+  `Complete` premature. `BatchAck`, a `Pong`'s `BatchId` and `Abort` carry no MAC: forged, they lead only to a failure
+  (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer ended).
+- **Bounds.** `WithMaxBatchBytes` bounds the plaintext, and the reader admits a sealed batch 16 bytes longer. In
+  encrypted mode a receiver admits a `Ping` of exactly 65 bytes and a `Complete` of exactly 32, whatever its
+  `WithMaxBatchBytes`, and a sender's control stream admits a `Pong` of exactly 97 and a `CompleteAck` of exactly 32;
+  any other length is a protocol violation.
+- **Refusals.** An encrypted end refuses a `Ping` or `Pong` without a payload and a batch in clear, and aborts with
+  `AbortReason.EncryptionModeMismatch` (5). A clear end is unchanged: it ignores a `Ping`'s payload and refuses a
+  sealed batch by its type, so the encrypted peer finds the mismatch at the `Pong`. A tag, confirmation or receipt that
+  does not verify, a share that changes, or a sealed batch before the keys aborts with `AbortReason.VerificationFailed`
+  (6); a PSK on one end only, or two different ones, fails at the confirmation, before any batch. The end that refuses
+  fails with `TransferFailureCategory.EndToEndEncryptionFailed` and a message that names no key; its peer learns it as
+  `AbandonedByPeer`. Nothing is resent: the batch arrived whole.
+- **The PSK.** The provider is called once per transfer, synchronously, with the peer's client id, and returns 32
+  bytes; `null` or another length refuses the transfer and never falls back to no PSK. Ignoring the id gives one key per
+  trust domain. `TransferInfo.Protection` (`TransferProtection.None`, `Encrypted`, `EncryptedWithPreSharedKey`) says
+  which level a transfer runs at.
+
+A transfer in clear is byte for byte what it was: version 2, the same header, no payload on a control chunk.
 
 ---
 

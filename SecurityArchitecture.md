@@ -71,6 +71,7 @@ Both planes are stated separately, because they are armed separately.
 | Token tampering | Signature verified against IDP |
 | An authenticated client flooding `InitTransfer` | Ceilings per client on the transfers it opens itself, refused with a 429 before anything is written: `AccessOptions.MaxHandshakesPerClient` (32 at once, per instance) and `MaxOpenTransfersPerClient` (256 open, counted through the state store); the host's transfers are not counted. A client's stream of events holds at most 1024 unread events: the write that finds it full closes it |
 | Expired tokens | `exp` validated by the host on each request, each segment of a write stream included, and when a stream opens, a WebSocket's upgrade among them; judged by the hub for as long as it runs (see Token Renewal) |
+| The hub, a front end or a capture reading or rewriting the payload | Nothing by default; end-to-end encryption when both ends enable it (see End-to-End Encryption) |
 
 A write stream carried by a WebSocket is admitted once, at its upgrade, as a read GET is: no later request checks its
 token again. Its expiry is the access sweep's to judge (see Token Renewal), which ends the transfer.
@@ -90,6 +91,37 @@ that the route admits either participant of the transfer, by the checks the stre
 anyone else: a transfer the hub does not know, a subject that is not a participant's, and a token that
 grants no `transportr:group:*` scope, even when its subject is a participant's. A host that lists its
 routes, filters them or allow-lists them in a proxy adds it to the ones it keeps for `send` and `receive`.
+
+---
+
+## End-to-End Encryption
+
+Off by default: the payload then crosses the hub in clear, under whatever TLS each hop has, and whoever terminates that
+TLS or reads the hub reads it. `WithEndToEndEncryption()` on both ends seals it from one end to the other, and a
+pre-shared key (PSK) can be added; the protocol is under "End-to-End Encryption" in
+[TransportRArchitecture.md](./TransportRArchitecture.md#end-to-end-encryption).
+
+| Adversary | Encryption alone | With a PSK |
+|---|---|---|
+| Whoever reads the path: a front end or proxy that terminates TLS, the hub's logs and memory image, a network capture | protected | protected |
+| A hub, or whoever runs it, that modifies: substitutes the shares, alters, moves or truncates batches, forges an acknowledgement | **not protected**: the key exchange is not authenticated, and a hub that answers each end with a share of its own reads and rewrites everything | protected: the transfer fails, never a false success |
+
+- **Without a PSK the protection holds only against whoever reads.** Whoever can rewrite the streams can stand between
+  the two ends unseen.
+- **Still visible to the hub**: who talks to whom, when, and how much (payload sizes, the `Count` and `BatchId` of each
+  header), and its power to cut everything. These metadata are out of reach by nature, and availability cannot be
+  protected end to end; nothing is built for either.
+- **Forward secrecy**, at both levels: each session draws an ephemeral key pair, erased once the keys are derived, so a
+  key taken later, the PSK included, opens no transfer recorded before.
+- **A PSK per trust domain** is known to every node of that domain: one of them that also held the hub could stand in
+  the middle of the others' transfers. **A PSK per pair** closes that case, at the price of a secret per pair; the
+  provider receives the peer's client id to allow either.
+- **The PSK comes from each node's own configuration**, never from a coordinator that runs alongside the hub or reaches
+  the nodes through the same front end: a key that travels the path it protects protects nothing against whoever holds
+  that path.
+- **No secret leaves the process.** Neither the PSK nor a derived key appears in a log, an exception message or a
+  `ToString`. The session erases its copy of the PSK once the keys are derived, and the keys when it is released; the
+  array the provider returned is the provider's, and is left as it is.
 
 ---
 
