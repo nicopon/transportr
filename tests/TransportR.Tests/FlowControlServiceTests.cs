@@ -116,6 +116,29 @@ public class FlowControlServiceTests
     }
 
     [Fact]
+    public void CanSendTo_GroupsThatDifferOnlyInCase_DoNotMatch()
+    {
+        var options = new FlowControlOptions
+        {
+            Groups = new()
+            {
+                ["senders"] = new GroupAccess { CanSendTo = ["Receivers"] }
+            }
+        };
+        var service = new DefaultFlowControlService(options);
+
+        Assert.False(service.CanSendTo(
+            new HashSet<string> { "senders" },
+            new HashSet<string> { "receivers" }));
+        Assert.False(service.CanSendTo(
+            new HashSet<string> { "Senders" },
+            new HashSet<string> { "Receivers" }));
+        Assert.True(service.CanSendTo(
+            new HashSet<string> { "senders" },
+            new HashSet<string> { "Receivers" }));
+    }
+
+    [Fact]
     public void CanSendTo_EmptyGroups_ReturnsFalse()
     {
         var options = new FlowControlOptions();

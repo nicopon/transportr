@@ -49,7 +49,9 @@ public class DefaultFlowControlService : IFlowControlService
                 if (access.CanSendTo.Contains("*"))
                     return true;
 
-                return access.CanSendTo.Contains(targetGroup, StringComparer.OrdinalIgnoreCase);
+                // Ordinal, as the source's lookup and every other comparison of a group: a rule that
+                // names "Receivers" grants nothing to "receivers".
+                return access.CanSendTo.Contains(targetGroup, StringComparer.Ordinal);
             });
 
             if (!canReachThisTarget)
