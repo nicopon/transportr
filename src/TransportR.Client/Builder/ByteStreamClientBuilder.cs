@@ -109,6 +109,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithTokenProviderFactory"/>
+    internal ByteStreamClientBuilder WithTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    {
+        _state.SetTokenProviderFactory(factory);
+        return this;
+    }
+
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithTokenRefreshThreshold"/>
     public ByteStreamClientBuilder WithTokenRefreshThreshold(TimeSpan threshold)
     {
@@ -127,6 +134,13 @@ public sealed class ByteStreamClientBuilder
     public ByteStreamClientBuilder WithWriteTransportProbe()
     {
         _state.EnableWriteTransportProbe();
+        return this;
+    }
+
+    /// <inheritdoc cref="TransportRClientBuilder{T}.ConfigureHttpHandler"/>
+    public ByteStreamClientBuilder ConfigureHttpHandler(Action<SocketsHttpHandler> configure)
+    {
+        _state.SetHttpHandlerConfiguration(configure);
         return this;
     }
 

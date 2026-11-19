@@ -233,6 +233,15 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Sets a token provider made at <see cref="Build"/> from the handler the client's requests go through.
+    /// </summary>
+    internal TransportRClientBuilder<T> WithTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    {
+        _state.SetTokenProviderFactory(factory);
+        return this;
+    }
+
+    /// <summary>
     /// How long before a token expires the client asks its provider for a new one and presents it to
     /// the hub. Default: 5 minutes, and never more than half of what is left of the token, so a token
     /// shorter than two thresholds is renewed once rather than continuously.
@@ -278,6 +287,32 @@ public class TransportRClientBuilder<T>
     public TransportRClientBuilder<T> WithWriteTransportProbe()
     {
         _state.EnableWriteTransportProbe();
+        return this;
+    }
+
+    /// <summary>
+    /// Configures the handler every request of the client goes through: its control plane, its data
+    /// streams and their WebSockets. For a proxy, a client certificate or a certificate authority.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="Build"/> calls <paramref name="configure"/> on a new handler, once for each client it
+    /// builds, before that client's first request. A later call replaces an earlier one.
+    /// <c>WithClientCredentials</c> given no <see cref="HttpClient"/> of its own asks for its tokens through
+    /// the same handler.
+    /// </para>
+    /// <para>
+    /// <see cref="Build"/> throws <see cref="InvalidOperationException"/>, naming the setting, when
+    /// <paramref name="configure"/> turns on <see cref="SocketsHttpHandler.UseCookies"/> or
+    /// <see cref="SocketsHttpHandler.AutomaticDecompression"/>. Every request is HTTP/1.1 whatever the
+    /// handler allows. The events stream and each data stream hold a connection for as long as they
+    /// last, so a <see cref="SocketsHttpHandler.MaxConnectionsPerServer"/> below what a client has open
+    /// at once leaves its other requests waiting.
+    /// </para>
+    /// </remarks>
+    public TransportRClientBuilder<T> ConfigureHttpHandler(Action<SocketsHttpHandler> configure)
+    {
+        _state.SetHttpHandlerConfiguration(configure);
         return this;
     }
 

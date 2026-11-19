@@ -25,19 +25,25 @@ internal class ClientCredentialsTokenProvider : IDisposable
     /// </summary>
     /// <param name="options">Client credentials configuration.</param>
     /// <param name="logger">Optional logger.</param>
-    /// <param name="httpClient">Optional HttpClient (for testing).</param>
+    /// <param name="httpClient">What the token requests go through; a client of its own when null.</param>
     public ClientCredentialsTokenProvider(
         ClientCredentialsOptions options,
         ILogger<ClientCredentialsTokenProvider>? logger = null,
         HttpClient? httpClient = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-
-        if (!options.IsConfigured)
-            throw new ArgumentException("ClientCredentialsOptions is not fully configured", nameof(options));
+        EnsureConfigured(options);
 
         _logger = logger;
         _httpClient = httpClient ?? new HttpClient();
+    }
+
+    public HttpClient HttpClient => _httpClient;
+
+    public static void EnsureConfigured(ClientCredentialsOptions options)
+    {
+        if (!options.IsConfigured)
+            throw new ArgumentException("ClientCredentialsOptions is not fully configured", nameof(options));
     }
 
     /// <summary>

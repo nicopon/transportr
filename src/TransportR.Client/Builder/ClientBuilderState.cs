@@ -32,6 +32,8 @@ internal sealed class ClientBuilderState
     private ILoggerFactory? _loggerFactory;
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
+    private Func<HttpMessageHandler, Func<Task<string>>>? _tokenProviderFactory;
+    private Action<SocketsHttpHandler>? _configureHttpHandler;
     private TimeSpan? _tokenRefreshThreshold;
     private TimeSpan? _acknowledgementTimeout;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
@@ -88,7 +90,23 @@ internal sealed class ClientBuilderState
 
     public void SetAccessToken(string token) => _accessToken = token;
 
-    public void SetTokenProvider(Func<Task<string>> provider) => _tokenProvider = provider;
+    public void SetTokenProvider(Func<Task<string>> provider)
+    {
+        _tokenProvider = provider;
+        _tokenProviderFactory = null;
+    }
+
+    public void SetTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    {
+        _tokenProviderFactory = factory;
+        _tokenProvider = null;
+    }
+
+    public void SetHttpHandlerConfiguration(Action<SocketsHttpHandler> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        _configureHttpHandler = configure;
+    }
 
     public void SetTokenRefreshThreshold(TimeSpan threshold)
     {
@@ -122,6 +140,7 @@ internal sealed class ClientBuilderState
     public ClientWiring Assemble(ILogger logger)
     {
         RequireUrl();
+        var httpHandler = CreateHttpHandler();
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
 
         var options = new ClientOptions
@@ -152,14 +171,8 @@ internal sealed class ClientBuilderState
         var hubUrl = _url!.TrimEnd('/');
         var dataUrl = hubUrl + WireRoutes.StreamBase;
 
-        // No cookie container: the control channel sets each request's cookies itself, since a
-        // transfer's requests carry another affinity than the client's own.
-        var httpHandler = new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.None,
-            UseCookies = false
-        };
-
+        // The hub's HttpClient owns the handler, and the client disposes it. A token provider made here
+        // reaches its identity provider through the same handler without owning it.
         var httpClient = new HttpClient(httpHandler)
         {
             Timeout = Timeout.InfiniteTimeSpan
@@ -172,8 +185,46 @@ internal sealed class ClientBuilderState
             options,
             loggerFactory.CreateLogger<ControlChannel>(),
             _accessToken,
-            _tokenProvider);
+            _tokenProviderFactory?.Invoke(httpHandler) ?? _tokenProvider);
 
         return new ClientWiring(channel, options, dataUrl, httpClient);
     }
+
+    private SocketsHttpHandler CreateHttpHandler()
+    {
+        // No cookie container: the control channel sets each request's cookies itself, since a
+        // transfer's requests carry another affinity than the client's own.
+        var handler = new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.None,
+            UseCookies = false
+        };
+
+        try
+        {
+            _configureHttpHandler?.Invoke(handler);
+
+            if (handler.UseCookies)
+            {
+                throw Refused(nameof(SocketsHttpHandler.UseCookies),
+                    "the client sets the cookies of each request itself, and a cookie container would override them");
+            }
+
+            if (handler.AutomaticDecompression != DecompressionMethods.None)
+            {
+                throw Refused(nameof(SocketsHttpHandler.AutomaticDecompression),
+                    "it invites compression on the way to the client, which may hold a stream back instead of forwarding it as it is written");
+            }
+        }
+        catch
+        {
+            handler.Dispose();
+            throw;
+        }
+
+        return handler;
+    }
+
+    private static InvalidOperationException Refused(string setting, string why) =>
+        new($"ConfigureHttpHandler may not set {setting}: {why}.");
 }

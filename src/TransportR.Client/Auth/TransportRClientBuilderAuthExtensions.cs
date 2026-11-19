@@ -12,31 +12,44 @@ public static class TransportRClientBuilderAuthExtensions
     /// <summary>
     /// Configures the client to acquire tokens using OAuth2 client credentials flow.
     /// </summary>
+    /// <param name="httpClient">
+    /// What the token requests go through, for an identity provider not reached the way the hub is
+    /// (another proxy, certificate or authority). The caller owns it: the client neither configures nor
+    /// disposes it. When null, they go through the client's own handler, so what
+    /// <c>ConfigureHttpHandler</c> sets for the hub applies to them too.
+    /// </param>
     public static TransportRClientBuilder<T> WithClientCredentials<T>(
         this TransportRClientBuilder<T> builder,
         string tokenEndpoint,
         string clientId,
         string clientSecret,
         string? scope,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        HttpClient? httpClient = null)
     {
-        return builder.WithTokenProvider(CreateProvider(tokenEndpoint, clientId, clientSecret, scope, loggerFactory));
+        var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
+        return httpClient != null
+            ? builder.WithTokenProvider(CreateProvider(options, loggerFactory, httpClient))
+            : builder.WithTokenProviderFactory(handler => CreateProvider(options, loggerFactory, OnTheHubsHandler(handler)));
     }
 
-    /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, ILoggerFactory?)"/>
+    /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, ILoggerFactory?, HttpClient?)"/>
     public static ByteStreamClientBuilder WithClientCredentials(
         this ByteStreamClientBuilder builder,
         string tokenEndpoint,
         string clientId,
         string clientSecret,
         string? scope,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        HttpClient? httpClient = null)
     {
-        return builder.WithTokenProvider(CreateProvider(tokenEndpoint, clientId, clientSecret, scope, loggerFactory));
+        var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
+        return httpClient != null
+            ? builder.WithTokenProvider(CreateProvider(options, loggerFactory, httpClient))
+            : builder.WithTokenProviderFactory(handler => CreateProvider(options, loggerFactory, OnTheHubsHandler(handler)));
     }
 
-    private static Func<Task<string>> CreateProvider(
-        string tokenEndpoint, string clientId, string clientSecret, string? scope, ILoggerFactory? loggerFactory)
+    private static ClientCredentialsOptions OptionsOf(string tokenEndpoint, string clientId, string clientSecret, string? scope)
     {
         var options = new ClientCredentialsOptions
         {
@@ -46,9 +59,22 @@ public static class TransportRClientBuilderAuthExtensions
             Scope = scope
         };
 
+        // Refused at the call, not at Build where the provider of the hub's handler is made.
+        ClientCredentialsTokenProvider.EnsureConfigured(options);
+        return options;
+    }
+
+    // Its own client, so that nothing the hub's client carries reaches the identity provider, and its
+    // own timeout, since the hub's has none. The hub's client owns the handler.
+    private static HttpClient OnTheHubsHandler(HttpMessageHandler handler) => new(handler, disposeHandler: false);
+
+    private static Func<Task<string>> CreateProvider(
+        ClientCredentialsOptions options, ILoggerFactory? loggerFactory, HttpClient httpClient)
+    {
         var provider = new ClientCredentialsTokenProvider(
             options,
-            loggerFactory?.CreateLogger<ClientCredentialsTokenProvider>() ?? NullLogger<ClientCredentialsTokenProvider>.Instance);
+            loggerFactory?.CreateLogger<ClientCredentialsTokenProvider>() ?? NullLogger<ClientCredentialsTokenProvider>.Instance,
+            httpClient);
 
         return provider.AsTokenProvider();
     }

@@ -148,6 +148,27 @@ write stream, for the hub to tell its `IHubProgressMonitor` before any transfer;
 to 5 s per registration on a path that accepts the upgrade without relaying it, and each transfer still finds its own
 transport.
 
+### Network
+Every request of a client (its control plane, its data streams and their WebSockets) goes through one
+`SocketsHttpHandler`, which `ConfigureHttpHandler`, on both builders, sets up for a proxy, a client certificate or a
+private certificate authority:
+```csharp
+.ConfigureHttpHandler(handler =>
+{
+    handler.Proxy = new WebProxy("http://proxy.example:3128");
+    handler.SslOptions.ClientCertificates = [clientCertificate];
+    handler.SslOptions.CertificateChainPolicy = new X509ChainPolicy
+    {
+        TrustMode = X509ChainTrustMode.CustomRootTrust,
+        CustomTrustStore = { authority }
+    };
+})
+```
+`Build()` refuses a handler that keeps cookies or decompresses responses, naming the setting. `WithClientCredentials`
+asks for its tokens through the same handler, so what is set here for the hub, a `ConnectCallback` included, applies to
+the identity provider too; given an `HttpClient` of its own (its last parameter), it uses that one, which the caller
+keeps and disposes.
+
 ### Serialization
 MessagePack is the recommended default: it takes any POCO without attributes or schema. JSON is about 20 % slower
 to produce in our benchmark, and can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`).

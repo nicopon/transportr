@@ -211,6 +211,7 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | `WithReceiveCapacity(items, bytes)` | unbounded | Receiver-side backpressure, first bound reached wins |
 | `WithMaxBatchBytes(bytes)` | `256 MiB` | The largest batch on the wire, at both ends: a receiver fails the transfer on a larger one |
 | `WithWriteTransport(policy)` | `PreferWebSocket` | What carries a write stream: a WebSocket, else segments; `RequireWebSocket` fails without one, `SegmentsOnly` never asks |
+| `ConfigureHttpHandler(configure)` | none | The `SocketsHttpHandler` of every request, for a proxy, a client certificate or a certificate authority: `Build()` refuses cookies and automatic decompression |
 
 **Both backpressure bounds are opt-in, and `Build()` warns when neither is set.** The right figure depends on
 how large an item is, which only the caller knows. Set both: either one alone moves the backlog to the other

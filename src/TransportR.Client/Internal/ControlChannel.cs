@@ -116,6 +116,8 @@ internal sealed class ControlChannel : IAsyncDisposable
 
     public bool HasTokenProvider => _tokenProvider != null;
 
+    public Func<Task<string>>? TokenProvider => _tokenProvider;
+
     /// <summary>The expiry the current token declares, when this client can read it.</summary>
     public DateTime? TokenExpiry => _tokenExpiry;
 
