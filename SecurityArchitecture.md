@@ -142,13 +142,8 @@ A client keeps the hub holding a token that has not run out, and the hub closes 
   is near its expiry, as it is after one ran out, so while the identity provider is down the client stays out.
 - **Dev mode** has no token: nothing expires and nothing is closed.
 
-For a deployment:
+For a deployment ("Deploying the hub" in `src/TransportR.Hub/README.md` has the rest, a front end included):
 
-- Update the hub and its clients together. A client without renewal (0.2.0) is closed at its token's expiry and
-  does not come back.
-- A reverse proxy that filters by path must let `/api/client/*` through as it does `/api/stream/*`: it carries the
-  events stream and every control request as well as the renewal. With the renewal alone held back, every stream
-  closes at its token's expiry.
 - A static token (`WithAccessToken`) cannot be renewed: its client is closed at the expiry, and says so when it connects.
 - The identity provider may be out of reach for as long as the renewal advance without any effect. Past that,
   streams close as their tokens expire, and a client cannot open one again until the provider answers.

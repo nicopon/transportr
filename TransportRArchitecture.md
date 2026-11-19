@@ -99,9 +99,8 @@ TransportR clearly separates responsibilities between coordination and transfer:
 
 Every control request names the client in its path and carries the token the client holds at that moment; with
 authentication on, it is refused with a 404 unless the path's `clientId` is the identity that token attests.
-The events stream is HTTP/1.1 like the data streams (below); a reverse proxy must forward it as it is written
-rather than buffer it, and keep its idle timeout above the hub's keepalive interval (*Key Timings* in
-`ResilienceArchitecture.md`).
+The events stream is HTTP/1.1 like the data streams (below), and is relayed as they are ("Deploying the hub" in
+`src/TransportR.Hub/README.md`).
 
 ### Data Plane Transport: HTTP/1.1, WebSocket or Segments
 
@@ -199,30 +198,8 @@ Both transports are HTTP/1.1, and the client says so on every request, an upgrad
   That was measured on a continuous upload: segments under HTTP/2 have not been, and a WebSocket over HTTP/2
   (RFC 8441) is excluded.
 
-For a deployment:
-
-- Kestrel may offer HTTP/2 to other clients; TransportR clients do not ask for it. A reverse proxy that speaks HTTP/2
-  to the hub is not covered: that hop has not been validated.
-- A reverse proxy has to do what the control plane asks of it already: answer short requests in full, and relay a GET
-  as it is written rather than buffer it (`X-Accel-Buffering: no`, which nginx honours; the hub sends the headers
-  before it has a byte to relay).
-- For a WebSocket it also has to relay the upgrade (`Upgrade` and `Connection` on `GET /api/stream/{id}/send`) and the
-  bytes of the socket as they come, both ways. Where the reference proxy strips the two headers the hub answers `426`
-  and the client uses segments at once; where it accepts the upgrade and relays nothing, the client gives up on the
-  proof after 5 s.
-- With segments, a request body is bounded by the proxy's limit: nginx's `client_max_body_size` is 1 MB by default,
-  which a 512 KB segment fits and a 2 MB one does not (413), so `StreamBufferSize` stays under it behind such a proxy.
-- A GET must carry a byte, and a segment must be answered, before the proxy's idle limit: 60 s for a default nginx,
-  240 s for App Service. A sender with nothing to write sends a `Ping` every presence interval (15 s): a byte on the
-  receiver's data GET, and its `Pong` one on the sender's control GET. A WebSocket's keepalive frames go at the same
-  interval; whether a front end counts them as traffic has not been measured.
-- Validated with segments: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`) with a
-  transfer of 200 items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no
-  408 or 499 on `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a
-  stock nginx (the `nginx-default` scenario) and the reference proxy in `tests/TransportR.TestProxy` (YARP). A WebSocket
-  has been carried on loopback only: directly, through the reference proxy, which relays the upgrade and the affinity
-  cookie, and through Toxiproxy for the cuts. The `nginx-default` scenario, a `proxy_pass` that sets neither header, has
-  not been run with one, and what a stock nginx, App Service or a corporate proxy answers has not been measured.
+What this asks of a front end, and the environments it has been validated in, are under "Deploying the hub" in
+`src/TransportR.Hub/README.md`.
 
 ### Resilience & Reliability
 

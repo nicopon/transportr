@@ -17,7 +17,7 @@ file points into rather than repeats:
 - `SecurityArchitecture.md` — JWT/OAuth2, `transportr:group:*` scopes, flow control, what each plane admits, token
   renewal, dev vs production auth mode.
 
-The package READMEs under `src/` are for users: the hub's covers its integration and the transfers its host opens.
+The package READMEs under `src/` are for users: the hub's covers its integration, its deployment and the transfers its host opens.
 
 ## Build & Test
 

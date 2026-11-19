@@ -97,10 +97,16 @@ so the sender sizes its batches for it (see the documentation of `WithMaxBatchBy
 
 ### Sizing for WAN and high-throughput streaming
 
-On high-latency links, size the in-flight window (`WithMaxInFlightBatches`) to at least the bandwidth-delay product:
-$$\text{Window} = \text{batchBytes} \times \text{MaxInFlightBatches} \ge \text{RTT} \times \text{TargetBandwidth}$$
+A sender that sets `WithMaxInFlightBatches` stops once that many batches await an acknowledgement, so on a long round
+trip the window, in bytes, has to cover the bandwidth-delay product, or the acknowledgements set the rate:
 
-For continuous streaming at 60–100 MB/s over a 25 ms WAN (BDP $\approx$ 1.5–2.5 MB), use 256 KB or 512 KB batches with an in-flight window of 4–8 MB (e.g. `WithMaxInFlightBatches(16)`). This keeps the pipe full during acknowledgement round-trips and matches `StreamBufferSize` (512 KB).
+```
+batch size in bytes × MaxInFlightBatches ≥ round-trip time × target bandwidth
+```
+
+A batch's size in bytes is `batchBytes` on a `ByteStreamClient`; on an item client it is `WithBatchSize` items times an
+item's serialized size, after compression. The window lifts no other bound: in segments, the fallback, a sender moves
+one 512 KB segment per round trip whatever its window ("Performance, and its conditions" in the repository's `README.md`).
 
 ## Advanced Configuration
 

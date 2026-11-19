@@ -39,13 +39,8 @@ Provides the hub services that:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-A write stream arrives as a WebSocket (`GET` with an upgrade) or as segments (`POST`) on the same path: whatever filters
-requests by method in front of the hub must let both through. For a client to use a WebSocket it has to relay `Upgrade`
-and `Connection` and the socket's bytes as they come, both ways; a front end that does not relay the upgrade, or holds
-back the opening proof, makes the client use segments. The route brings `UseWebSockets` with it, so the host's pipeline
-needs nothing. See "Data Plane Transport" in `TransportRArchitecture.md`. The hub logs the transport
-of each write stream it takes on, and of each client's write-transport probe, and hands them to
-`IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`: that is where to read what a client obtained.
+A write stream arrives as a WebSocket (`GET` with an upgrade) or as segments (`POST`) on the same path ("Data Plane
+Transport" in `TransportRArchitecture.md`); what that asks of a front end is under "Deploying the hub" below.
 
 ## Integration
 
@@ -71,6 +66,66 @@ app.MapDataHub();
 
 app.Run();
 ```
+
+## Deploying the hub
+
+### Before production
+
+- **Validate tokens.** `UseDevMode()` trusts whatever group a client claims. Without it the host configures JwtBearer
+  authentication, and its clients carry tokens whose `transportr:group:<name>` scopes name their groups ("Scope
+  Convention" in `SecurityArchitecture.md`).
+- **Choose where the tokens come from.** An identity provider that issues client-credentials tokens is one source.
+  The other needs no provider: an issuer the host embeds exchanges a key, held by each client, for a short token. The
+  hub validates that issuer's tokens like any others, so expiry, renewal and the access sweep work unchanged, and a
+  client takes them with `WithClientCredentials`, its key as the client secret. The token carries the client's groups
+  as scopes, or the host maps its subject to groups with its own `IClientIdentityProvider`. That issuer is a security
+  component of the host: it exchanges keys over HTTPS only, stores them hashed, lets them expire and be revoked, and
+  limits failed exchanges. [DtPipe](https://github.com/nicopon/dtpipe)'s coordinator issues its nodes' tokens this
+  way. `TransportR.Auth.SimpleIdp` has the same shape for development only: its clients and secrets live in memory.
+- **Register the group access rules.** Without an `IFlowControlService`, any client holding a group may open a transfer
+  to any other ("Group Access Rules" in `SecurityArchitecture.md`).
+- **Update the hub and its clients together.** They negotiate no protocol version; a release that needs one before the
+  other says so in its notes.
+- **Two hubs or more** need the Redis state store and effective session affinity at the load balancer ("High
+  Availability" in `TransportRArchitecture.md`).
+
+### In front of the hub
+
+- **Let both paths and both methods through.** `/api/client/*` carries the events stream, every control request and
+  the token renewal, and `/api/stream/*` the data; a write stream is a `GET` with an upgrade or a `POST` on the same
+  path. With the renewal alone held back, every stream closes at its token's expiry.
+- **Relay a long GET as it is written**, the events stream and every read stream, and answer short requests in full.
+  The hub sends `X-Accel-Buffering: no`, which nginx honours, and sends the headers before it has a byte to relay.
+- **Keep the idle limit above what the hub writes.** A GET must carry a byte, and a segment must be answered, before
+  the proxy's idle limit: 60 s for a default nginx, 240 s for App Service. The events stream carries the hub's
+  keepalive (*Key Timings* in `ResilienceArchitecture.md`). A sender with nothing to write sends a `Ping` every presence
+  interval (15 s): a byte on the receiver's data GET, and its `Pong` one on the sender's control GET. A WebSocket's
+  keepalive frames go at the same interval; whether a front end counts them as traffic has not been measured.
+- **For a WebSocket, relay the upgrade** (`Upgrade` and `Connection` on `GET /api/stream/{id}/send`) and the socket's
+  bytes as they come, both ways. Where the reference proxy strips the two headers the hub answers `426` and the client
+  uses segments at once; where it accepts the upgrade and relays nothing, the client gives up on the proof after 5 s.
+  The route brings `UseWebSockets` with it, so the host's pipeline needs nothing.
+- **With segments, a request body is bounded by the proxy's limit**: nginx's `client_max_body_size` is 1 MB by
+  default, which a segment, 512 KB, fits.
+- **HTTP/2.** TransportR clients ask for HTTP/1.1 on every request, an upgrade included; Kestrel may offer HTTP/2 to
+  other clients. A reverse proxy that speaks HTTP/2 to the hub has not been validated, App Service's front end below
+  aside, and what it spoke to the hub there was not recorded.
+
+The hub logs the transport of each write stream it takes on, and of each client's write-transport probe, and hands them
+to `IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`: that is where to read what a client obtained
+behind a given front end.
+
+### Validated environments
+
+- **Over a WebSocket**: Azure App Service (Linux, `http20Enabled=true`, `http20ProxyFlag=1`), with clients on Linux,
+  macOS and Windows, one of them behind a proxy taken from the system's proxy settings. Kestrel keeps accepting HTTP/1.1 there: a container restricted to HTTP/2 failed App Service's health check
+  under this flag. Also the reference proxy in `tests/TransportR.TestProxy` (YARP), which relays the upgrade and the
+  affinity cookie, and Toxiproxy for the cuts.
+- **In segments**: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`), with a transfer
+  of 200 items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no 408 or
+  499 on `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a stock
+  nginx (the `nginx-default` scenario, a `proxy_pass` that sets neither upgrade header).
+- **Not run**: a stock nginx that relays the upgrade.
 
 ## Transfers the host opens
 

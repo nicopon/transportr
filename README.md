@@ -253,10 +253,11 @@ hub. See the [Security guide](./SecurityArchitecture.md).
 - **The hub is on the path.** All traffic crosses it. High availability needs the Redis state store and
   effective session affinity at the load balancer, not merely preferred affinity
   (see [Architecture](./TransportRArchitecture.md#high-availability-ha)).
-- **Tested on a limited set of environments**: two reverse proxies (YARP, a stock nginx), Azure App Service,
-  HTTP/1.1 to the hub, two identity providers, and the scenarios above on developer machines. The nginx and App Service
-  runs carried write streams in segments: a WebSocket has been carried on loopback only, directly and through YARP and
-  Toxiproxy. Reports from other environments are welcome.
+- **Tested on a limited set of environments**: two reverse proxies (YARP, a stock nginx), Azure App Service, a
+  client behind a proxy, clients on Windows, Linux and macOS, two identity providers, and the scenarios above on
+  developer machines. Write streams crossed App Service and the proxy over a WebSocket, and nginx in segments; each
+  environment's settings are under "Deploying the hub" in the
+  [hub's README](./src/TransportR.Hub/README.md#deploying-the-hub). Reports from other environments are welcome.
 
 ---
 
