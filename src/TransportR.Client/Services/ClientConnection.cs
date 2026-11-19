@@ -287,6 +287,19 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
         return await response.Content.ReadFromJsonAsync<List<ClientInfo>>(ControlPlane.Json, cancellationToken) ?? [];
     }
 
+    // Not async itself, so that a blank group is refused by the call rather than by the task it returns.
+    public Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(group);
+        return GetReceiversInGroupAsync(group, cancellationToken);
+    }
+
+    private async Task<List<ClientInfo>> GetReceiversInGroupAsync(string group, CancellationToken cancellationToken)
+    {
+        var receivers = await GetReceiversAsync(cancellationToken);
+        return receivers.FindAll(receiver => receiver.Groups.Contains(group));
+    }
+
     /// <summary>
     /// Asks the hub for a transfer to <paramref name="targetClientId"/>, following it to the instance
     /// that holds the receiver, and returns the transfer the hub opened with the affinity that reached

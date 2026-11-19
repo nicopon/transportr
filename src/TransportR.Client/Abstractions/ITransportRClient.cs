@@ -108,5 +108,23 @@ public interface IDataSender<T> : IDataClient
     /// <returns>List of authorized receiver clients.</returns>
     /// <exception cref="HubRequestFailedException">The hub refused the request.</exception>
     Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the receivers of <see cref="GetReceiversAsync(CancellationToken)"/> that belong to
+    /// <paramref name="group"/>: the hub's answer, kept to those whose <see cref="ClientInfo.Groups"/>
+    /// contain it.
+    /// </summary>
+    /// <remarks>
+    /// A receiver whose stream is down is kept, since a registration outlives its stream: the caller
+    /// still picks one whose <see cref="ClientInfo.DisconnectedAtUtc"/> is <c>null</c>.
+    /// </remarks>
+    /// <param name="group">The group to keep, compared as given: case matters.</param>
+    /// <param name="cancellationToken">Token to cancel the request.</param>
+    /// <returns>The authorized receivers in the group.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="group"/> is null, empty or whitespace. Raised by the call, before any request.
+    /// </exception>
+    /// <exception cref="HubRequestFailedException">The hub refused the request.</exception>
+    Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken cancellationToken = default);
 }
 

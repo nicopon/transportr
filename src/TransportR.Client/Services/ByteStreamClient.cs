@@ -124,6 +124,10 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     public Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default)
         => _connection.GetReceiversAsync(cancellationToken);
 
+    /// <inheritdoc cref="IDataSender{T}.GetReceiversAsync(string, CancellationToken)"/>
+    public Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken cancellationToken = default)
+        => _connection.GetReceiversAsync(group, cancellationToken);
+
     /// <summary>
     /// Initiates a new transfer to the specified target client.
     /// </summary>

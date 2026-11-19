@@ -152,6 +152,9 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     public Task<List<ClientInfo>> GetReceiversAsync(CancellationToken cancellationToken = default)
         => _connection.GetReceiversAsync(cancellationToken);
 
+    public Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken cancellationToken = default)
+        => _connection.GetReceiversAsync(group, cancellationToken);
+
     public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null)
     {
         int size = batchSize ?? _defaultBatchSize;

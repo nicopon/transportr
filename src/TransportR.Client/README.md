@@ -42,7 +42,7 @@ var client = new TransportRClientBuilder<Order>()
 await client.ConnectAsync();
 
 // 3. Send Data
-var receivers = await client.GetReceiversAsync();
+var receivers = await client.GetReceiversAsync("receivers");
 await using var transfer = await client.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 // ... send each item with transfer.SendAsync(item) ...
 await transfer.CompleteAsync();
@@ -65,7 +65,7 @@ var sender = new ByteStreamClientBuilder(batchBytes: 1 << 20)
     .WithMaxInFlightBatches(8)            // optional: bounds what the sender holds
     .Build();
 await sender.ConnectAsync(new[] { "senders" });
-var receivers = await sender.GetReceiversAsync();
+var receivers = await sender.GetReceiversAsync("receivers");
 await using var send = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 await using var source = File.OpenRead("data.bin");
 await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), which copies them before it returns
@@ -210,6 +210,7 @@ public interface IDataSender<T> : IDataClient
 {
     Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
     Task<List<ClientInfo>> GetReceiversAsync(CancellationToken ct = default);
+    Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken ct = default);   // those of one group; one whose stream is down is kept
     event Func<Send<T>, Task> OnSendRequested;   // a transfer the hub's host opened
 }
 

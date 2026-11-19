@@ -54,7 +54,7 @@ internal static class ReadmeQuickStart
         await sender.ConnectAsync(["senders"]);
 
         // Find a receiver and start transfer
-        var receivers = await sender.GetReceiversAsync();
+        var receivers = await sender.GetReceiversAsync("receivers");
         await using var transfer = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 
         // Stream data (auto-batched, auto-compressed)
