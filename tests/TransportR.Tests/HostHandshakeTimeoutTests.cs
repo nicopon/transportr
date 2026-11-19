@@ -63,6 +63,7 @@ public class HostHandshakeTimeoutTests
             () => initiator.InitTransferAsync(clients.Sender.ClientId, clients.Receiver.ClientId, TimeSpan.Zero));
 
         Assert.Contains("timed out", timedOut.Message);
+        Assert.Equal(HubRequestFailureCategory.HandshakeTimedOut, timedOut.Category);
     }
 
     private static async Task<ConnectedPair> ConnectAsync(IHost host)

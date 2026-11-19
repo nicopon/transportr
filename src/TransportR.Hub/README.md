@@ -109,13 +109,13 @@ async Task SendOrdersAsync(Send<Order> send)
 ```
 
 `TerminateAsync` removes the transfer's state and bridges and tells both clients to cancel, and their sessions fail with
-`TransferFailedException`. `AccessOptions.ClientsMayOpenTransfers = false` reserves opening transfers to the host: a client
+`TransferFailedException` (`EndedByHub`). `AccessOptions.ClientsMayOpenTransfers = false` reserves opening transfers to the host: a client
 is then refused `GetReceivers` and `InitTransfer`. With affinity handoff on, a transfer the host opens is refused unless
 both clients' streams are on the instance that opens it ("Affinity Handoff" in `ResilienceArchitecture.md`).
 
 A client that opens transfers itself is held to two ceilings of `AccessOptions`, on by default: `MaxHandshakesPerClient`
 (32 handshakes at once on an instance) and `MaxOpenTransfersPerClient` (256 open transfers, counted through the state
-store). Past either, its request is refused with a 429; `null` lifts a ceiling. Transfers the host opens through
+store). Past either, its request is refused with a 429, which the client raises as `RateLimited`; `null` lifts a ceiling. Transfers the host opens through
 `ITransferInitiator` are not counted.
 
 ## Testability

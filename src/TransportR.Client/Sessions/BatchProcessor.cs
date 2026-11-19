@@ -486,16 +486,16 @@ internal class BatchProcessor : IAsyncDisposable
     }
 
     /// <summary>
-    /// The peer gave up before the transfer completed. Releases whatever this side has parked -
-    /// a producer on the in-flight window, a consumer on the receive buffer - with the reason
-    /// carried on the wire, then tells <see cref="DataSession"/> so it can fail the state
-    /// machine and pass the same reason to callers waiting elsewhere (CompleteAsync,
-    /// WaitForCompletionAsync).
+    /// The peer gave up before the transfer completed. Tells <see cref="DataSession"/> first, so that
+    /// it records the reason carried on the wire and fails the state machine, then releases whatever
+    /// this side has parked - a producer on the in-flight window, a consumer on the receive buffer -
+    /// with that reason. In the other order, a call released before the reason is recorded reports a
+    /// failure without its cause.
     /// </summary>
     private void HandleAbort(AbortReason reason)
     {
-        Fail(reason.Describe());
         OnAbortReceived?.Invoke(reason);
+        Fail(TransferFailureCategory.AbandonedByPeer, reason.Describe());
     }
 
     /// <summary>
@@ -503,9 +503,9 @@ internal class BatchProcessor : IAsyncDisposable
     /// once, a consumer once it has taken what was already admitted. Ending the enumeration quietly
     /// instead would tell the consumer it had everything.
     /// </summary>
-    public void Fail(string reason)
+    public void Fail(TransferFailureCategory category, string reason)
     {
-        _sink?.Fail(new TransferFailedException(_transferId, reason));
+        _sink?.Fail(new TransferFailedException(_transferId, category, reason));
         AbandonSender();
     }
 

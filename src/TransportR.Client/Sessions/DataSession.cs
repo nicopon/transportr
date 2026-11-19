@@ -49,6 +49,9 @@ internal class DataSession : IDataSession
 
     private const string EndedByHub = "The hub ended the transfer before it completed.";
 
+    /// <summary>Why a transfer failed, as the calls it ends report it.</summary>
+    private sealed record Failure(TransferFailureCategory Category, string Message);
+
     public string TransferId { get; }
     public int BatchSize { get; }
     public string DataUrl { get; }
@@ -65,11 +68,12 @@ internal class DataSession : IDataSession
     private bool _isSender;
 
     /// <summary>
-    /// Set when the transfer is failed from outside any call - a peer's Abort, a stream the hub
-    /// refuses for good - and read from another thread by whatever call that unblocks (SendAsync,
-    /// CompleteAsync, WaitForCompletionAsync).
+    /// Set before the session moves to Failed, by whatever fails it - a peer's Abort, a stream the
+    /// hub refuses for good, the acknowledgement timeout - and read from another thread by whatever
+    /// call that unblocks (SendAsync, CompleteAsync, WaitForCompletionAsync). Every way into Failed
+    /// sets it first, so a call that finds the session Failed finds the cause with it.
     /// </summary>
-    private volatile string? _failureReason;
+    private volatile Failure? _failure;
 
     /// <summary>
     /// Set once this side has put an Abort on its outgoing channel, so that disposal knows to give
@@ -156,7 +160,7 @@ internal class DataSession : IDataSession
         };
         _batchProcessor.OnAbortReceived += (reason) =>
         {
-            _failureReason = reason.Describe();
+            _failure = new Failure(TransferFailureCategory.AbandonedByPeer, reason.Describe());
             if (_fsm.OnAborted())
             {
                 _config.Logger.LogWarning(
@@ -168,7 +172,7 @@ internal class DataSession : IDataSession
         {
             if (IsStopped) return;
 
-            FailTransfer($"A batch could not be serialized: {ex.Message}");
+            FailTransfer(TransferFailureCategory.UndecodableOrUnserializableBatch, $"A batch could not be serialized: {ex.Message}");
 
             // The receiver holds every batch up to this one and nothing would tell it the rest is not
             // coming. Abort precedes completing the channel, as on the stall bound.
@@ -250,14 +254,13 @@ internal class DataSession : IDataSession
             var silence = AcknowledgementSilence(parkedAtMs);
             if (silence >= stallTimeout)
             {
-                FailOnAcknowledgementStall();
+                var stalled = $"The send window stayed full: nothing was acknowledged for {silence.TotalSeconds:N0}s.";
+                FailOnAcknowledgementStall(stalled);
 
                 // The parked producer unwinds with a cancellation; the failure is reported below.
                 try { await send; } catch (OperationCanceledException) { }
 
-                throw new TransferFailedException(
-                    TransferId,
-                    $"The send window stayed full: nothing was acknowledged for {silence.TotalSeconds:N0}s.");
+                throw new TransferFailedException(TransferId, TransferFailureCategory.AcknowledgementTimedOut, stalled);
             }
 
             // Wakes when an acknowledgement reopens the window, or when the receiver will have been
@@ -280,11 +283,13 @@ internal class DataSession : IDataSession
         TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(sinceMs, _batchProcessor.LastAckAtMs));
 
     /// <summary>
-    /// Fails a transfer whose receiver stopped acknowledging. The Abort is queued before the channel
-    /// completes, as <see cref="AbortPeer"/> requires, and a producer still parked on the window is let go.
+    /// Fails a transfer whose receiver stopped acknowledging, for <paramref name="message"/>, which a
+    /// call made after it reports too. The Abort is queued before the channel completes, as
+    /// <see cref="AbortPeer"/> requires, and a producer still parked on the window is let go.
     /// </summary>
-    private void FailOnAcknowledgementStall()
+    private void FailOnAcknowledgementStall(string message)
     {
+        _failure ??= new Failure(TransferFailureCategory.AcknowledgementTimedOut, message);
         _fsm.TransitionTo(SessionState.Failed);
         AbortPeer(AbortReason.AcknowledgementTimeout);
         _batchProcessor.CompleteSenderChannel();
@@ -295,7 +300,8 @@ internal class DataSession : IDataSession
     /// Awaits a producer task, translating what a transfer that has ended does to it - an Abort or
     /// DisposeAsync abandoning the accumulator, which cancels a parked call and closes the queue under
     /// a later one - into <see cref="TransferFailedException"/>. A cancellation the caller's own token
-    /// carries is left alone: that one was asked for.
+    /// carries is left alone: that one was asked for. So is one while the session has neither failed
+    /// nor been released, whose cause nothing here knows.
     /// </summary>
     private async Task AwaitOrTranslateAsync(Task task, CancellationToken callerToken)
     {
@@ -303,20 +309,34 @@ internal class DataSession : IDataSession
         {
             await task;
         }
-        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (!callerToken.IsCancellationRequested && HasFailedOrBeenReleased)
         {
-            throw new TransferFailedException(TransferId, FailureMessage);
+            throw FailureOfStoppedSession();
         }
-        catch (Exception ex) when (ex is ChannelClosedException or ObjectDisposedException
-            && _fsm.CurrentState is SessionState.Failed or SessionState.Disposed)
+        catch (Exception ex) when (ex is ChannelClosedException or ObjectDisposedException && HasFailedOrBeenReleased)
         {
-            throw new TransferFailedException(TransferId, FailureMessage);
+            throw FailureOfStoppedSession();
         }
     }
 
-    private string FailureMessage =>
-        _failureReason
-        ?? (_fsm.CurrentState == SessionState.Disposed ? ReleasedBeforeCompletion : "Transfer failed before it could complete.");
+    private bool HasFailedOrBeenReleased => _fsm.CurrentState is SessionState.Failed or SessionState.Disposed;
+
+    /// <summary>
+    /// What a call reports once it finds the session Failed or Disposed, and only then: the cause
+    /// recorded on the way into Failed, or the release of a session that had reached no outcome. The
+    /// state decides: a cause recorded by a failure that lost its race to the release is not what
+    /// stopped the session.
+    /// </summary>
+    private TransferFailedException FailureOfStoppedSession()
+    {
+        if (_fsm.CurrentState == SessionState.Disposed)
+        {
+            return new TransferFailedException(TransferId, TransferFailureCategory.HandleReleased, ReleasedBeforeCompletion);
+        }
+
+        var failure = _failure!;
+        return new TransferFailedException(TransferId, failure.Category, failure.Message);
+    }
 
     public async Task CompleteAsync(CancellationToken cancellationToken = default)
     {
@@ -324,7 +344,7 @@ internal class DataSession : IDataSession
         // already gone raises a disposal error the caller can do nothing with.
         if (_fsm.CurrentState == SessionState.Disposed)
         {
-            throw new TransferFailedException(TransferId, ReleasedBeforeCompletion);
+            throw new TransferFailedException(TransferId, TransferFailureCategory.HandleReleased, ReleasedBeforeCompletion);
         }
 
         Volatile.Write(ref _completeStarted, 1);
@@ -389,10 +409,9 @@ internal class DataSession : IDataSession
             var silence = AcknowledgementSilence(startedAtMs);
             if (silence >= stallTimeout)
             {
-                FailOnAcknowledgementStall();
-                throw new TransferFailedException(
-                    TransferId,
-                    $"Transfer did not complete: nothing was acknowledged for {silence.TotalSeconds:N0}s.");
+                var stalled = $"Transfer did not complete: nothing was acknowledged for {silence.TotalSeconds:N0}s.";
+                FailOnAcknowledgementStall(stalled);
+                throw new TransferFailedException(TransferId, TransferFailureCategory.AcknowledgementTimedOut, stalled);
             }
 
             if (silence < retryInterval)
@@ -409,8 +428,9 @@ internal class DataSession : IDataSession
             }
         }
 
-        // Only reachable when something else stopped the session under us.
-        throw new TransferFailedException(TransferId, FailureMessage);
+        // Only reachable when something else stopped the session under us, which a sender's session
+        // only completes in the loop above: it failed or was released.
+        throw FailureOfStoppedSession();
     }
 
     public void TriggerReconnect()
@@ -453,13 +473,14 @@ internal class DataSession : IDataSession
             {
                 throw new TransferFailedException(
                     TransferId,
+                    TransferFailureCategory.AcknowledgementTimedOut,
                     "All data was received, but the transfer never finished closing; the sender cannot know it completed.");
             }
         }
 
-        if (_fsm.CurrentState is SessionState.Disposed or SessionState.Failed)
+        if (HasFailedOrBeenReleased)
         {
-            throw new TransferFailedException(TransferId, FailureMessage);
+            throw FailureOfStoppedSession();
         }
     }
 
@@ -469,16 +490,16 @@ internal class DataSession : IDataSession
     /// on a full window, and the contract has the consumer ask for the outcome only after the
     /// enumeration ends.
     /// </summary>
-    private void FailTransfer(string reason)
+    private void FailTransfer(TransferFailureCategory category, string reason)
     {
         // A session that already stopped keeps the reason it stopped for. The reason is set before the
         // state moves: whoever polls the state, or is woken by it, reads the reason next.
         if (IsStopped) return;
 
-        _failureReason ??= reason;
+        var failure = _failure ??= new Failure(category, reason);
         if (_fsm.TransitionTo(SessionState.Failed))
         {
-            _batchProcessor.Fail(reason);
+            _batchProcessor.Fail(failure.Category, failure.Message);
         }
     }
 
@@ -499,10 +520,10 @@ internal class DataSession : IDataSession
         // state moves: whoever polls the state reads the reason next.
         if (!IsStopped)
         {
-            _failureReason ??= EndedByHub;
+            var failure = _failure ??= new Failure(TransferFailureCategory.EndedByHub, EndedByHub);
             if (_fsm.OnEndedByHub())
             {
-                _batchProcessor.Fail(EndedByHub);
+                _batchProcessor.Fail(failure.Category, failure.Message);
             }
         }
 
@@ -749,7 +770,12 @@ internal class DataSession : IDataSession
             else if (!result.IsSuccess)
             {
                 _config.Logger.LogError("Stream failed (Fatal): {Error}. Sessions FAILED.", result.ErrorMessage);
-                FailTransfer($"The data stream failed permanently: {result.ErrorMessage}");
+
+                // Outside the closing phase a Gone is the hub refusing the transfer's streams, which it
+                // answers alike for a transfer it ended or lost and for a client it no longer admits.
+                FailTransfer(
+                    result.Outcome == StreamOutcome.Gone ? TransferFailureCategory.EndedByHub : result.Failure,
+                    $"The data stream failed permanently: {result.ErrorMessage}");
             }
             else
             {

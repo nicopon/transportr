@@ -33,8 +33,9 @@ public interface ITransferInitiator
     /// </exception>
     /// <exception cref="HubRequestFailedException">
     /// Either client is unknown, has an expired token, is not authorized to reach the other, is
-    /// unreachable or refuses, or the handshake times out. The message is generic; the detail is in
-    /// the hub log.
+    /// unreachable or refuses, or the handshake times out. The message is generic, and so is the
+    /// category, which tells those apart only as far as <see cref="HubRequestFailureCategory"/> says;
+    /// the detail is in the hub log.
     /// </exception>
     Task<string> InitTransferAsync(
         Guid senderClientId,

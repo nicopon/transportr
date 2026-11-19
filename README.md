@@ -120,7 +120,7 @@ await transfer.CompleteAsync();
 ```
 
 `CompleteAsync` returns once the receiver has acknowledged every batch; it throws `TransferFailedException`
-otherwise.
+otherwise, whose `Category` says why ("Failures" in the [client README](./src/TransportR.Client/README.md)).
 
 ### 3. A receiver
 

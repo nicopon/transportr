@@ -143,7 +143,8 @@ public class TransferIntegrationTests
         await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(send.TransferId);
         answer.Set();
 
-        await Assert.ThrowsAsync<HubRequestFailedException>(() => init.WaitAsync(TimeSpan.FromSeconds(10)));
+        var ended = await Assert.ThrowsAsync<HubRequestFailedException>(() => init.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(HubRequestFailureCategory.EndedDuringHandshake, ended.Category);
     }
 
     [Fact]
@@ -368,15 +369,17 @@ public class TransferIntegrationTests
 
         // Whichever call meets the failure first reports it: SendAsync when the producer is still
         // adding, CompleteAsync otherwise.
-        await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        var sent = await Assert.ThrowsAsync<TransferFailedException>(async () =>
         {
             await send.SendAsync(Enumerable.Range(0, 10).Select(i => $"item-{i}"));
             await send.CompleteAsync();
         }).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(TransferFailureCategory.UndecodableOrUnserializableBatch, sent.Category);
 
         // Told by the Abort, not by a stall bound: well under the 60s default.
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Contains("serialize", failure.Message);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, failure.Category);
     }
 
     private sealed class FailingOn(IBatchSerializer<string> inner, string poison) : IBatchSerializer<string>
@@ -776,6 +779,7 @@ public class TransferIntegrationTests
         var sendFailure = await Assert.ThrowsAsync<TransferFailedException>(() => parked.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Contains("hub ended", sendFailure.Message);
         Assert.DoesNotContain("released", sendFailure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, sendFailure.Category);
 
         // The enumeration does not end as a finished transfer's does: the consumer who only enumerates
         // would take a transfer cut short for a complete one.
@@ -784,10 +788,12 @@ public class TransferIntegrationTests
             await foreach (var _ in receive.ReceiveAsync()) { }
         }).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Contains("hub ended", enumerationFailure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, enumerationFailure.Category);
 
         var waitFailure = await Assert.ThrowsAsync<TransferFailedException>(() => receive.WaitForCompletionAsync().WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Contains("hub ended", waitFailure.Message);
         Assert.DoesNotContain("released", waitFailure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, waitFailure.Category);
     }
 
     [Fact]
@@ -846,6 +852,7 @@ public class TransferIntegrationTests
             () => initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20)));
 
         Assert.Contains("refused", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, ex.Category);
 
         // The sender refused before creating anything; the receiver was readied first and is told
         // to cancel, which releases its session.
@@ -937,6 +944,7 @@ public class TransferIntegrationTests
         var ex = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiver.ClientId).WaitAsync(TimeSpan.FromSeconds(20)));
         Assert.Contains("failed to prepare", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, ex.Category);
     }
 
     [Fact]
@@ -1024,8 +1032,10 @@ public class TransferIntegrationTests
         await receiver.ConnectAsync();
 
         // Refused, not served an empty list: a caller that finds nobody fails for another reason.
-        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.GetReceiversAsync());
-        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        Assert.Equal(HubRequestFailureCategory.Refused,
+            (await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.GetReceiversAsync())).Category);
+        Assert.Equal(HubRequestFailureCategory.Refused,
+            (await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10))).Category);
         Assert.Empty(receiver.GetTransfers());
 
         var initiator = host.Services.GetRequiredService<ITransferInitiator>();
@@ -1060,7 +1070,8 @@ public class TransferIntegrationTests
         await using var first = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
         Assert.Equal(1, store.SessionsSaved);
 
-        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        var limited = await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+        Assert.Equal(HubRequestFailureCategory.RateLimited, limited.Category);
         using (var refused = await RawHub.SendAsync(host, HttpMethod.Post, sender.ClientId, WireRoutes.TransfersSegment, token: null,
                    new InitTransferRequest(receiver.ClientId, 1000)))
         {
@@ -1191,6 +1202,78 @@ public class TransferIntegrationTests
             () => sender.InitTransferAsync(receiverId, batchSize: 100));
 
         Assert.Contains("not reachable", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HubRequestFailureCategory.Refused, ex.Category);
+    }
+
+    [Fact]
+    public async Task SenderInitiatedTransfer_WhoseReceiverAnswersPastTheHandshakeTimeout_FailsAsTimedOut()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost", o => o.HandshakeTimeout = TimeSpan.FromMilliseconds(300));
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        // The client answers the hub once the handler returns: blocking before the return is what
+        // holds the answer past the hub's deadline, well inside the client's own.
+        using var answer = new ManualResetEventSlim();
+        receiver.OnTransferStarted += _ => { answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        try
+        {
+            var timedOut = await Assert.ThrowsAsync<HubRequestFailedException>(
+                () => sender.InitTransferAsync(receiver.ClientId).WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal(HubRequestFailureCategory.HandshakeTimedOut, timedOut.Category);
+            Assert.Contains("timed out", timedOut.Message);
+        }
+        finally
+        {
+            answer.Set();
+        }
+    }
+
+    [Fact]
+    public async Task SenderInitiatedTransfer_EndedDuringItsHandshake_FailsAsEndedDuringHandshake()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var started = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var answer = new ManualResetEventSlim();
+        receiver.OnTransferStarted += receive => { started.TrySetResult(receive); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var init = sender.InitTransferAsync(receiver.ClientId);
+        await using var receive = await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(receive.TransferId);
+        answer.Set();
+
+        var ended = await Assert.ThrowsAsync<HubRequestFailedException>(() => init.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(HubRequestFailureCategory.EndedDuringHandshake, ended.Category);
+        Assert.Equal("The transfer was ended before its handshake completed.", ended.Message);
+    }
+
+    [Theory]
+    [InlineData(421, "null", HubRequestFailureCategory.Other)]
+    [InlineData(200, "null", HubRequestFailureCategory.Other)]
+    [InlineData(421, """{"cookieName":"instance","token":"elsewhere"}""", HubRequestFailureCategory.Refused)]
+    public async Task InitTransfer_AnsweredWithNothingToGoOn_FailsWithItsCategory(int status, string body, HubRequestFailureCategory category)
+    {
+        // A redirect that names no instance, an acceptance that names no transfer, and a redirect that
+        // reaches an instance that redirects again: no instance reached holds the target.
+        using var host = TestHubServerFactory.CreateHost();
+        await using var sender = CreateClient(
+            new AnsweredTransferRequests(host.GetTestServer().CreateHandler(), (HttpStatusCode)status, body), "http://localhost");
+        await sender.ConnectAsync();
+
+        var failure = await Assert.ThrowsAsync<HubRequestFailedException>(
+            () => sender.InitTransferAsync(Guid.NewGuid()).WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Equal(category, failure.Category);
     }
 
     [Fact]
@@ -1213,9 +1296,10 @@ public class TransferIntegrationTests
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         // The 20s keeps a call that never returns from hanging the run; the claim is the bound below.
-        await Assert.ThrowsAsync<HubRequestFailedException>(
+        var timedOut = await Assert.ThrowsAsync<HubRequestFailedException>(
             () => sender.InitTransferAsync(receiver.ClientId, batchSize: 10).WaitAsync(TimeSpan.FromSeconds(20)));
         stopwatch.Stop();
+        Assert.Equal(HubRequestFailureCategory.HandshakeTimedOut, timedOut.Category);
 
         // The call ends at the handshake timeout it announces plus a margin of 10s: no sooner than the
         // hub's own window, which a refusal would, and no later than that bound plus the slack of a
@@ -1347,6 +1431,7 @@ public class TransferIntegrationTests
         // had before.
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Contains("decode", failure.Message);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, failure.Category);
     }
 
     /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>
@@ -1408,6 +1493,24 @@ public class TransferIntegrationTests
     /// Holds every <c>POST …/transfers</c> without an answer until it is cancelled, and passes the rest
     /// through.
     /// </summary>
+    /// <summary>Answers every transfer request itself, with <paramref name="status"/> and a JSON <paramref name="body"/>.</summary>
+    private sealed class AnsweredTransferRequests(HttpMessageHandler inner, HttpStatusCode status, string body) : DelegatingHandler(inner)
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post
+                && request.RequestUri!.AbsolutePath.EndsWith("/" + WireRoutes.TransfersSegment, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(status)
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+                });
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
+
     private sealed class SilentTransferRequests(HttpMessageHandler inner) : DelegatingHandler(inner)
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

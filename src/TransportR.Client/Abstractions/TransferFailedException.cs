@@ -17,8 +17,14 @@ public class TransferFailedException : Exception
     /// </summary>
     public string TransferId { get; }
 
-    public TransferFailedException(string transferId, string message) : base(message)
+    /// <summary>
+    /// Why the transfer failed, as this end saw it.
+    /// </summary>
+    public TransferFailureCategory Category { get; }
+
+    public TransferFailedException(string transferId, TransferFailureCategory category, string message) : base(message)
     {
         TransferId = transferId;
+        Category = category;
     }
 }

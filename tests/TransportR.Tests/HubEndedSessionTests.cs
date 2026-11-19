@@ -29,6 +29,7 @@ public class HubEndedSessionTests
         Assert.Equal(SessionState.Failed, session.State);
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => session.WaitForCompletionAsync(CancellationToken.None).WaitAsync(Bound));
         Assert.Contains("hub ended", failure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, failure.Category);
         await Assert.ThrowsAsync<TransferFailedException>(async () =>
         {
             await foreach (var _ in session.ReceiveAsync(CancellationToken.None)) { }

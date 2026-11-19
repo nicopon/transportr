@@ -28,6 +28,7 @@ public class SessionDisposalTests
             () => session.WaitForCompletionAsync(cts.Token));
 
         Assert.Equal(session.TransferId, failure.TransferId);
+        Assert.Equal(TransferFailureCategory.HandleReleased, failure.Category);
     }
 
     [Fact]
@@ -69,6 +70,7 @@ public class SessionDisposalTests
             () => session.CompleteAsync(CancellationToken.None));
 
         Assert.Equal(session.TransferId, failure.TransferId);
+        Assert.Equal(TransferFailureCategory.HandleReleased, failure.Category);
     }
 
     [Fact]

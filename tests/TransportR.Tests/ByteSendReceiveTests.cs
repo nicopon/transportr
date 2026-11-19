@@ -370,7 +370,7 @@ public class ByteSendReceiveTests
     {
         await Task.Yield();
         yield return new ByteChunk(owner, owner.Memory.Length);
-        throw new TransferFailedException("fake", "The transfer was ended.");
+        throw new TransferFailedException("fake", TransferFailureCategory.EndedByHub, "The transfer was ended.");
     }
 
     private static async IAsyncEnumerable<ByteChunk> AfterGate(Task gate, CountingOwner owner)

@@ -69,6 +69,7 @@ Both planes are stated separately, because they are armed separately.
 | A client acting under another's id on the control plane | On every control route the `clientId` of the path must be the identity the request's token attests; refused with a 404 otherwise |
 | Group spoofing | Group from JWT scope only |
 | Unauthorized transfer | The flow control rules, when the host registers them; without them any group reaches any other |
+| Learning from a refused transfer which clients exist, or in what state | One message and one category (`Refused`) for a target that is unknown, out of the caller's reach or gone; the hub's log says which |
 | Token tampering | Signature verified against IDP |
 | An authenticated client flooding `InitTransfer` | Ceilings per client on the transfers it opens itself, refused with a 429 before anything is written: `AccessOptions.MaxHandshakesPerClient` (32 at once, per instance) and `MaxOpenTransfersPerClient` (256 open, counted through the state store); the host's transfers are not counted. A client's stream of events holds at most 1024 unread events: the write that finds it full closes it |
 | Expired tokens | `exp` validated by the host on each request, each segment of a write stream included, and when a stream opens, a WebSocket's upgrade among them; judged by the hub for as long as it runs (see Token Renewal) |

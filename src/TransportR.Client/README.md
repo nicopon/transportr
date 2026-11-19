@@ -220,6 +220,34 @@ serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(St
 `ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are abstract, like `Send<T>` and `Receive<T>`, and
 are disposed once the transfer has ended.
 
+### Failures
+
+A request the hub refuses or cannot carry out throws `HubRequestFailedException`, and a transfer that ends without
+delivering its data throws `TransferFailedException`. Each carries a `Category`; the message stays generic, and the
+detail is in the hub's log.
+
+| `HubRequestFailedException.Category` | |
+|---|---|
+| `Refused` | An unknown target, one out of the caller's rights and one that is gone alike, on purpose; the caller's own registration refused; a route reserved to the host |
+| `RateLimited` | A ceiling of the hub's (429); retry once a transfer has ended |
+| `HandshakeTimedOut` | The handshake, or the hub's answer to the request, did not come within the handshake timeout |
+| `TargetRefusedOrFailedToPrepare` | A client asked to take part refused, or its handler failed |
+| `EndedDuringHandshake` | The hub ended the transfer before its handshake completed |
+| `Other` | The hub's answer to a transfer request named no instance to go to, or no transfer |
+
+| `TransferFailedException.Category` | |
+|---|---|
+| `EndedByHub` | The host, a reaper or a withdrawn right ended it, or the hub refuses its stream |
+| `AbandonedByPeer` | The other end gave up; the message says why |
+| `AcknowledgementTimedOut` | Nothing acknowledged for `WithAcknowledgementTimeout`, or, on a receiver, the transfer did not close within it |
+| `HandleReleased` | This end's handle was released first |
+| `UndecodableOrUnserializableBatch` | A batch this end could not serialize, or decode: both ends must use the same serializer and settings |
+| `ProtocolViolation` | What arrived breaks the wire protocol |
+| `Other` | `RequireWebSocket`, and the path to the hub carries no WebSocket |
+
+A 409 from the hub whose category the client cannot read fails as an `HttpRequestException`
+(`HttpRequestError.InvalidResponse`), not as a refusal.
+
 ## License
 
 MIT

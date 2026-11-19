@@ -65,6 +65,7 @@ public class ControlChannelTests
         var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => channel.OpenAsync(groups: null, CancellationToken.None));
 
         Assert.Equal(ControlChannel.RefusedMessage, refusal.Message);
+        Assert.Equal(HubRequestFailureCategory.Refused, refusal.Category);
         Assert.Equal(1, hub.Openings);
     }
 
@@ -109,7 +110,8 @@ public class ControlChannelTests
 
         if (marked)
         {
-            await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(response));
+            var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(response));
+            Assert.Equal(HubRequestFailureCategory.Refused, refusal.Category);
         }
         else
         {
@@ -131,9 +133,27 @@ public class ControlChannelTests
 
         var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(fromHub));
         Assert.Equal("Too many.", refusal.Message);
+        Assert.Equal(HubRequestFailureCategory.RateLimited, refusal.Category);
 
         var failure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxy));
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("""{"message":"Refused."}""")]
+    [InlineData("""{"message":"Refused.","code":99}""")]
+    public async Task AConflictWhoseCategoryIsAbsentOrUnknown_IsAnAnswerTheClientCannotRead_NotARefusal(string body)
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.Conflict)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        };
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(response));
+
+        Assert.Equal(HttpRequestError.InvalidResponse, failure.HttpRequestError);
+        Assert.Equal(HttpStatusCode.Conflict, failure.StatusCode);
+        Assert.Equal(ControlChannel.UnreadableRefusalMessage, failure.Message);
     }
 
     [Theory]

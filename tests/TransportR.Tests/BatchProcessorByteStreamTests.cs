@@ -565,7 +565,7 @@ public class BatchProcessorByteStreamTests
     {
         if (how == FailedBy.Fail)
         {
-            processor.Fail("The transfer was ended.");
+            processor.Fail(TransferFailureCategory.EndedByHub, "The transfer was ended.");
             return;
         }
 
@@ -616,7 +616,7 @@ public class BatchProcessorByteStreamTests
         await processor.StartReceiverAsync();
         await processor.ProcessChunkAsync(CreateChunk(0, Bytes(7, 5)));
 
-        processor.Fail("The transfer was ended.");
+        processor.Fail(TransferFailureCategory.EndedByHub, "The transfer was ended.");
 
         var received = new List<byte[]>();
         var failure = await Assert.ThrowsAsync<TransferFailedException>(async () =>
@@ -629,6 +629,7 @@ public class BatchProcessorByteStreamTests
 
         Assert.Equal([Bytes(7, 5)], received);
         Assert.Contains("The transfer was ended.", failure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, failure.Category);
     }
 
     private sealed class StreamCounts

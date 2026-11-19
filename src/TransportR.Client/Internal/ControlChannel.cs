@@ -36,6 +36,9 @@ internal sealed class ControlChannel : IAsyncDisposable
     /// <summary>The message of a 404 that does not carry <see cref="WireRoutes.RefusedHeader"/>.</summary>
     internal const string NoHubRouteMessage = "The response did not come from a TransportR route (404).";
 
+    /// <summary>The message of a 409 whose category is absent, or one this version does not know.</summary>
+    internal const string UnreadableRefusalMessage = "The hub refused the request with a category this client cannot read (409).";
+
     // Twice the hub's keepalive interval: a stream that carried nothing for this long is taken as cut.
     private static readonly TimeSpan StreamSilenceLimit = TimeSpan.FromSeconds(30);
 
@@ -267,7 +270,8 @@ internal sealed class ControlChannel : IAsyncDisposable
 
     /// <summary>
     /// Fails with a <see cref="HubRequestFailedException"/> when the hub refused the request or could
-    /// not carry it out, and with an <see cref="HttpRequestException"/> on any other failure.
+    /// not carry it out, and with an <see cref="HttpRequestException"/> on any other failure: a 409
+    /// whose category is absent or unknown to this version is one, an answer this client cannot read.
     /// </summary>
     public static async Task EnsureAcceptedAsync(HttpResponseMessage response, CancellationToken cancellationToken = default)
     {
@@ -276,13 +280,15 @@ internal sealed class ControlChannel : IAsyncDisposable
         EnsureFromHub(response);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            throw new HubRequestFailedException(RefusedMessage);
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, RefusedMessage);
         }
 
         if (response.StatusCode == HttpStatusCode.Conflict
             && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { } error)
         {
-            throw new HubRequestFailedException(error.Message);
+            var category = HubErrorCodes.CategoryOf(error.Code)
+                ?? throw new HttpRequestException(HttpRequestError.InvalidResponse, UnreadableRefusalMessage, inner: null, HttpStatusCode.Conflict);
+            throw new HubRequestFailedException(category, error.Message);
         }
 
         // A proxy in front of the hub that limits the rate answers 429 too, without the hub's error.
@@ -290,7 +296,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             && response.Content.Headers.ContentType?.MediaType == MediaTypeNames.Application.Json
             && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { Message: { } message })
         {
-            throw new HubRequestFailedException(message);
+            throw new HubRequestFailedException(HubRequestFailureCategory.RateLimited, message);
         }
 
         response.EnsureSuccessStatusCode();
@@ -569,7 +575,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             EnsureFromHub(response);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                throw new HubRequestFailedException(RefusedMessage);
+                throw new HubRequestFailedException(HubRequestFailureCategory.Refused, RefusedMessage);
             }
 
             response.EnsureSuccessStatusCode();

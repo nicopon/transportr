@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using TransportR.Client.Internal;
 using TransportR.Hub;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
@@ -59,6 +60,32 @@ public class TargetRefusalTests
         {
             Assert.True(logs.Has(LogLevel.Warning, targetId.ToString()), $"The log does not name the target that is {reason}.");
         }
+    }
+
+    [Fact]
+    public async Task ATargetThatIsAbsentOutOfReachOrGone_FailsTheClient_WithTheSameCategoryAndWords()
+    {
+        using var host = TestHubServerFactory.CreateHost(services => services.AddSingleton<IFlowControlService>(new Rules()));
+
+        var sourceId = await RegisterAsync(host, [OpenGroup]);
+        var targets = new Dictionary<string, Guid>
+        {
+            ["absent"] = Guid.NewGuid(),
+            ["not authorized"] = await RegisterAsync(host, [ClosedGroup]),
+            ["gone: no stream behind the registration"] = await RegisterAsync(host, [OpenGroup]),
+        };
+
+        var failures = new Dictionary<string, (HubRequestFailureCategory Category, string Message)>();
+        foreach (var (reason, targetId) in targets)
+        {
+            using var response = await RawHub.SendAsync(host, HttpMethod.Post, sourceId, WireRoutes.TransfersSegment, token: null,
+                new InitTransferRequest(targetId, 1000)).WaitAsync(TimeSpan.FromSeconds(30));
+            var failure = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(response));
+            failures[reason] = (failure.Category, failure.Message);
+        }
+
+        Assert.All(failures.Values, failure => Assert.Equal(HubRequestFailureCategory.Refused, failure.Category));
+        Assert.Single(failures.Values.Distinct());
     }
 
     [Theory]

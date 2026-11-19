@@ -235,10 +235,10 @@ internal class ClientController : ControllerBase
 
     /// <summary>
     /// Opens a transfer from this client and answers with its id once the receiver is ready: a 409
-    /// carries the reason it was not, written for the client. A receiver whose stream another instance
-    /// holds is answered with a 421 that carries the affinity reaching that instance, for the client to
-    /// send this request again with it. A client past a ceiling of <see cref="AccessOptions"/> is
-    /// answered with a 429, before anything is written.
+    /// carries the reason it was not, written for the client, and its category. A receiver whose
+    /// stream another instance holds is answered with a 421 that carries the affinity reaching that
+    /// instance, for the client to send this request again with it. A client past a ceiling of
+    /// <see cref="AccessOptions"/> is answered with a 429, before anything is written.
     /// </summary>
     [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment)]
     public async Task<IActionResult> InitTransfer(Guid clientId, [FromBody] InitTransferRequest request)
@@ -270,7 +270,7 @@ internal class ClientController : ControllerBase
             if (target == null)
             {
                 _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
-                return Conflict(new HubError(TransferInitiator.TargetUnavailable));
+                return Conflict(new HubError(TransferInitiator.TargetUnavailable, HubErrorCode.Refused));
             }
 
             _initiator.ValidateTransferRequest(source, target);
@@ -283,7 +283,7 @@ internal class ClientController : ControllerBase
         }
         catch (HubRequestFailedException ex)
         {
-            return Conflict(new HubError(ex.Message));
+            return Conflict(new HubError(ex.Message, HubErrorCodes.Of(ex.Category)));
         }
         catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
         {

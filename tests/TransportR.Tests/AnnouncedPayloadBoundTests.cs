@@ -39,6 +39,7 @@ public class AnnouncedPayloadBoundTests
 
         // Assert: the whole process is counted, so the margin is wide, and still half the payload.
         Assert.Contains(named, failure.Message);
+        Assert.Equal(TransferFailureCategory.ProtocolViolation, failure.Category);
         Assert.True(allocated < DefaultMaxBatchBytes,
             $"{allocated} bytes were allocated while a chunk announcing {announced} was refused.");
     }

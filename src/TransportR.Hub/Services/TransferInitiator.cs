@@ -14,8 +14,8 @@ namespace TransportR.Hub.Services;
 /// <remarks>
 /// One implementation for both, so that authorization, the order in which the two clients are
 /// readied and the cleanup of a handshake that fails halfway cannot drift apart. Every failure is a
-/// <see cref="HubRequestFailedException"/>, whose message the control route forwards to a calling
-/// client.
+/// <see cref="HubRequestFailedException"/>, whose message and category the control route forwards to
+/// a calling client.
 /// </remarks>
 internal class TransferInitiator : ITransferInitiator
 {
@@ -87,7 +87,7 @@ internal class TransferInitiator : ITransferInitiator
         if (sender == null)
         {
             _logger.LogWarning("InitTransfer by host failed: Source {SourceClientId} not found.", senderClientId);
-            throw new HubRequestFailedException($"Source client {senderClientId} not found.");
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, $"Source client {senderClientId} not found.");
         }
 
         ValidateSource(sender);
@@ -96,7 +96,7 @@ internal class TransferInitiator : ITransferInitiator
         if (receiver == null)
         {
             _logger.LogWarning("InitTransfer by host failed: Target {TargetClientId} not found.", receiverClientId);
-            throw new HubRequestFailedException(TargetUnavailable);
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, TargetUnavailable);
         }
 
         ValidateTransferRequest(sender, receiver);
@@ -108,7 +108,7 @@ internal class TransferInitiator : ITransferInitiator
         {
             _logger.LogWarning("InitTransfer by host denied: Source {SourceClientId} and Target {TargetClientId} are not both connected to this instance",
                 sender.ClientId, receiver.ClientId);
-            throw new HubRequestFailedException("Source and target clients are not both connected to this hub instance.");
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, "Source and target clients are not both connected to this hub instance.");
         }
 
         return await HandshakeAsync(sender, receiver, handshakeTimeout, requestSender: true, cancellationToken);
@@ -188,7 +188,7 @@ internal class TransferInitiator : ITransferInitiator
         _logger.LogWarning("InitTransfer denied ({Verdict}): Source {SourceClientId} [{SourceGroups}]",
             verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups));
 
-        throw new HubRequestFailedException(verdict == AccessVerdict.TokenExpired
+        throw new HubRequestFailedException(HubRequestFailureCategory.Refused, verdict == AccessVerdict.TokenExpired
             ? "Source client token has expired. Please reconnect with a fresh token."
             : "Client groups not found.");
     }
@@ -211,7 +211,7 @@ internal class TransferInitiator : ITransferInitiator
             verdict, sourceClient.ClientId, string.Join(", ", sourceClient.Groups),
             targetClient.ClientId, string.Join(", ", targetClient.Groups));
 
-        throw new HubRequestFailedException(TargetUnavailable);
+        throw new HubRequestFailedException(HubRequestFailureCategory.Refused, TargetUnavailable);
     }
 
     /// <summary>
@@ -254,14 +254,14 @@ internal class TransferInitiator : ITransferInitiator
                 _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}, registration likely stale: {Message}",
                     receiver.ClientId, receiver.ConnectionId, transferId, ex.Message);
                 await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubRequestFailedException(TargetUnavailable);
+                throw new HubRequestFailedException(HubRequestFailureCategory.Refused, TargetUnavailable);
             }
 
             if (receiverReady != CallbackOutcome.Accepted)
             {
                 _logger.LogWarning("Receiver {TargetClientId} answered {Outcome} to {TransferId}.", receiver.ClientId, receiverReady, transferId);
                 await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubRequestFailedException(receiverReady == CallbackOutcome.Refused
+                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, receiverReady == CallbackOutcome.Refused
                     ? $"Target client {receiver.ClientId} refused the transfer."
                     : $"Target client {receiver.ClientId} failed to prepare for the transfer.");
             }
@@ -281,7 +281,7 @@ internal class TransferInitiator : ITransferInitiator
             {
                 _logger.LogWarning("Sender unreachable for {TransferId}, cancelling Receiver: {Message}", transferId, ex.Message);
                 await AbandonAsync(transferId, receiver);
-                throw new HubRequestFailedException("Source client failed to prepare for the transfer.");
+                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, "Source client failed to prepare for the transfer.");
             }
 
             if (senderReady != CallbackOutcome.Accepted)
@@ -289,7 +289,7 @@ internal class TransferInitiator : ITransferInitiator
                 _logger.LogWarning("Sender {SourceClientId} answered {Outcome} to {TransferId}. Cancelling Receiver.",
                     sender.ClientId, senderReady, transferId);
                 await AbandonAsync(transferId, receiver);
-                throw new HubRequestFailedException(senderReady == CallbackOutcome.Refused
+                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, senderReady == CallbackOutcome.Refused
                     ? "Source client refused the transfer."
                     : "Source client failed to prepare for the transfer.");
             }
@@ -300,7 +300,7 @@ internal class TransferInitiator : ITransferInitiator
             if (cancellationToken.IsCancellationRequested) throw;
 
             _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
-            throw new HubRequestFailedException($"Handshake timed out after {handshakeTimeout.TotalMilliseconds}ms");
+            throw new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, $"Handshake timed out after {handshakeTimeout.TotalMilliseconds}ms");
         }
 
         return StillOpen(transferId);
@@ -316,7 +316,7 @@ internal class TransferInitiator : ITransferInitiator
         if (_transferManager.GetTransfer(transferId) != null) return transferId;
 
         _logger.LogWarning("Transfer {TransferId} was ended during its handshake", transferId);
-        throw new HubRequestFailedException("The transfer was ended before its handshake completed.");
+        throw new HubRequestFailedException(HubRequestFailureCategory.EndedDuringHandshake, "The transfer was ended before its handshake completed.");
     }
 
     private async Task AbandonAsync(string transferId, ClientRegistration receiver)

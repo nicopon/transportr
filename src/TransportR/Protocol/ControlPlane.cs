@@ -71,7 +71,52 @@ internal sealed record InitTransferResponse(string TransferId);
 /// </summary>
 internal sealed record AffinityRedirect(string CookieName, string Token);
 
-/// <summary>The answer to a request the hub could not carry out, with a 409; the message is written for the client.</summary>
-internal sealed record HubError(string Message);
+/// <summary>
+/// The answer to a request the hub could not carry out, with a 409; the message is written for the
+/// client, and <see cref="Code"/> carries its <see cref="HubRequestFailureCategory"/>. A 429 or a 400
+/// carries none: the status says the first, and nothing reads the body of the second.
+/// </summary>
+internal sealed record HubError(string Message, HubErrorCode Code = HubErrorCode.Absent);
+
+/// <summary>
+/// The <see cref="HubRequestFailureCategory"/> a <see cref="HubError"/> carries on the wire, numbered
+/// apart from it so that the public enum can change without moving a code.
+/// </summary>
+internal enum HubErrorCode
+{
+    /// <summary>No code: a client fails a 409 that carries none as an answer it cannot read.</summary>
+    Absent = 0,
+    Refused = 1,
+    HandshakeTimedOut = 2,
+    TargetRefusedOrFailedToPrepare = 3,
+    EndedDuringHandshake = 4,
+}
+
+internal static class HubErrorCodes
+{
+    /// <summary>
+    /// The code a 409 carries for <paramref name="category"/>; <see cref="HubErrorCode.Absent"/> for a
+    /// category no handshake on the hub ends in, which the client then fails as unreadable rather than
+    /// as a category it was not given.
+    /// </summary>
+    public static HubErrorCode Of(HubRequestFailureCategory category) => category switch
+    {
+        HubRequestFailureCategory.Refused => HubErrorCode.Refused,
+        HubRequestFailureCategory.HandshakeTimedOut => HubErrorCode.HandshakeTimedOut,
+        HubRequestFailureCategory.TargetRefusedOrFailedToPrepare => HubErrorCode.TargetRefusedOrFailedToPrepare,
+        HubRequestFailureCategory.EndedDuringHandshake => HubErrorCode.EndedDuringHandshake,
+        _ => HubErrorCode.Absent,
+    };
+
+    /// <summary>The category <paramref name="code"/> stands for; null for an absent code, or one this version does not know.</summary>
+    public static HubRequestFailureCategory? CategoryOf(HubErrorCode code) => code switch
+    {
+        HubErrorCode.Refused => HubRequestFailureCategory.Refused,
+        HubErrorCode.HandshakeTimedOut => HubRequestFailureCategory.HandshakeTimedOut,
+        HubErrorCode.TargetRefusedOrFailedToPrepare => HubRequestFailureCategory.TargetRefusedOrFailedToPrepare,
+        HubErrorCode.EndedDuringHandshake => HubRequestFailureCategory.EndedDuringHandshake,
+        _ => null,
+    };
+}
 
 internal sealed record TransferProgress(long Items, long Acks);

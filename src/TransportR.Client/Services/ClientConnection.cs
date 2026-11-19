@@ -313,7 +313,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                 // The receiver is on another instance. Only this request goes there: the client's own
                 // stream, and its other transfers, stay where they are.
                 var redirect = await response.Content.ReadFromJsonAsync<AffinityRedirect>(ControlPlane.Json, deadline.Token)
-                    ?? throw new HubRequestFailedException("The hub redirected the transfer without saying where.");
+                    ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub redirected the transfer without saying where.");
                 _logger.LogInformation("The receiver is on another hub instance. Sending the transfer request there (cookie {CookieName}).", redirect.CookieName);
 
                 affinity = ControlChannel.WithCookie(affinity, redirect.CookieName, redirect.Token);
@@ -322,20 +322,20 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
 
                 if (response.StatusCode == HttpStatusCode.MisdirectedRequest)
                 {
-                    throw new HubRequestFailedException($"Target client {targetClientId} is not reachable.");
+                    throw new HubRequestFailedException(HubRequestFailureCategory.Refused, $"Target client {targetClientId} is not reachable.");
                 }
             }
 
             await ControlChannel.EnsureAcceptedAsync(response, deadline.Token);
             opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, deadline.Token)
-                ?? throw new HubRequestFailedException("The hub opened the transfer without naming it.");
+                ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub opened the transfer without naming it.");
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "The hub did not answer the transfer request to ReceiverId={TargetId} within {Seconds}s (handshake timeout {HandshakeSeconds}s plus {MarginSeconds}s).",
                 targetClientId, (_options.HandshakeTimeout + HandshakeMargin).TotalSeconds, _options.HandshakeTimeout.TotalSeconds, HandshakeMargin.TotalSeconds);
-            throw new HubRequestFailedException("The hub did not answer the transfer request in time.");
+            throw new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, "The hub did not answer the transfer request in time.");
         }
         finally
         {

@@ -292,7 +292,9 @@ public class ByteStreamTransferTests
         var received = await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(Bound));
 
         // Told by the receiver's Abort, not by a stall bound.
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, sent.Category);
         Assert.Equal(AbortReason.UndecodableBatch.Describe(), sent.Message);
+        Assert.Equal(TransferFailureCategory.UndecodableOrUnserializableBatch, received.Category);
         Assert.NotEmpty(received.Message);
     }
 
@@ -316,7 +318,9 @@ public class ByteStreamTransferTests
         }).WaitAsync(Bound);
         var received = await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(Bound));
 
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, sent.Category);
         Assert.Equal(AbortReason.UndecodableBatch.Describe(), sent.Message);
+        Assert.Equal(TransferFailureCategory.UndecodableOrUnserializableBatch, received.Category);
         Assert.NotEmpty(received.Message);
     }
 

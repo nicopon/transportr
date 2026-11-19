@@ -160,4 +160,7 @@ internal sealed class SegmentedWriteStream : WriteStream
 internal sealed class StreamRefusedException(StreamOutcome outcome, string message) : Exception(message)
 {
     public StreamOutcome Outcome { get; } = outcome;
+
+    /// <summary>What the transfer fails as when <see cref="Outcome"/> is <see cref="StreamOutcome.Fatal"/>.</summary>
+    public TransferFailureCategory Failure { get; init; }
 }

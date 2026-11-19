@@ -371,6 +371,7 @@ public class WebSocketTransferTests
 
         Assert.Contains("requires a WebSocket", failure.Message);
         Assert.DoesNotContain("403", failure.Message);
+        Assert.Equal(TransferFailureCategory.Other, failure.Category);
     }
 
     [Fact]

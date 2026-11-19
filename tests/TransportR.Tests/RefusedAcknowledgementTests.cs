@@ -30,6 +30,7 @@ public class RefusedAcknowledgementTests
 
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => consumer.WaitAsync(Bound));
         Assert.Contains(AbortReason.SerializationFailed.Describe(), failure.Message);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, failure.Category);
     }
 
     /// <summary>

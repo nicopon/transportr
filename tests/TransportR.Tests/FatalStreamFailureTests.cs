@@ -63,10 +63,11 @@ public class FatalStreamFailureTests
         var clock = System.Diagnostics.Stopwatch.StartNew();
         hub.Forget();
 
-        // The reason is the one the failure recorded, not the generic text of a state read before it was set.
+        // The reason is the one the failure recorded: a stream the hub refuses is the hub ending the transfer.
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => complete.WaitAsync(TimeSpan.FromSeconds(10)));
         clock.Stop();
         Assert.Contains("data stream failed permanently", failure.Message);
+        Assert.Equal(TransferFailureCategory.EndedByHub, failure.Category);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1), $"CompleteAsync took {clock.Elapsed} to report a stream the hub refused for good.");
     }
 

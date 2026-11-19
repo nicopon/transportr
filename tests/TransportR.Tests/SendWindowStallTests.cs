@@ -32,6 +32,7 @@ public class SendWindowStallTests
             () => parked.WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(session.TransferId, failure.TransferId);
+        Assert.Equal(TransferFailureCategory.AcknowledgementTimedOut, failure.Category);
         Assert.Equal(SessionState.Failed, session.State);
     }
 
@@ -56,6 +57,7 @@ public class SendWindowStallTests
             () => session.CompleteAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
 
         Assert.Equal(session.TransferId, failure.TransferId);
+        Assert.Equal(TransferFailureCategory.AcknowledgementTimedOut, failure.Category);
         Assert.Equal(SessionState.Failed, session.State);
     }
 

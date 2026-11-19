@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
+using TransportR.Client.Batching;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 using TransportR.Protocol;
@@ -46,6 +47,12 @@ internal class HttpStreamManager : IAsyncDisposable
     public readonly record struct StreamResult(StreamOutcome Outcome, string? ErrorMessage = null, bool Refused = false)
     {
         public bool IsSuccess => Outcome is StreamOutcome.Ended or StreamOutcome.Cancelled;
+
+        /// <summary>
+        /// What a <see cref="StreamOutcome.Fatal"/> outcome fails the transfer as, which only the stream
+        /// that failed knows; set with every one, and read for no other outcome.
+        /// </summary>
+        public TransferFailureCategory Failure { get; init; }
     }
 
     /// <summary>
@@ -274,17 +281,26 @@ internal class HttpStreamManager : IAsyncDisposable
         switch (failure)
         {
             case StreamRefusedException refused:
-                return new StreamResult(refused.Outcome, refused.Message, Refused: true);
+                return new StreamResult(refused.Outcome, refused.Message, Refused: true) { Failure = refused.Failure };
 
-            case WireProtocolViolationException:
+            case WireProtocolViolationException violation:
                 _config.Logger.LogError("Protocol violation, session failed: {Message}", failure.Message);
-                return new StreamResult(StreamOutcome.Fatal, failure.Message);
+                return new StreamResult(StreamOutcome.Fatal, failure.Message) { Failure = FailureOf(violation) };
 
             default:
                 _config.Logger.LogWarning("WriteLoop interrupted ({Type}) - Transfer={TransferId}: {Message}", type, _transferId, failure.Message);
                 return new StreamResult(StreamOutcome.Retryable, failure.Message);
         }
     }
+
+    /// <summary>
+    /// A batch this side cannot decode is told apart from the rest of the protocol: the peer is sent
+    /// an Abort for the one, and both ends use the same serializer and settings to cure it.
+    /// </summary>
+    private static TransferFailureCategory FailureOf(WireProtocolViolationException violation) =>
+        violation is UndecodableBatchException
+            ? TransferFailureCategory.UndecodableOrUnserializableBatch
+            : TransferFailureCategory.ProtocolViolation;
 
     private void CountRupture(long openedAtMs)
     {
@@ -316,7 +332,10 @@ internal class HttpStreamManager : IAsyncDisposable
 
         if (policy == WriteTransportPolicy.RequireWebSocket)
         {
-            throw new StreamRefusedException(StreamOutcome.Fatal, "The data stream requires a WebSocket, and the path to the hub does not carry one.");
+            throw new StreamRefusedException(StreamOutcome.Fatal, "The data stream requires a WebSocket, and the path to the hub does not carry one.")
+            {
+                Failure = TransferFailureCategory.Other,
+            };
         }
 
         LogOpened(type, TransportR.WriteTransport.Segments);
@@ -424,7 +443,7 @@ internal class HttpStreamManager : IAsyncDisposable
                 // The peer sent something this version cannot interpret; reconnecting would only
                 // repeat the violation, so this is fatal rather than retryable.
                 _config.Logger.LogError("Protocol violation, session failed: {Message}", ex.Message);
-                return new StreamResult(StreamOutcome.Fatal, ex.Message);
+                return new StreamResult(StreamOutcome.Fatal, ex.Message) { Failure = FailureOf(ex) };
             }
             catch (Exception ex)
             {
