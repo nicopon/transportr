@@ -82,8 +82,8 @@ app.Run();
   component of the host: it exchanges keys over HTTPS only, stores them hashed, lets them expire and be revoked, and
   limits failed exchanges. [DtPipe](https://github.com/nicopon/dtpipe)'s coordinator issues its nodes' tokens this
   way. `TransportR.Auth.SimpleIdp` has the same shape for development only: its clients and secrets live in memory.
-- **Register the group access rules.** Without an `IFlowControlService`, any client holding a group may open a transfer
-  to any other ("Group Access Rules" in `SecurityArchitecture.md`).
+- **Register the group access rules** with `UseFlowControl`. Without an `IFlowControlService`, any client holding a
+  group may open a transfer to any other ("Group Access Rules" in `SecurityArchitecture.md`).
 - **Update the hub and its clients together.** They negotiate no protocol version; a release that needs one before the
   other says so in its notes.
 - **Two hubs or more** need the Redis state store and effective session affinity at the load balancer ("High

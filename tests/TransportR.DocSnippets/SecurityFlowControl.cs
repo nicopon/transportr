@@ -13,14 +13,10 @@ internal static class SecurityFlowControl
     {
         var builder = new { Services = services };
 
-        builder.Services.AddSingleton(new FlowControlOptions
+        builder.Services.AddDataHub().UseFlowControl(rules =>
         {
-            Groups = new()
-            {
-                ["senders"] = new GroupAccess { CanSendTo = ["receivers"] },
-                ["receivers"] = new GroupAccess { CanSendTo = [] },
-            }
+            rules.Groups["senders"]   = new GroupAccess { CanSendTo = ["receivers"] };
+            rules.Groups["receivers"] = new GroupAccess { CanSendTo = [] };
         });
-        builder.Services.AddSingleton<IFlowControlService, DefaultFlowControlService>();
     }
 }

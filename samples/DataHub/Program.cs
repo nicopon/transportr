@@ -133,38 +133,31 @@ if (flowControlMode.Equals("none", StringComparison.OrdinalIgnoreCase))
 }
 else
 {
-    FlowControlOptions flowControlOptions;
+    Dictionary<string, GroupAccess> groups;
 
     if (flowControlMode.Equals("wildcard", StringComparison.OrdinalIgnoreCase))
     {
         // Wildcard mode - test group can send to everyone
-        flowControlOptions = new FlowControlOptions
+        groups = new Dictionary<string, GroupAccess>
         {
-            Groups = new Dictionary<string, GroupAccess>
-            {
-                ["test"] = new GroupAccess { CanSendTo = new List<string> { "*" } },
-                ["senders"] = new GroupAccess { CanSendTo = new List<string> { "receivers" } },
-                ["receivers"] = new GroupAccess { CanSendTo = new List<string>() }
-            }
+            ["test"] = new GroupAccess { CanSendTo = new List<string> { "*" } },
+            ["senders"] = new GroupAccess { CanSendTo = new List<string> { "receivers" } },
+            ["receivers"] = new GroupAccess { CanSendTo = new List<string>() }
         };
         Console.WriteLine("FlowControl: WILDCARD (test -> *)");
     }
     else
     {
         // Default mode - senders can send to receivers
-        flowControlOptions = new FlowControlOptions
+        groups = new Dictionary<string, GroupAccess>
         {
-            Groups = new Dictionary<string, GroupAccess>
-            {
-                ["senders"] = new GroupAccess { CanSendTo = new List<string> { "receivers" } },
-                ["receivers"] = new GroupAccess { CanSendTo = new List<string>() }
-            }
+            ["senders"] = new GroupAccess { CanSendTo = new List<string> { "receivers" } },
+            ["receivers"] = new GroupAccess { CanSendTo = new List<string>() }
         };
         Console.WriteLine("FlowControl: DEFAULT (senders -> receivers)");
     }
 
-    builder.Services.AddSingleton(flowControlOptions);
-    builder.Services.AddSingleton<IFlowControlService, DefaultFlowControlService>();
+    dataHubBuilder.UseFlowControl(rules => rules.Groups = groups);
 }
 
 // OpenTelemetry Configuration

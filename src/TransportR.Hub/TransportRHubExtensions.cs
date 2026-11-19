@@ -44,6 +44,66 @@ public class DataHubBuilder
     }
 
     /// <summary>
+    /// Registers the group access rules: which group may send to which. Without them, any client
+    /// holding a group may open a transfer to any other.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the flow control registered so far: one the host registered before this call, or the rules
+    /// of an earlier call. A service the host registers afterwards replaces these in turn, which is how a
+    /// host with rules of its own supplies its <see cref="IFlowControlService"/>.
+    /// </remarks>
+    /// <param name="configure">Declares the rules on a new <see cref="FlowControlOptions"/>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="configure"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// No group is declared (an empty rule set would refuse every transfer, so it is taken as a mistake), a
+    /// group has a blank name, a group has no <see cref="GroupAccess"/> or no <c>CanSendTo</c> list, or a
+    /// <c>CanSendTo</c> list holds a blank target.
+    /// </exception>
+    public DataHubBuilder UseFlowControl(Action<FlowControlOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var options = new FlowControlOptions();
+        configure(options);
+        Validate(options, nameof(configure));
+
+        Services.Replace(ServiceDescriptor.Singleton(options));
+        Services.Replace(ServiceDescriptor.Singleton<IFlowControlService, DefaultFlowControlService>());
+        return this;
+    }
+
+    private static void Validate(FlowControlOptions options, string paramName)
+    {
+        if (options.Groups is not { Count: > 0 })
+        {
+            throw new ArgumentException("No group is declared.", paramName);
+        }
+
+        foreach (var (group, access) in options.Groups)
+        {
+            if (string.IsNullOrWhiteSpace(group))
+            {
+                throw new ArgumentException("A group has a blank name.", paramName);
+            }
+
+            if (access is null)
+            {
+                throw new ArgumentException($"Group '{group}' has no access rule.", paramName);
+            }
+
+            if (access.CanSendTo is null)
+            {
+                throw new ArgumentException($"Group '{group}' has no CanSendTo list.", paramName);
+            }
+
+            if (access.CanSendTo.Any(string.IsNullOrWhiteSpace))
+            {
+                throw new ArgumentException($"Group '{group}' lists a blank target in CanSendTo.", paramName);
+            }
+        }
+    }
+
+    /// <summary>
     /// Enables affinity handoff for HA deployment with multiple hub instances.
     /// Requires sticky sessions on the load balancer and a shared IStateStore.
     /// </summary>

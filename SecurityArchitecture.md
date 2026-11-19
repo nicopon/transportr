@@ -33,18 +33,15 @@ one group may do to another is the flow control rule below.
 ## Group Access Rules (Flow Control)
 
 **Without an `IFlowControlService`, any client holding a group may open a transfer to any other client holding
-one.** `AddDataHub()` registers none; the host adds the rules:
+one.** `AddDataHub()` registers none. `UseFlowControl` adds the rules; a host with rules of its own registers its own
+`IFlowControlService` instead, and the one registered last serves:
 
 ```csharp
-builder.Services.AddSingleton(new FlowControlOptions
+builder.Services.AddDataHub().UseFlowControl(rules =>
 {
-    Groups = new()
-    {
-        ["senders"]   = new GroupAccess { CanSendTo = ["receivers"] },
-        ["receivers"] = new GroupAccess { CanSendTo = [] },
-    }
+    rules.Groups["senders"]   = new GroupAccess { CanSendTo = ["receivers"] };
+    rules.Groups["receivers"] = new GroupAccess { CanSendTo = [] };
 });
-builder.Services.AddSingleton<IFlowControlService, DefaultFlowControlService>();
 ```
 
 A source may reach a target when, for **every** group of the target, one of the source's groups lists it (or
