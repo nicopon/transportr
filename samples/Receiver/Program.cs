@@ -44,6 +44,20 @@ logger.LogInformation("Configuration:");
 logger.LogInformation("  - Output Directory: {OutputDirectory}", receiverOptions.OutputDirectory);
 logger.LogInformation("  - Hub URL: {HubUrl}", receiverOptions.HubUrl);
 logger.LogInformation("  - Group: {Group}", receiverOptions.Group);
+logger.LogInformation("  - EndToEndEncryption: {Enabled}", receiverOptions.EndToEndEncryption);
+logger.LogInformation("  - EndToEndPreSharedKey: {State}", string.IsNullOrEmpty(receiverOptions.EndToEndPreSharedKey) ? "not set" : "set");
+
+byte[]? preSharedKey;
+try
+{
+    preSharedKey = receiverOptions.ResolveEndToEndPreSharedKey();
+}
+catch (InvalidOperationException ex)
+{
+    logger.LogError("{Message}", ex.Message);
+    Environment.ExitCode = 1;
+    return;
+}
 
 var group = receiverOptions.Group;
 var showProgress = configuration.GetValue<bool>("ShowProgress", false);
@@ -80,7 +94,7 @@ else
 // The byte-stream mode has no Order, no serializer and no batch size, so it runs apart from the item mode.
 if (receiverOptions.ByteStreamBatchBytes is { } byteStreamBatchBytes)
 {
-    await RunByteStreamAsync(receiverOptions, byteStreamBatchBytes, expectedTransfers, loggerFactory, logger, showProgress);
+    await RunByteStreamAsync(receiverOptions, preSharedKey, byteStreamBatchBytes, expectedTransfers, loggerFactory, logger, showProgress);
     return;
 }
 
@@ -106,6 +120,12 @@ if (receiverOptions.WriteTransport is { } writeTransport)
 {
     clientBuilder.WithWriteTransport(writeTransport);
     logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+}
+
+if (receiverOptions.EndToEndEncryption)
+{
+    if (preSharedKey is not null) clientBuilder.WithEndToEndEncryption(_ => preSharedKey);
+    else clientBuilder.WithEndToEndEncryption();
 }
 
 if (receiverOptions.ConsumeItemsPerSecond > 0)
@@ -226,8 +246,17 @@ static void ReportLiveSessions(string role, IDataClient client, Microsoft.Extens
     Console.WriteLine(msg);
 }
 
+// The protection the transfer ran at, as the client reports it: the line a scenario judges the run on.
+static void ReportProtection(string transferId, TransferInfo? info, Microsoft.Extensions.Logging.ILogger logger)
+{
+    var msg = $"[RECEIVER][PROTECTION] Transfer {transferId[..8]} protection: {info?.Protection.ToString() ?? "Unknown"}";
+    logger.LogInformation(msg);
+    Console.WriteLine(msg);
+}
+
 static async Task RunByteStreamAsync(
     ReceiverOptions options,
+    byte[]? preSharedKey,
     int batchBytes,
     int expectedTransfers,
     ILoggerFactory loggerFactory,
@@ -264,6 +293,12 @@ static async Task RunByteStreamAsync(
     {
         clientBuilder.WithWriteTransport(writeTransport);
         logger.LogInformation("Write transport policy: {Policy}", writeTransport);
+    }
+
+    if (options.EndToEndEncryption)
+    {
+        if (preSharedKey is not null) clientBuilder.WithEndToEndEncryption(_ => preSharedKey);
+        else clientBuilder.WithEndToEndEncryption();
     }
 
     if (options.Auth?.IsConfigured == true)
@@ -315,6 +350,7 @@ static async Task RunByteStreamAsync(
                         logger.LogInformation(finalStatsMsg);
                         if (showProgress)
                             Console.WriteLine(finalStatsMsg);
+                        ReportProtection(transfer.TransferId, finalInfo, logger);
 
                         logger.LogInformation("[Transfer {TransferId}] Transfer completed.", transfer.TransferId);
                     }
@@ -446,6 +482,7 @@ static async Task<long> ProcessStreamAsync(Receive<Order> transfer, IDataClient 
     if (showProgress)
         Console.WriteLine(finalStatsMsg);
     logger.LogInformation(finalStatsMsg);
+    ReportProtection(transfer.TransferId, finalInfo, logger);
 
     return itemsReceived;
 }

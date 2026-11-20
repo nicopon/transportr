@@ -40,6 +40,44 @@ public class SenderOptions
     public bool EnableAuth { get; set; } = false;
     public string OutputDirectory { get; set; } = "output";
     public string Group { get; set; } = "senders";
+
+    /// <summary>
+    /// Seals every batch end to end. Both ends of a transfer have to set it alike.
+    /// </summary>
+    public bool EndToEndEncryption { get; set; }
+
+    /// <summary>
+    /// The pre-shared key of the end-to-end encryption, 32 bytes in base64: one key for every peer. Null seals
+    /// without a key. It comes from the node's own configuration and is never printed.
+    /// </summary>
+    public string? EndToEndPreSharedKey { get; set; }
+
+    /// <summary>
+    /// The decoded <see cref="EndToEndPreSharedKey"/>, or null when none is set. Throws, without quoting the
+    /// key, for one that does not decode to 32 bytes, and for a key set with the encryption off.
+    /// </summary>
+    public byte[]? ResolveEndToEndPreSharedKey()
+    {
+        if (string.IsNullOrEmpty(EndToEndPreSharedKey)) return null;
+
+        if (!EndToEndEncryption)
+            throw new InvalidOperationException("EndToEndPreSharedKey is set while EndToEndEncryption is off.");
+
+        byte[] key;
+        try
+        {
+            key = Convert.FromBase64String(EndToEndPreSharedKey);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException("EndToEndPreSharedKey is not valid base64.");
+        }
+
+        if (key.Length != 32)
+            throw new InvalidOperationException("EndToEndPreSharedKey must decode to 32 bytes.");
+        return key;
+    }
+
     public string? AccessToken { get; set; } = null;
 
     /// <summary>

@@ -30,6 +30,8 @@ dotnet run
 | `Receiver__ConsumeItemsPerSecond` | 0 (no pacing) | Throttles the consumer |
 | `Receiver__Group` | receivers | Group announced in dev mode |
 | `Receiver__EnableAuth`, `Receiver__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |
+| `Receiver__EndToEndEncryption` | false | Seals every batch end to end; the sender must set it alike |
+| `Receiver__EndToEndPreSharedKey` | unset | With the encryption on: 32 bytes in base64, mixed into the keys; the same on the sender. Never printed (the start-up log says `set` or `not set`) |
 | `SERIALIZER_TYPE` | MessagePack | `MessagePack` or `Json`; the sender must use the same |
 
 ## Data Flow

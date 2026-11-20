@@ -32,6 +32,8 @@ dotnet run
 | `SENDER__PARALLELISM` | 1 | Transfers opened in parallel, to the discovered receivers in turn |
 | `Sender__TransferStaggerSeconds` | 0 | Seconds between the opening of one transfer and the next |
 | `Sender__EnableAuth`, `Sender__Auth__*` | off | Client credentials (`TokenEndpoint`, `ClientId`, `ClientSecret`, `Scope`) |
+| `Sender__EndToEndEncryption` | false | Seals every batch end to end; the receiver must set it alike |
+| `Sender__EndToEndPreSharedKey` | unset | With the encryption on: 32 bytes in base64, mixed into the keys; the same on the receiver. Never printed (the start-up log says `set` or `not set`) |
 | `SERIALIZER_TYPE` | MessagePack | `MessagePack` or `Json`; the receiver must use the same |
 
 ## Data Flow
