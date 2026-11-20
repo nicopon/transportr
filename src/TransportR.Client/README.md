@@ -87,13 +87,16 @@ receiver.OnTransferStarted += async transfer =>
 await receiver.ConnectAsync(new[] { "receivers" });
 ```
 
-The builder has the options of the item builder that mean something for bytes (`WithClientCredentials`, `WithAccessToken`,
-`WithTokenProvider`, `WithWriteTransport`, `WithLoggerFactory`, among others). One that means something only for items (`WithSerializer`, `WithBatchSize`, a bound in items) is not an overload that exists. Both ends
-of a transfer must be `ByteStreamClient`s, or both item clients. `TransferInfo.ItemsProcessed` is 0 for a byte transfer, which has
-no items; `BytesTransferred` carries the count. `WithMaxBatchBytes`, on both builders, bounds one batch on the wire,
-256 MiB by default: a receiver fails the transfer on a larger chunk, and `Build()` refuses a `batchBytes` above it. On an item client the
-bound also covers a batch once decompressed, and a MessagePack or Arrow sender is not stopped by it: it is the receiver that refuses,
-so the sender sizes its batches for it (see the documentation of `WithMaxBatchBytes`).
+The byte builder has the item builder's options that mean something for bytes (`WithClientCredentials`,
+`WithAccessToken`, `WithTokenProvider`, `WithWriteTransport`, `WithLoggerFactory`, among others). Those that mean
+something only for items (`WithSerializer`, `WithBatchSize`, a bound in items) do not exist on it. Both ends of a
+transfer must be of the same kind: two `ByteStreamClient`s or two item clients. A byte transfer counts in
+`TransferInfo.BytesTransferred`; `ItemsProcessed` stays 0.
+
+`WithMaxBatchBytes`, on both builders, bounds one batch on the wire (256 MiB by default): a receiver fails the transfer
+on a larger chunk, and `Build()` refuses a `batchBytes` above it. On an item client it also bounds a batch once
+decompressed, which MessagePack and Arrow senders do not check: size their batches for the receiver (see
+`WithMaxBatchBytes`).
 
 ### Sizing for WAN and high-throughput streaming
 
@@ -117,7 +120,7 @@ You can provide a static token or a custom dynamic provider:
 // OR
 .WithTokenProvider(async () => await GetMyTokenAsync())
 ```
-Only a provider is renewed (see "Token Renewal" in `SecurityArchitecture.md`): the hub closes the
+Only a provider is renewed (see "Token Renewal" in `SecurityArchitecture.md`). The hub closes the
 events stream of a client whose token it was not given a new one for, and a static token's client is closed
 when it expires. `WithTokenRefreshThreshold` sets how far ahead of the expiry the renewal starts.
 
@@ -128,10 +131,13 @@ await client.RefreshRegistrationAsync();
 ```
 The client registers again under the same id, with the groups its identity holds now and a token from its
 provider, and returns once the hub has recorded both. It stays reachable and its transfers are not
-interrupted; the hub ends those the new groups no longer allow. It raises `InvalidOperationException` when the client is
-not connected or its lost connection cannot reach the hub, and the hub's refusal when the identity holds no group,
-connection lost or not (the registration stays as it was).
-The hub must be of the same release.
+interrupted; the hub ends those the new groups no longer allow. The hub must be of the same release.
+
+It raises:
+
+- `InvalidOperationException` when the client is not connected, or its lost connection cannot reach the hub;
+- the hub's refusal when the identity holds no group, whether the connection is lost or not; the registration stays as
+  it was.
 
 `IsRegisteredAsync()` asks the hub whether it still knows the client. It answers `false` when the hub has
 forgotten it (a restart, an eviction); the next presence heartbeat registers it again, and
@@ -143,11 +149,16 @@ carries one, and over short POST requests (segments) otherwise:
 ```csharp
 .WithWriteTransport(WriteTransportPolicy.PreferWebSocket) // the default
 ```
-`PreferWebSocket` falls back on segments for the rest of the transfer, with a logged warning, when the path does not
-carry a WebSocket; `RequireWebSocket` fails the transfer (`TransferFailedException`) instead; `SegmentsOnly` never asks
-for an upgrade. `GetTransfers()` reports `TransferInfo.WriteTransport` (`WebSocket` or `Segments`, null before the first
-opening) and `TransferInfo.WriteTransportFallback` (why a transfer has no WebSocket, null otherwise). A proxy in front of
-the hub must relay the upgrade: see the hub's README.
+
+| Policy | Where the path carries no WebSocket |
+|---|---|
+| `PreferWebSocket` (default) | segments for the rest of the transfer, with a warning in the log |
+| `RequireWebSocket` | the transfer fails (`TransferFailedException`) |
+| `SegmentsOnly` | never asks for an upgrade |
+
+`GetTransfers()` reports `TransferInfo.WriteTransport` (`WebSocket` or `Segments`; null before the first opening) and
+`TransferInfo.WriteTransportFallback` (why a transfer has no WebSocket; null otherwise). A proxy in front of the hub
+must relay the upgrade: see the hub's README.
 
 `.WithWriteTransportProbe()`, off by default, has the client prove after each registration what the path carries of a
 write stream, for the hub to tell its `IHubProgressMonitor` before any transfer; the client logs the outcome. It costs up
@@ -155,8 +166,8 @@ to 5 s per registration on a path that accepts the upgrade without relaying it, 
 transport.
 
 ### Network
-Every request of a client (its control plane, its data streams and their WebSockets) goes through one
-`SocketsHttpHandler`, which `ConfigureHttpHandler`, on both builders, sets up for a proxy, a client certificate or a
+Every request of a client goes through one `SocketsHttpHandler`: its control plane, its data streams and their
+WebSockets. `ConfigureHttpHandler`, on both builders, sets it up for a proxy, a client certificate or a
 private certificate authority:
 ```csharp
 .ConfigureHttpHandler(handler =>
@@ -172,7 +183,7 @@ private certificate authority:
 ```
 `Build()` refuses a handler that keeps cookies or decompresses responses, naming the setting. `WithClientCredentials`
 asks for its tokens through the same handler, so what is set here for the hub, a `ConnectCallback` included, applies to
-the identity provider too; given an `HttpClient` of its own (its last parameter), it uses that one, which the caller
+the identity provider too. Given an `HttpClient` of its own (its last parameter), it uses that one, which the caller
 keeps and disposes.
 
 ### End-to-end encryption
@@ -234,11 +245,6 @@ public interface IBatchSerializer<T>
     Task<List<T>?> DeserializeBatchAsync(Stream source);
 }
 ```
-
-The item type is on the interface, not on the call. A per-call generic would claim that every
-implementation carries every type, which none can and one cannot at all: a serializer built on
-Apache Arrow carries record batches only, and on a generic contract it could reject anything else
-only by throwing at the first batch. Typed here, the mismatch is a compile error.
 
 ### IDataSender<T> / IDataReceiver<T>
 
