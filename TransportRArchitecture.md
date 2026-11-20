@@ -313,14 +313,29 @@ One suite, never negotiated, all in the BCL: ECDH on P-256, HKDF-SHA256, AES-256
 construction is Noise `NNpsk0`'s and TLS 1.3's PSK-DHE key schedule, written out here because Noise defines no P-256
 function and the BCL has no portable X25519.
 
+```mermaid
+sequenceDiagram
+    participant S as Sender
+    participant H as Hub
+    participant R as Receiver
+
+    Note over S,R: At each opening of the streams, before any batch
+    S->>R: Ping, payload: the sender's share (65 bytes)
+    R-->>S: Pong, payload: the receiver's share then the confirmation (97 bytes), BatchId: the resume point
+    Note over S: Seals nothing, and signs no Complete, before a Pong whose confirmation holds
+    loop Each batch
+        S->>R: SealedBatch or SealedStreamBatch, payload: the ciphertext then the tag (16 bytes)
+        R-->>S: BatchAck, no payload, for a batch that opened
+    end
+    S->>R: Complete, payload: the sender's receipt (32 bytes), BatchId: the last batch's
+    R-->>S: CompleteAck, payload: the receiver's receipt (32 bytes), BatchId: 0
+```
+
 - **Shares.** Each end draws an ephemeral P-256 key pair per session, kept across its reconnections and erased once the
-  keys are derived. The sender's share is the payload of every `Ping`, the handshake's and the keepalive's: 65 bytes,
-  the uncompressed point of SEC 1 (`0x04`, then X and Y, 32 bytes each, big-endian). The receiver's share followed by
-  the key confirmation is the payload of every `Pong`, 97 bytes; a `Pong`'s `BatchId` keeps the resume point. A share
-  that is not a point of the curve, or differs from the first one a session accepted, is refused. The `Ping` heads
-  every stream the sender opens, so the receiver holds the keys before the first batch; the sender seals nothing, and
-  signs no `Complete`, before a `Pong` whose confirmation holds, and fails without one as without an acknowledgement
-  (`WithAcknowledgementTimeout`).
+  keys are derived. A share is the uncompressed point of SEC 1 (`0x04`, then X and Y, 32 bytes each, big-endian). A
+  keepalive `Ping` and its `Pong` carry the same payloads as the handshake's. A share that is not a point of the curve,
+  or differs from the first one a session accepted, is refused. Without a `Pong` whose confirmation holds, the sender
+  fails as without an acknowledgement (`WithAcknowledgementTimeout`).
 - **Keys.** The transcript `T` is 227 bytes, in this order: the protocol identifier, one byte of length (47) then the
   ASCII `transportr e2e v1 P-256 HKDF-SHA256 AES-256-GCM`, length-prefixed so that no identifier another suite or
   version takes yields the same bytes; the mode (1 byte: `0x00`, `0x01` with a PSK); the `TransferId`, the sender's
@@ -335,30 +350,26 @@ function and the BCL has no portable X25519.
   in `T` keeps an all-zero PSK from passing for none.
 - **Sealed batches.** AES-256-GCM under the batch key. The nonce is the header's `BatchId` as written there (4 bytes,
   little-endian) followed by 8 zero bytes; the associated data is the 30-byte header as written on the wire, its type
-  and sealed length included; the payload is the ciphertext then the 16-byte tag. A `BatchId` is spent once per
-  session, never wraps (an encrypted transfer carries at most 2³¹ batches), and a resend replays the sealed bytes: no
-  nonce covers two plaintexts. The receiver opens a batch before it judges the batch's place in the order, and
-  acknowledges none that does not open.
-- **Receipts.** `Complete` carries `HMAC-SHA256(sender receipt key, TransferId ‖ BatchId)`, the `BatchId` being the
-  last one (int32, little-endian); `CompleteAck` carries the same under the receiver receipt key, for the `BatchId` of
-  the `Complete` it accepted, and its header keeps `BatchId` 0. The sender signs only its final `BatchId`, once every
-  batch is registered, so no `Complete` for fewer batches exists; the receiver checks the receipt before it judges a
-  `Complete` premature, and writes the same `CompleteAck` again on a reopened stream; a `CompleteAck` that comes before
-  the sender has signed a `Complete` is refused. No MAC covers `BatchAck`, `Abort`, a `Pong`'s `BatchId`, the
-  `BatchId` of a `Ping` or a `CompleteAck`, nor the `TransferId` and `Count` of any control chunk: forged or altered,
-  they lead to a failure (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer ended) or
-  to nothing delivered that differs (a lower resume point resends batches the receiver holds, which it drops).
+  and sealed length included. A `BatchId` is spent once per session, never wraps (an encrypted transfer carries at most
+  2³¹ batches), and a resend replays the sealed bytes: no nonce covers two plaintexts. The receiver opens a batch
+  before it judges the batch's place in the order, and acknowledges none that does not open.
+- **Receipts.** Each is `HMAC-SHA256(its receipt key, TransferId ‖ BatchId)`, with the `BatchId` of the `Complete`
+  (int32, little-endian). The sender signs only its final `BatchId`, once every batch is registered, so no `Complete`
+  for fewer batches exists; the receiver checks the receipt before it judges a `Complete` premature, and writes the
+  same `CompleteAck` again on a reopened stream; a `CompleteAck` that comes before the sender has signed a `Complete`
+  is refused. No MAC covers `BatchAck`, `Abort`, a `Pong`'s `BatchId`, the `BatchId` of a `Ping` or a `CompleteAck`,
+  nor the `TransferId` and `Count` of any control chunk: forged or altered, they lead to a failure (a batch missing, a
+  `Complete` refused until the acknowledgement timeout, a transfer ended) or to nothing delivered that differs (a
+  lower resume point resends batches the receiver holds, which it drops).
 - **Bounds.** `WithMaxBatchBytes` bounds the plaintext, and the reader admits a sealed batch 16 bytes longer. In
-  encrypted mode a receiver admits a `Ping` of exactly 65 bytes and a `Complete` of exactly 32, whatever its
-  `WithMaxBatchBytes`, and a sender's control stream admits a `Pong` of exactly 97 and a `CompleteAck` of exactly 32;
-  `BatchAck` and `Abort` carry nothing. Any other length is a protocol violation, judged on the header before any of
-  the payload is read.
+  encrypted mode a control chunk has exactly the length the diagram gives, whatever `WithMaxBatchBytes`, and `Abort`
+  carries nothing. Any other length is a protocol violation, judged on the header before any of the payload is read.
 - **Refusals.** An encrypted end refuses a `Ping` or `Pong` without a payload and a batch in clear, and aborts with
   `AbortReason.EncryptionModeMismatch` (5). A clear end ignores a `Ping`'s payload, so an encrypted sender finds the
   mismatch at the `Pong`. It answers a sealed batch with `Abort` (`UndecodableBatch`), as a batch of a kind it does
-  not carry, and refuses a chunk its stream does not carry (*ChunkType Values*). A tag, confirmation or receipt that does not verify, a share that changes, or a sealed
-  batch before the keys aborts with `AbortReason.VerificationFailed` (6); a PSK on one end only, or two different ones,
-  fails at the confirmation, before any batch. An end whose provider gives no key refuses the transfer when its first
+  not carry, and refuses a chunk its stream does not carry (*ChunkType Values*). A tag, confirmation or receipt that
+  does not verify, a share that changes, or a sealed batch before the keys aborts with `AbortReason.VerificationFailed`
+  (6); a PSK on one end only, or two different ones, fails at the confirmation, before any batch. An end whose provider gives no key refuses the transfer when its first
   stream opens, which carries its `Abort` (`VerificationFailed`) and nothing else. The end that refuses fails with
   `TransferFailureCategory.EndToEndEncryptionFailed` and a message that names no key; its peer learns it as
   `AbandonedByPeer`. Nothing is resent, neither the refused batch, which arrived whole, nor any other: the `Abort`

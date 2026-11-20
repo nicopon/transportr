@@ -123,6 +123,11 @@ pre-shared key (PSK) can be added; the protocol is under "End-to-End Encryption"
 - **No secret leaves the process.** Neither the PSK nor a derived key appears in a log, an exception message or a
   `ToString`. The session erases its copy of the PSK once the keys are derived, and the keys when it is released; the
   array the provider returned is the provider's, and is left as it is.
+- **It does not replace TLS.** The tokens, the control plane and every chunk header still rely on each hop's TLS.
+- **No PSK rotation.** Each end tries one key per transfer, never an old and a new one: a key changes on both nodes
+  together ("Deploying it" in the client README).
+- **Transfers the host opens.** The sender takes the receiver the hub announces. Binding the ids stops a hub that tells
+  the two ends different parties, not the host's choice of receiver.
 
 ---
 

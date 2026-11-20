@@ -158,7 +158,9 @@ A batch body the receiver cannot decode is not a cut: it arrived whole, so a res
 receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead of reconnecting; the sender's
 `SendAsync` or `CompleteAsync` throws `TransferFailedException`. The other way round, a batch the sender cannot
 serialize fails the sender's session at once, and the receiver is told with `Abort` (`SerializationFailed`). Either
-`Abort` falls back on the abort request (§6) when it cannot be written within `AbortWriteTimeout`.
+`Abort` falls back on the abort request (§6) when it cannot be written within `AbortWriteTimeout`. An end-to-end
+encryption refusal ends the transfer too, with an `Abort` and no resumption ("End-to-End Encryption" in
+`TransportRArchitecture.md`).
 
 What a cut is on a write stream depends on its transport (see "Data Plane Transport" in `TransportRArchitecture.md`).
 Over segments no connection stays open between two of them to fail: a cut is a segment that fails, which ends the epoch,
@@ -238,6 +240,8 @@ Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new d
 1.  **Sender** sends `ChunkType.Ping` immediately upon connecting the stream.
 2.  **Receiver** responds with `ChunkType.Pong`, carrying the `NextExpectedBatchId`.
 3.  **Sender** uses this ID to prune its retry buffer.
+
+In encrypted mode, `Ping` and `Pong` also carry the key exchange ("End-to-End Encryption" in `TransportRArchitecture.md`).
 
 This ensures that resumption is based on the **Receiver's actual state**, which is the ultimate source of truth.
 
@@ -356,6 +360,8 @@ sequenceDiagram
 ```
 
 Steps 3 and 4 have no order between them. A receiver whose stream fails before step 3 reopens both and writes the acknowledgement again first; a reopened stream answered `404` means step 5 has happened, which is the end as well. A consumer waits for that closing phase at most `CompleteStallTimeout` (`WaitForCompletionAsync`).
+
+In encrypted mode, `Complete` and `CompleteAck` also carry receipts ("End-to-End Encryption" in `TransportRArchitecture.md`).
 
 ### Hub Detection
 

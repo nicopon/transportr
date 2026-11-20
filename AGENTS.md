@@ -129,6 +129,12 @@ Each is described where its pointer leads. A change that undoes one is the owner
   route that acts for a registered client, the write-transport probe included. A new surface asks it rather than keeping
   a copy. On every control route the path's `clientId` has to be the identity the request's token attests ("Security
   Guarantees" and "Token Renewal" in `SecurityArchitecture.md`).
+- **End-to-end encryption lives in the clients.** The hub holds no key and does not change for it. The pre-shared key
+  comes from each node's own configuration, never from a service hosted with the hub ("End-to-End Encryption" in
+  `SecurityArchitecture.md`).
+- **One suite, never negotiated.** Noise and TLS were examined and set aside: the construction is theirs in substance,
+  written out (the first paragraph of "End-to-End Encryption" in `TransportRArchitecture.md`). Changing the
+  transcript, a label or a size breaks the wire.
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 
