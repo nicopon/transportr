@@ -110,6 +110,8 @@ app.Run();
 - **HTTP/2.** TransportR clients ask for HTTP/1.1 on every request, an upgrade included; Kestrel may offer HTTP/2 to
   other clients. A reverse proxy that speaks HTTP/2 to the hub has not been validated, App Service's front end below
   aside, and what it spoke to the hub there was not recorded.
+- **End-to-end encryption asks nothing of the hub.** A front end that terminates TLS then sees every batch sealed.
+  Keep TLS all the same: the tokens, the control plane and the metadata rely on it.
 
 The hub logs the transport of each write stream it takes on, and of each client's write-transport probe, and hands them
 to `IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`: that is where to read what a client obtained
@@ -143,7 +145,9 @@ await app.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(tran
 The transfer goes through the authorization and the handshake a sender's own request does, and `InitTransferAsync`
 returns once both clients hold their handles. The receiver sees an ordinary `OnTransferStarted`. The sender, a
 `TransportRClient<T>` or a `ByteStreamClient`, is handed its handle through `OnSendRequested`, inside the handshake; a
-client with no handler attached refuses the transfer, and the host's call fails.
+client with no handler attached refuses the transfer, and the host's call fails. Under end-to-end encryption the host
+still chooses the receiver, which binding the client ids does not prevent ("End-to-End Encryption" in
+`SecurityArchitecture.md`).
 
 ```csharp
 sender.OnSendRequested += send =>
