@@ -354,9 +354,9 @@ function and the BCL has no portable X25519.
   `BatchAck` and `Abort` carry nothing. Any other length is a protocol violation, judged on the header before any of
   the payload is read.
 - **Refusals.** An encrypted end refuses a `Ping` or `Pong` without a payload and a batch in clear, and aborts with
-  `AbortReason.EncryptionModeMismatch` (5). A clear end is unchanged: it ignores a `Ping`'s payload and refuses a
-  sealed batch by its type, as a batch of a kind it does not carry (`UndecodableBatch`), so the encrypted peer finds
-  the mismatch at the `Pong`. A tag, confirmation or receipt that does not verify, a share that changes, or a sealed
+  `AbortReason.EncryptionModeMismatch` (5). A clear end ignores a `Ping`'s payload, so an encrypted sender finds the
+  mismatch at the `Pong`. It answers a sealed batch with `Abort` (`UndecodableBatch`), as a batch of a kind it does
+  not carry, and refuses a chunk its stream does not carry (*ChunkType Values*). A tag, confirmation or receipt that does not verify, a share that changes, or a sealed
   batch before the keys aborts with `AbortReason.VerificationFailed` (6); a PSK on one end only, or two different ones,
   fails at the confirmation, before any batch. An end whose provider gives no key refuses the transfer when its first
   stream opens, which carries its `Abort` (`VerificationFailed`) and nothing else. The end that refuses fails with

@@ -430,5 +430,7 @@ Each side writes one stream and reads the other. The write loop drains the outgo
 
 | Role | Writes | Reads (GET) |
 |------|---------------|-------------|
-| Sender | Data: handshake `Ping`, unacknowledged batches again, then `Batch`, `Complete`, `Abort` | Control: `BatchAck`, `Pong`, `CompleteAck`, `Abort` |
-| Receiver | Control: `BatchAck`, `Pong`, `CompleteAck` (written again first on a stream reopened in the closing phase), `Abort` | Data: `Batch`, `Ping`, `Complete`, `Abort` |
+| Sender | Data | Control |
+| Receiver | Control | Data |
+
+What each stream carries is under "ChunkType Values" in [TransportRArchitecture.md](./TransportRArchitecture.md#chunktype-values).
