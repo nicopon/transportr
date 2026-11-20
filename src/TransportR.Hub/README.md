@@ -102,7 +102,8 @@ behind a given front end.
 | stock nginx relaying the upgrade | not run | |
 
 Not measured or not recorded: whether a front end counts a WebSocket's keepalive frames as traffic, and which HTTP
-version App Service's front end spoke to the hub.
+version App Service's front end spoke to the hub. The 460 s transfer on App Service had each end's streams cut and
+reopened twice, for a cause not established; it completed to the item.
 
 ## Transfers the host opens
 
