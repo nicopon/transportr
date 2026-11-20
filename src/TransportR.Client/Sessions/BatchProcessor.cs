@@ -257,6 +257,9 @@ internal class BatchProcessor : IAsyncDisposable
                 // batch that could not be serialized, as below: a worker that stopped quietly on it would
                 // leave CompleteAsync to sign a Complete short of that batch.
                 catch (OperationCanceledException) when (ct.IsCancellationRequested || _abandoned) { return; }
+                // The read loop refused what the peer sent: it fails the session for the encryption and
+                // tells the peer. The batch the cipher would not seal is not at fault.
+                catch (Exception) when (_encryption is { HasRefused: true }) { return; }
                 catch (Exception ex)
                 {
                     // A batch that is never sent is a gap the receiver's Complete check cannot see when

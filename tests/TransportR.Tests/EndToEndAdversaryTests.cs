@@ -327,6 +327,34 @@ public class EndToEndAdversaryTests
     }
 
     [Fact]
+    public async Task APongRefusedWhileTheSenderSeals_FailsTheSender_ForTheEncryption()
+    {
+        await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed());
+        var pongs = 0;
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.Pong && Interlocked.Increment(ref pongs) > 1
+            ? [WithShare(chunk.Bytes, NewShare())]
+            : [chunk.Bytes];
+        await pair.StartAsync();
+        var receiving = pair.ReceiveAsync();
+        var sent = 0;
+        var producing = Task.Run(async () =>
+        {
+            while (true)
+            {
+                await pair.Sender.SendAsync("item", CancellationToken.None);
+                Interlocked.Increment(ref sent);
+            }
+        });
+        await WaitUntilAsync(() => Volatile.Read(ref sent) >= 200);
+        pair.Sender.TriggerReconnect();
+
+        await Assert.ThrowsAsync<TransferFailedException>(() => producing.WaitAsync(Bound));
+        await Assert.ThrowsAsync<TransferFailedException>(() => receiving.WaitAsync(Bound));
+        var refused = await Assert.ThrowsAsync<TransferFailedException>(() => pair.Sender.CompleteAsync().WaitAsync(Bound));
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, refused.Category);
+    }
+
+    [Fact]
     public async Task AHubThatSuppressesEveryPong_FailsTheSenderOnTheAcknowledgementTimeout_WithNothingSealed()
     {
         await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed(), configureSender: options =>

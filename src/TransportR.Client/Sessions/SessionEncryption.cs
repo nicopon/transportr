@@ -118,9 +118,10 @@ internal sealed class SessionEncryption : IDisposable
 
     /// <summary>
     /// Whether this end has refused something it read: from then on a sender writes nothing but its
-    /// Abort, which a resend would only hold back.
+    /// Abort, which a resend would only hold back. True from the moment the cipher's check fails, before
+    /// the read loop raises the refusal, so that a seal the cipher refuses meanwhile is taken for it.
     /// </summary>
-    public bool HasRefused => _hasRefused;
+    public bool HasRefused => _hasRefused || _cipher is { HasRefused: true };
 
     /// <summary>The type a batch of <paramref name="clear"/>'s kind is written with, sealed.</summary>
     public static ChunkType SealedTypeOf(ChunkType clear) => clear switch

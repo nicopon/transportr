@@ -164,6 +164,9 @@ internal sealed class EndToEndCipher : IDisposable
     /// </summary>
     public bool HasKeys => !_disposed && !_failed && Volatile.Read(ref _keys) is not null;
 
+    /// <summary>Whether a check has failed: from then on the cipher produces nothing.</summary>
+    public bool HasRefused => _failed;
+
     /// <summary>Writes the sender's share, the payload of every Ping.</summary>
     public void WritePing(Span<byte> payload)
     {
