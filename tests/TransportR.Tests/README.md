@@ -1,67 +1,45 @@
 # TransportR.Tests
 
-> Unit and component tests for the TransportR solution.
-
-## Purpose
-
 Unit tests for the components, and component tests for the hub's state and access logic.
-End-to-end transfers are covered in two places: `TransferIntegrationTests` carries one transfer in
-process over `TestServer`, and the scenarios of `./scripts/run-benchmark.sh` run real processes
-for faults, volume, HA and authentication.
 
----
+End-to-end transfers are covered in two places:
+
+- `TransferIntegrationTests` carries one transfer in process over `TestServer`.
+- The scenarios of `./scripts/run-benchmark.sh` run real processes for faults, volume, HA and authentication.
 
 ## Running Tests
 
-### Command Line
-
 ```bash
 dotnet test tests/TransportR.Tests
-```
-
-### With Coverage
-
-```bash
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
----
-
 ## Redis Tests
 
-`RedisStateStoreTests` run on a Testcontainers `redis:7.0` when Docker answers. Otherwise they run on a
-`redis-server` already on the machine (`tools/`, `PATH`, `/opt/homebrew/bin`), started on a free port per
-test. They are skipped only when neither exists (`RedisServer.cs`).
-
----
+`RedisStateStoreTests` run on a Testcontainers `redis:7.0` when Docker answers. Otherwise they run on a `redis-server`
+already on the machine (`tools/`, `PATH`, `/opt/homebrew/bin`), started on a free port per test. They are skipped only
+when neither exists (`RedisServer.cs`). `./scripts/init.sh` puts a `redis-server` in `tools/` on `linux-amd64` only;
+elsewhere nothing installs one.
 
 ## Test Coverage
+
+A selection; the other test classes sit beside this file.
 
 | Component | Covers |
 |-----------|--------|
 | `BatchAccumulator` | Validation, flush by size and by timeout, batch IDs |
-| `ReceiverState` | In-order and duplicate batches; one ahead of the expected one is a protocol violation |
+| `ReceiverState` | In-order and duplicate batches; a batch ahead of the expected one is a protocol violation (`ReceiverStateOwnershipTests`) |
 | `ChunkIO` | Binary header read and write, buffer management |
 | `FlowControlService` | Group permissions, wildcards |
 | `InMemoryStateStore` | Clients, connection index, disconnection grace, renewal, sessions |
 | `TransferManager` | Participants, transfer statistics, state removal |
 | `RedisStateStore` | Clients, connection index, TTLs, renewal, sessions |
 
----
+## End-to-end encryption vector
 
-## Dependencies
+`tests/vectors/end_to_end_kat.py` recomputes, in Python and from the specification alone, the vector `EndToEndCipherTests`
+freezes, and checks the test carries every value. In a venv with `cryptography`:
 
-| Package | Usage |
-|---------|-------|
-| `xunit` | Test framework |
-| `xunit.runner.visualstudio` | VS runner |
-| `Microsoft.NET.Test.Sdk` | Test SDK |
-
----
-
-## Notes
-
-- For end-to-end runs with real processes, use `./scripts/run-benchmark.sh`.
-- `tests/vectors/end_to_end_kat.py` recomputes, in Python and from the specification alone, the vector
-  `EndToEndCipherTests` freezes, and checks the test carries every value. In a venv with `cryptography`:
-  `<venv>/bin/python -I tests/vectors/end_to_end_kat.py tests/TransportR.Tests/EndToEndCipherTests.cs`.
+```bash
+<venv>/bin/python -I tests/vectors/end_to_end_kat.py tests/TransportR.Tests/EndToEndCipherTests.cs
+```
