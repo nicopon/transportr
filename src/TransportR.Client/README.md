@@ -190,11 +190,27 @@ var client = new TransportRClientBuilder<Order>()
 
 - **Without a pre-shared key** it protects against whoever reads the path, not against a hub that rewrites it.
 - **With one**, a hub that rewrites, truncates or reroutes a transfer makes it fail; it never ends in a false success.
-- Two ends set differently fail before the first batch, with `EndToEndEncryptionFailed`. `TransferInfo.Protection`
-  says which level a transfer runs at.
 
 The hub still sees who talks to whom, when and how much. What each level protects, and against whom, is under
 "End-to-End Encryption" in `SecurityArchitecture.md`.
+
+#### Deploying it
+
+With a key per pair, the provider looks the peer's client id up:
+```csharp
+// keys: a Dictionary<Guid, byte[]> read from this node's own configuration, one key per peer
+.WithEndToEndEncryption(peerId => keys.GetValueOrDefault(peerId))
+```
+- **Generate a key** with `openssl rand -base64 32`, and give it to both nodes of the pair.
+- **Roll it out** in two steps: upgrade both nodes, then enable encryption on both together.
+- **No rotation**: change a key on both nodes together. A transfer under way keeps the key it started with.
+- **Check it** with `GetTransfers()[i].Protection`.
+
+| Symptom | Cause |
+|---|---|
+| `EndToEndEncryptionFailed` at one end, `AbandonedByPeer` at the other, before the first batch | The ends are not set alike: encryption or a key on one only, or two different keys |
+| The log says the provider gave no key for a peer | The provider returns `null` for that id: this node lacks the peer's key |
+| `Build()` throws `PlatformNotSupportedException` | The platform has no AES-GCM |
 
 ### Serialization
 MessagePack is the recommended default: it takes any POCO without attributes or schema. JSON is about 20 % slower

@@ -171,6 +171,7 @@ stated, a memory ceiling. `./scripts/test-all.sh` runs them all; see [`scripts/R
 | **Authentication on both planes**, groups taken from token scopes | `oidc`, `embedded-idp`; `data-plane-probe` asks the live hub to serve anonymous and wrong-role stream requests and expects refusals |
 | **Two hubs behind a load balancer**, with affinity handoff | `ha-redis` (Redis state store), `ha-no-shared-state`; `ha-transfer-affinity` (one sender's two transfers on two hubs, every stream back to the hub of its bridge after a cut) |
 | **This page's Quick Start** | Its sender and receiver run against a local hub in `ReadmeQuickStartTests`, which counts every order received; its hub configuration runs in an integration test |
+| **Encrypted end to end**, when both ends enable it | `sealed`, `byte-stream-sealed-cut-sender` (both ends report the level, and the key is in no output); in process, `EndToEndAdversaryTests` |
 
 Unit and in-process integration tests run in CI; the scenarios run on demand.
 
@@ -212,6 +213,7 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | `WithMaxBatchBytes(bytes)` | `256 MiB` | The largest batch on the wire, at both ends: a receiver fails the transfer on a larger one |
 | `WithWriteTransport(policy)` | `PreferWebSocket` | What carries a write stream: a WebSocket, else segments; `RequireWebSocket` fails without one, `SegmentsOnly` never asks |
 | `ConfigureHttpHandler(configure)` | none | The `SocketsHttpHandler` of every request, for a proxy, a client certificate or a certificate authority: `Build()` refuses cookies and automatic decompression |
+| `WithEndToEndEncryption(...)` | off | Seals every batch from one end to the other, with an optional pre-shared key; both ends set it alike |
 
 **Both backpressure bounds are opt-in, and `Build()` warns when neither is set.** The right figure depends on
 how large an item is, which only the caller knows. Set both: either one alone moves the backlog to the other
@@ -239,6 +241,8 @@ cannot decode fails the transfer, and so does a transfer whose ends are not of t
   token ran out and ends their transfers.
 - **Group access rules** — `transportr:group:<name>` scopes put a client in groups, and `DefaultFlowControlService`
   says which group may send to which. Without a flow control service, any group reaches any other.
+- **End-to-end encryption**, off by default — the hub forwards batches it cannot read ("End-to-end encryption" in
+  the [client README](./src/TransportR.Client/README.md#end-to-end-encryption)).
 
 For development, `TransportR.Auth.SimpleIdp` (not published to NuGet) embeds an OpenIddict provider in the
 hub. See the [Security guide](./SecurityArchitecture.md).
