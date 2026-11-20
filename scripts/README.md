@@ -89,6 +89,8 @@ Unified benchmark runner with scenario support.
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
 | `byte-stream` | `data/orders.bin` carried as bytes, with no serializer; the receiver's file must have the size and the SHA-256 of the source |
 | `byte-stream-cut-sender` | `chaos-cut-sender` for the byte-stream mode, on a window of one batch; the transfer must resume and the file must still be the source |
+| `sealed` | The `default` transfer with both samples sealing every batch end to end, without a pre-shared key; both ends must say `Encrypted` |
+| `byte-stream-sealed-cut-sender` | `byte-stream-cut-sender` sealed with a pre-shared key generated for the run; the file must still be the source, both ends must say `EncryptedWithPreSharedKey`, and the key must be in no file of the output |
 | `byte-stream-cut-receiver` | `chaos-cut-receiver` for the byte-stream mode, on a window of one batch; the transfer must resume and the file must still be the source |
 | `byte-stream-segments` | `byte-stream` with a WebSocket excluded; every write stream must be carried by segments |
 | `byte-stream-segments-cut-sender` | `byte-stream-cut-sender` over segments only |
@@ -114,6 +116,9 @@ the receiver's own logs:
 | `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket`; set empty for a run where the hub is not meant to have seen the request |
 | `SOURCE_MAX_ITEMS` | The sender stops after that many items, which sends a prefix of the source file |
 | `BYTE_STREAM_BATCH_BYTES` | Both samples run in the byte-stream mode, with batches cut at that many bytes. The run is judged on the size and the SHA-256 of the receiver's `.bin` file, not on lines; `BATCH_SIZE`, `RECEIVE_MAX_ITEMS`, `SOURCE_MAX_ITEMS` and `CONSUME_ITEMS_PER_SECOND` count items and are refused alongside it |
+| `E2E_ENCRYPTION` | `true`: both samples seal every batch end to end (`Sender__EndToEndEncryption`, `Receiver__EndToEndEncryption`) |
+| `E2E_PRE_SHARED_KEY` | `true`, with `E2E_ENCRYPTION`: the script generates a 32-byte key for each run (`openssl rand -base64 32`), gives it to both samples, never writes or prints it, and fails the run if it is in any file of the output directory, the hub's logs included |
+| `ASSERT_PROTECTION` | `None`, `Encrypted` or `EncryptedWithPreSharedKey`: every transfer of both sides journals that `TransferInfo.Protection` |
 | `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET), `hold` (accept the upgrade and relay nothing) or `hold-late` (answer the client's first message, then read nothing) |
 
 The chaos scenarios assert no transport: a client that has had three connections in a row cut within

@@ -147,6 +147,29 @@ if [ -n "$BYTE_STREAM_BATCH_BYTES" ] \
     exit 1
 fi
 
+# End-to-end encryption is set alike on both samples. The key of a run is generated here, held in this
+# shell's environment and the samples', and never written or printed: a run that left it in a file fails.
+if [ "$E2E_PRE_SHARED_KEY" == "true" ] && [ "$E2E_ENCRYPTION" != "true" ]; then
+    log_error "E2E_PRE_SHARED_KEY needs E2E_ENCRYPTION=true"
+    exit 1
+fi
+if [ -n "$ASSERT_PROTECTION" ]; then
+    case "$ASSERT_PROTECTION" in
+        None|Encrypted|EncryptedWithPreSharedKey) ;;
+        *) log_error "Unknown ASSERT_PROTECTION: $ASSERT_PROTECTION (None, Encrypted or EncryptedWithPreSharedKey)"; exit 1 ;;
+    esac
+fi
+if [ "$E2E_ENCRYPTION" == "true" ]; then
+    export Sender__EndToEndEncryption=true
+    export Receiver__EndToEndEncryption=true
+fi
+E2E_KEY=""
+if [ "$E2E_PRE_SHARED_KEY" == "true" ]; then
+    E2E_KEY=$(openssl rand -base64 32)
+    export Sender__EndToEndPreSharedKey="$E2E_KEY"
+    export Receiver__EndToEndPreSharedKey="$E2E_KEY"
+fi
+
 # Sender configuration
 export Sender__HubUrl="$HUB_URL"
 export Sender__EnableAuth="${ENABLE_AUTH:-false}"
@@ -481,6 +504,19 @@ fi
 if [ "$EXPECT_RESUME" == "true" ]; then
     source "$SCRIPT_DIR/lib/transport.sh"
     check_resume || exit 1
+fi
+
+# The level each end says its transfers ran at is as much a result as the line count: a client that
+# silently sent in clear delivers every line too.
+if [ -n "$ASSERT_PROTECTION" ]; then
+    source "$SCRIPT_DIR/lib/transport.sh"
+    source "$SCRIPT_DIR/lib/protection.sh"
+    check_protection || exit 1
+fi
+
+if [ -n "$E2E_KEY" ]; then
+    source "$SCRIPT_DIR/lib/protection.sh"
+    check_key_absent || exit 1
 fi
 
 if [ -n "$BYTE_STREAM_BATCH_BYTES" ]; then
