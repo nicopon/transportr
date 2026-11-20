@@ -397,7 +397,7 @@ The chunk types are listed once, under "ChunkType Values" in
 
 ## Transfer Completion: EOF Domino Sequence
 
-TransportR uses **pure dataplane signals** for transfer completion. No control plane message is used.
+A transfer ends on **pure dataplane signals**: no control-plane message is used.
 
 ### The Sequence
 
@@ -434,11 +434,22 @@ if (endReason == StreamEndReason.CleanEOF && bridge.Complete()) // Step 5
 }
 ```
 
-That clean end is also when the hub forgets the transfer: both participants have seen it end, so nothing is sent. It is the only signal the hub reads that way. A rupture is a transfer that may resume, and the receiver's control stream ends cleanly before the sender is known to have read the acknowledgement. A reopened stream then meets a transfer the hub no longer knows (`404`), which a receiver in its closing phase reads as the end.
+**Only that clean end retires the transfer**, and nothing is sent: both participants have seen it end. A rupture is a
+transfer that may resume. The receiver's control stream ends cleanly too, but before the sender is known to have read
+the acknowledgement. Once the transfer is retired, a reopened stream meets a transfer the hub no longer knows (`404`),
+which a receiver in its closing phase reads as the end.
 
-The sender's data stream ends cleanly only if the client lets it: `CompleteAsync` returns on the acknowledgement, and the end of the stream follows. `DisposeAsync` of a completed session therefore waits for the hub's answer to it, the final segment's response or the hub's own `Close(4000)`, which the hub gives once the bridge has closed the stream (at most `AbortWriteTimeout`, 2 s), before it cancels the streams. A client that releases the sender sooner, or dies, leaves the hub a rupture, and the transfer is then found by the inactivity sweep ("3. Hub-Driven Timeout", above).
+**The sender's data stream ends cleanly only if the client lets it.** `CompleteAsync` returns on the acknowledgement,
+and the end of the stream follows. `DisposeAsync` of a completed session therefore waits, at most `AbortWriteTimeout`
+(2 s), for the hub's answer to that end before it cancels the streams: the final segment's response, or the hub's own
+`Close(4000)`, which the hub gives once the bridge has closed the stream. A client that releases the sender sooner, or
+dies, leaves the hub a rupture, which the inactivity sweep finds ("3. Hub-Driven Timeout", above).
 
-The receiver can break that clean end too. It is `Completed` at step 3, which may come before step 4, and the hub cuts a source whose destination has gone: a receiver that closed its data GET then would take the end of the sender's stream down before the sender has read the acknowledgement, and nobody would send it again. A receiver in its closing phase therefore reads its data GET to the end, which the hub reaches after step 5, and `DisposeAsync` of a completed receiver waits for that end (at most 2 s) before it cancels the streams.
+**A receiver in its closing phase reads its data GET to the end**, which the hub reaches after step 5, and `DisposeAsync`
+of a completed receiver waits for that end (at most 2 s) before it cancels the streams. The receiver is `Completed` at
+step 3, which may come before step 4, and the hub cuts a source whose destination has gone. A receiver that closed its
+data GET then would take the end of the sender's stream down before the sender read the acknowledgement, and nobody
+would send it again.
 
 ### Why Not Control Plane?
 
@@ -466,14 +477,19 @@ stateDiagram-v2
     Completed --> [*]
 ```
 
-`DataSessionStateMachine` holds the state. The endings are events (`OnStreamsLost`, `OnReleased`, `OnAborted`, `OnEndedByHub`) and the rest goes through `TransitionTo`, which refuses a move out of a final state, and out of `ReceiverCompleteReceived` to anything but one: a closing receiver that loses a stream reopens it from its phase. Every state that is not final can end in:
+`DataSessionStateMachine` holds the state. The endings are events (`OnStreamsLost`, `OnReleased`, `OnAborted`,
+`OnEndedByHub`); every other move goes through `TransitionTo`. `TransitionTo` refuses a move out of a final state, and
+out of `ReceiverCompleteReceived` to anything but a final state: a closing receiver that loses a stream reopens it from
+its phase. Every state that is not final can end in:
 
 - `Failed`: a fatal stream (protocol violation, `404` outside the closing phase), the peer's `Abort`, the hub ending the transfer, nothing acknowledged for `CompleteStallTimeout`, or a batch that does not serialize or decode;
 - `Disposed`: the handle was released first, which queues an `Abort` for the peer.
 
 `Completed`, `Failed` and `Disposed` are final, and `Stopped` completes on the first of them. A released handle keeps an outcome it already has: releasing a completed session leaves it `Completed`.
 
-`Reconnecting` probes the hub with a request until it answers, with a pause after each failed probe that doubles from 2 s to 15 s (*Key Timings*), and no retry limit. A sender has no closing phase: `ReceiverCompleteReceived` is the only one, and `IsCompleting` is always false on a sender.
+`Reconnecting` probes the hub until it answers, with no retry limit; the pause after each failed probe doubles from 2 s
+to 15 s (*Key Timings*). `ReceiverCompleteReceived` is the only closing phase, so `IsCompleting` is always false on a
+sender.
 
 ### Client Internals
 
@@ -483,7 +499,7 @@ One `DataSession` per transfer. What runs, and who owns it:
 |------|------|---------|
 | `DataSession` | The session loop (open the streams, reconnect, close), the write and read loops it hands each attempt, the state machine, `CompleteAsync`/`WaitForCompletionAsync`, the stall bound, delivery of `Abort` on release, the per-transfer heartbeat | One loop task; the caller's thread for `SendAsync`/`CompleteAsync`; a timer for the heartbeat |
 | `HttpStreamManager` | One attempt at a time: two streams (data, control) under one cancellation source, the write one over a WebSocket or segments by `WriteTransportPolicy`. It reports how each attempt ended as a `StreamOutcome` (`Ended`, `Cancelled`, `Gone`, `Retryable`, `Fatal`), and sends the `abort` request | Two stream tasks per attempt |
-| `BatchProcessor` | The outgoing channel (batches and control chunks, unbounded), the unacknowledged batches and the in-flight slots, the serialization worker, which reads the batches off the source the client builds, the dispatch of incoming chunks, the receiver's `ReceiverState` (order, duplicates) and the sink the client builds. It knows neither the item type nor whether the client carries items or bytes | The serialization worker (sender); the read loop (both) |
+| `BatchProcessor` | The outgoing channel (batches and control chunks, unbounded); the unacknowledged batches and the in-flight slots; the serialization worker, which reads the batches off the source the client builds; the dispatch of incoming chunks; the receiver's `ReceiverState` (order, duplicates) and the sink the client builds. It knows neither the item type nor whether the client carries items or bytes | The serialization worker (sender); the read loop (both) |
 | `BatchAccumulator<T>` | Items not yet in a batch; flushes by size or `BatchFlushIntervalMs`, and takes an in-flight slot per batch | The caller's thread, and a flush timer |
 | `ReconnectionHandler` | The probe request while `Reconnecting`, and the Ping/Pong handshake at the head of every sender data stream | The session loop; the sender's write loop |
 
