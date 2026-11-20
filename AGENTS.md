@@ -149,7 +149,7 @@ Each is described where its pointer leads. A change that undoes one is the owner
   version nobody reads any more belongs to the commit log.
 - **No deliberation in committed code.** A comment that asks a question, weighs two options, or
   opens with "for now" / "let's assume" / "actually" / "wait" is thinking, not documentation: it
-  tells the next reader the matter is settled when it is not. Resolve it, or move it to `.notes/`
+  tells the next reader the matter is settled when it is not. Resolve it, or move it to the working notes
   and leave a one-line pointer. `./scripts/lint-comments.sh` enforces this and runs in CI ahead
   of the build.
 - **A doc comment outlives nothing.** When a member goes, its `///` block goes with it.
