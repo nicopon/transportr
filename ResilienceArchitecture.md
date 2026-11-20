@@ -297,7 +297,15 @@ Behind a load balancer with sticky sessions, a sender is sent to the instance ho
 
 A slow consumer must cost the transfer time, not memory. There is no control-plane message for this: the pushback is the data plane throttling itself, end to end, and the hub takes no part in it.
 
-**The chain.** A full receive buffer parks the receiver's read loop. A parked read loop stops draining the HTTP response body, which closes the TCP window back to the hub, which blocks the hub's forwarding write. Over segments, that holds back the answer to the sender's segment and so its next flush; over a WebSocket, the hub reads the next message only once its write has returned, so the socket fills and the sender's flush blocks. And because a batch is acknowledged only *after* it lands in the receive buffer, the acknowledgement that would reopen the sender's in-flight window is withheld for as long as the consumer is behind. One slow consumer therefore stops the producer, without anyone being told.
+**The chain.** One slow consumer stops the producer, without anyone being told:
+
+1.  A full receive buffer parks the receiver's read loop.
+2.  The parked read loop stops draining the HTTP response body, which closes the TCP window back to the hub and blocks
+    the hub's forwarding write.
+3.  Over segments, that holds back the answer to the sender's segment, and so its next flush. Over a WebSocket, the hub
+    reads the next message only once its write has returned, so the socket fills and the sender's flush blocks.
+4.  A batch is acknowledged only *after* it lands in the receive buffer, so the acknowledgement that would reopen the
+    sender's in-flight window is withheld for as long as the consumer is behind.
 
 **The two bounds, and their units.**
 
@@ -306,38 +314,75 @@ A slow consumer must cost the transfer time, not memory. There is no control-pla
 | Sender | `WithMaxInFlightBatches` | batches flushed but not yet acknowledged | `null` — unbounded |
 | Receiver | `WithReceiveCapacity` | items **and** wire bytes, first to bind | `null` — unbounded |
 
-**Both are opt-in, and that is a decision rather than an omission.** The figure that makes a bound useful depends on how large an item is, which only the caller knows: for record-sized payloads an unbounded buffer is a memory spike, for multi-megabyte ones it is the process. A default would be a guess wearing the costume of a safeguard, and the wrong guess is worse than none because nobody looks for a setting that appears to be handled. `Build()` warns when neither end is set, so the absence is loud rather than silent.
+**Set both ends: out of the box there is no backpressure**, and either bound alone moves the backlog to the other
+process. The receiver's bound blocks the sender's write (the chain above) but not its serialization worker, which never
+waits: its batches queue behind the blocked write. The send window stops that worker but cannot see the receiver's
+bytes. With the receiver bounded alone, `slow-receiver`'s sender peaks at 451 MB (the scenario asserts only the
+receiver), and an integration moving Arrow batches reached 1 693 MB on the sender. With neither bound, that integration
+reached 1 038 MB on the receiver.
 
-**Out of the box there is therefore no backpressure anywhere**, and a consumer slower than its producer is absorbed in memory until something dies. **Set both ends: either one alone moves the backlog to the other process.** The receiver's bound stops the sender's write through the chain above, but not its serialization worker, which never waits — serialized batches queue behind the blocked write. Measured: `slow-receiver` holds its receiver under 200 MB (182 and 193 MB on two runs) while its sender, which it does not assert, peaks at 451 MB; an integration moving Arrow batches reached 1 693 MB on the sender with the receiver bounded alone, and 1 038 MB on the receiver with neither. The send window is what stops the worker, and the receiver's bound is what the window cannot see.
+Both are `null` by default because the right figure depends on item size, which only the caller knows: for
+record-sized payloads an unbounded buffer is a memory spike, for multi-megabyte ones it is the process. A guessed
+default would look handled and go unchecked. `Build()` warns when neither end is set.
 
 **WAN and high-throughput sizing.** The sender's in-flight window must satisfy the bandwidth-delay product:
 $$\text{Window} = \text{MaxInFlightBatches} \times \text{batch size} \ge \text{RTT} \times \text{Bandwidth}$$
 On a 25 ms link aiming for 60–100 MB/s, BDP is 1.5–2.5 MB. A window smaller than this (such as 8 batches of 64 KB = 512 KB) starves the producer while waiting for acknowledgements across round-trips. For continuous streaming across WAN or cloud regions, 256 KB or 512 KB batches with an in-flight window of 4–8 MB maintain pipeline saturation while keeping memory bounded.
 
-A producer parked in `SendAsync` on a full window is released only by an acknowledgement, so a receiver that stops early would leave it parked forever. It fails instead, with `TransferFailedException`, once nothing has been acknowledged for `CompleteStallTimeout` — the rule `CompleteAsync` already applies: a peer still acknowledging is still working, however slowly. Both failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream, because that stream closes as cleanly as a finished transfer's and the hub relays it to the receiver as one.
+**A producer parked on a full window fails once nothing has been acknowledged for `CompleteStallTimeout`**, with
+`TransferFailedException`, the rule `CompleteAsync` applies. Only an acknowledgement releases it, so a receiver that
+stopped early would otherwise park it for ever; a peer still acknowledging, however slowly, is still working. Both
+failures send `Abort` (`AcknowledgementTimeout`) before closing the data stream: that stream closes as cleanly as a
+finished transfer's, and the hub relays it to the receiver as one.
 
-**An `Abort` can be lost.** The hub keeps nothing of what it relays, so an `Abort` the receiver never read is gone: its streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the client already reads as the end of the transfer — `Failed`, or `Completed` in the closing phase — rather than as a stream to reopen. A fatal stream failure, this one or a transfer the hub no longer knows, releases a consumer parked in `ReceiveAsync` (it throws `TransferFailedException` once it has taken what was already received) and a producer parked on the window, as an `Abort` does.
+**An `Abort` can be lost.** The hub keeps nothing it relays, so an `Abort` the receiver never read is gone. The
+receiver's streams restart when the sender's control read ends (the hub cuts the receiver's control write), and the
+restart discards what was still unread. A data stream whose source has finished is answered `410 Gone`, which the
+client reads as the end of the transfer (`Failed`, or `Completed` in the closing phase), not as a stream to reopen. A
+fatal stream failure, this one or a transfer the hub no longer knows, releases what an `Abort` releases: a consumer
+parked in `ReceiveAsync`, which throws `TransferFailedException` once it has taken what was already received, and a
+producer parked on the window.
 
 **An `Abort` can also be stuck** behind data the receiver does not read, and it then goes as a request of its own (§6).
 
-The sender's window is taken **by the producer, before serialization** (in a `ByteStreamClient`, which has none, before the batch's buffer is rented). Taking it in front of the serialization worker instead would bound the serialized bytes by letting the un-serialized items pile up behind them — which for an off-heap payload such as an Arrow `RecordBatch` converts a managed backlog into a native one, the same symptom in a worse form.
+**The sender's window counts batches, taken by the producer before serialization** (in a `ByteStreamClient`, which has
+no serialization, before the batch's buffer is rented). Taken in front of the serialization worker instead, it would
+bound the serialized bytes by letting the un-serialized items pile up behind them; for an off-heap payload such as an
+Arrow `RecordBatch`, a managed backlog would become a native one. Nor can it count bytes: the serialized size is unknown
+when the slot is taken, and only the caller could price an item before it is serialized. It need not: with the window
+set, the receiver's byte bound reaches the sender through the chain above, by withholding the acknowledgements the
+window waits for.
 
-That placement is also why the sender's window cannot count bytes: the serialized size is not known until after the point where the slot is taken. A byte-accurate sender window would need the caller to price an item before it is serialized. It is not needed for the memory to be bounded — with the window set, the receiver's byte bound reaches the sender through the chain above, by withholding the acknowledgements the window waits for.
+**The receiver's capacity counts items and wire bytes, and the first reached binds.** One unit cannot serve both
+payload shapes: ten thousand items is a memory figure for orders and a meaningless one for multi-megabyte record
+batches, and a byte budget is the reverse.
 
-**Receive capacity is two-dimensional because one unit cannot serve both payload shapes.** Ten thousand items is a memory figure when an item is an order and a meaningless one when it is a multi-megabyte record batch; a byte budget is the reverse. Both are declared and the first one reached binds, so neither kind of payload has to disable the other's bound.
-
-**Bytes are wire bytes** — the serialized payload as it arrived, charged to a chunk before it is decoded and returned item by item as the consumer takes them. It is the only size available without knowing what the item type costs on the heap, and it is not that cost: Arrow IPC bodies are close to their decoded buffers less whatever LZ4 saved, while MessagePack records decode to several times their wire size. Size the bound against that expansion.
-
-**A chunk larger than the whole budget — in either dimension — is still admitted into an empty buffer.** Refusing it would be a permanent stall rather than backpressure, since nothing can ever free room for it, and a chunk cannot be handed over in parts. Lowering either bound therefore throttles a transfer and cannot deadlock one.
+-   **Wire bytes** are the serialized payload as it arrived, charged to a chunk before it is decoded and returned item
+    by item as the consumer takes them. They are the only size known without the item type's heap cost, and they are
+    not that cost: Arrow IPC bodies are close to their decoded buffers less whatever LZ4 saved, while MessagePack
+    records decode to several times their wire size. Size the bound against that expansion.
+-   **A chunk larger than the whole budget**, in either dimension, is still admitted into an empty buffer. Nothing could
+    ever free room for it, and a chunk cannot be handed over in parts, so refusing it would stall the transfer for good.
+    Lowering either bound therefore throttles a transfer and cannot deadlock one.
 
 ### 6. The Abort Request
 
-An `Abort` cannot overtake data the receiver has not read, and that is not a rare case: whenever the data unacknowledged when the sender gives up is more than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s) expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the sockets' buffers and on what the connection has already carried, so no figure in bytes can be given; the larger the window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all behind 8 × 64 KB.
+**An `Abort` cannot overtake data the receiver has not read**, and that is not rare. When the sender gives up with more
+data unacknowledged than the pipe between the two holds, the `Abort` is still queued when `AbortWriteTimeout` (2 s)
+expires, and cancelling the stream then looks to the hub like a cut to wait out. What the pipe holds depends on the
+sockets' buffers and on what the connection has already carried, so no figure in bytes can be given: the larger the
+window times the *wire* size of a batch (after compression), the likelier. On a loopback socket with a consumer that
+reads nothing, 50 passes each: none behind 8 batches of 8 × 4 KB, 16 % behind 8 × 16 KB, 64 % behind 8 × 32 KB, all
+behind 8 × 64 KB.
 
-The one thing that still gets through a full stream is a request of its own. A participant whose `Abort` was not written within `AbortWriteTimeout` sends `POST /api/stream/{id}/abort`, for this case only, and the hub ends the transfer through `ITransferTerminator`, as for a host terminating a run: both participants are told to cancel. The receiver fails as for any transfer the hub ends (§3), not with the `Abort`'s reason. It is a request the hub acts on, not a message anyone listens for.
+**A participant whose `Abort` was not written within `AbortWriteTimeout` sends `POST /api/stream/{id}/abort`**, for this
+case only: a request of its own is the one thing that still gets through a full stream. The hub ends the transfer
+through `ITransferTerminator`, as for a host terminating a run, and both participants are told to cancel. The receiver
+fails as for any transfer the hub ends (§3), not with the `Abort`'s reason. It is a request the hub acts on, not a
+message anyone listens for.
 
-- **Which instance acts.** Only the one that carried the transfer's streams: it holds the bridges and the event streams to tell. Behind a proxy with affinity the request follows the streams' cookie, which the session sets on it as on its streams (§4); a hub that holds none of the transfer's bridges answers 404 and leaves it alone.
-- **When it cannot be made** (the hub is unreachable, a proxy blocks the path, the hub predates the route), only `BridgeTimeoutSeconds` — or `StalledProgressTimeoutSeconds`, where it is set — releases the receiver; set `BridgeTimeoutSeconds` with `DisconnectedGraceSeconds`, which default to the same value on purpose.
+- **Which instance acts.** Only the one that carried the transfer's streams: it holds the bridges and the event streams to tell. Behind a proxy with affinity the request follows the streams' cookie, which the session sets on it as on its streams (§4). A hub that holds none of the transfer's bridges answers 404 and leaves it alone.
+- **When it cannot be made** (the hub is unreachable, a proxy blocks the path, the hub predates the route), only `BridgeTimeoutSeconds`, or `StalledProgressTimeoutSeconds` where it is set, releases the receiver.
 - **Who may send it**: either participant, admitted as on the stream routes ("Security Guarantees" in `SecurityArchitecture.md`).
 
 ---
