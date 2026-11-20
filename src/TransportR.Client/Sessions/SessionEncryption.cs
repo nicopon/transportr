@@ -26,6 +26,7 @@ internal sealed class SessionEncryption : IDisposable
     private const string PeerInClearMessage = "The peer does not encrypt end to end, and this end does.";
     private const string NotVerified =
         "End-to-end encryption could not be verified: the streams were altered on their way, or the two ends do not hold the same pre-shared key.";
+
     /// <summary>What the end that has no key fails with. The log says why: no key from the provider, or no P-256.</summary>
     public const string NoKey = "This end could not set up end-to-end encryption for its peer: the transfer is refused.";
 
@@ -37,9 +38,10 @@ internal sealed class SessionEncryption : IDisposable
     private byte[]? _pong;
     private volatile bool _hasRefused;
 
-    // The sender's: the BatchId its Complete signs, the only one a CompleteAck may acknowledge. Null
-    // until it signs one.
-    private int? _signedBatchId;
+    // The sender's: the BatchId its Complete signs, the only one a CompleteAck may acknowledge. Signed
+    // on the caller of CompleteAsync, read on the read loop: the id is written before the flag.
+    private int _signedBatchId;
+    private volatile bool _signed;
 
     private SessionEncryption(bool isSender, Guid transferId, EndToEndCipher? cipher)
     {
@@ -257,6 +259,7 @@ internal sealed class SessionEncryption : IDisposable
         }
 
         _signedBatchId = lastBatchId;
+        _signed = true;
         return true;
     }
 
@@ -286,7 +289,7 @@ internal sealed class SessionEncryption : IDisposable
     /// </summary>
     public void VerifyCompleteAck(ReadOnlySpan<byte> receipt)
     {
-        if (_signedBatchId is not { } signed || !Keyed().VerifyPeerReceipt(signed, receipt)) throw Unverified();
+        if (!_signed || !Keyed().VerifyPeerReceipt(_signedBatchId, receipt)) throw Unverified();
     }
 
     /// <summary>What an encrypted end raises on a batch in clear, or a Ping or Pong without a share.</summary>
