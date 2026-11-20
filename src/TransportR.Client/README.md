@@ -175,6 +175,27 @@ asks for its tokens through the same handler, so what is set here for the hub, a
 the identity provider too; given an `HttpClient` of its own (its last parameter), it uses that one, which the caller
 keeps and disposes.
 
+### End-to-end encryption
+
+By default a batch crosses the hub in clear, under whatever TLS each hop has. `WithEndToEndEncryption()`, set alike
+on both ends, seals every batch so that the hub, and whoever terminates TLS on the way, forward bytes they cannot
+read:
+
+```csharp
+var client = new TransportRClientBuilder<Order>()
+    .WithUrl(hubUrl)
+    .WithEndToEndEncryption(peerId => nodeKey) // 32 bytes from this node's own configuration
+    .Build();
+```
+
+- **Without a pre-shared key** it protects against whoever reads the path, not against a hub that rewrites it.
+- **With one**, a hub that rewrites, truncates or reroutes a transfer makes it fail; it never ends in a false success.
+- Two ends set differently fail before the first batch, with `EndToEndEncryptionFailed`. `TransferInfo.Protection`
+  says which level a transfer runs at.
+
+The hub still sees who talks to whom, when and how much. What each level protects, and against whom, is under
+"End-to-End Encryption" in `SecurityArchitecture.md`.
+
 ### Serialization
 MessagePack is the recommended default: it takes any POCO without attributes or schema. JSON is about 20 % slower
 to produce in our benchmark, and can be sent uncompressed for debugging (`WithJsonSerialization(compress: false)`).
@@ -250,6 +271,7 @@ detail is in the hub's log.
 | `HandleReleased` | This end's handle was released first |
 | `UndecodableOrUnserializableBatch` | A batch this end could not serialize, or decode: both ends must use the same serializer and settings |
 | `ProtocolViolation` | What arrived breaks the wire protocol |
+| `EndToEndEncryptionFailed` | The two ends are not set alike for end-to-end encryption, or a sealed batch, key confirmation or receipt does not verify |
 | `Other` | `RequireWebSocket`, and the path to the hub carries no WebSocket |
 
 A 409 from the hub whose category the client cannot read fails as an `HttpRequestException`
