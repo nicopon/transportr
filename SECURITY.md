@@ -6,8 +6,17 @@ Only the latest release receives security updates.
 
 | Version | Supported |
 |---------|-----------|
-| 0.11.x  | :white_check_mark: |
-| < 0.11  | :x: |
+| 0.13.x  | :white_check_mark: |
+| < 0.13  | :x: |
+
+## Scope
+
+By design, these are not vulnerabilities ("End-to-End Encryption" in [SecurityArchitecture.md](./SecurityArchitecture.md#end-to-end-encryption)):
+
+- the metadata the hub sees: who talks to whom, when, and how much;
+- without a pre-shared key, a hub that rewrites the streams;
+- with one pre-shared key per trust domain, a node of that domain that also holds the hub;
+- availability: the hub can cut any transfer.
 
 ## Reporting a Vulnerability
 
