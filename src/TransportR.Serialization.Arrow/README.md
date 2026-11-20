@@ -18,10 +18,8 @@ var client = new TransportRClientBuilder<RecordBatch>()
     .Build();
 ```
 
-`WithArrowSerialization` exists only on a builder carrying `RecordBatch`. Unlike the MessagePack and JSON
-packages, this serializer is not generic — Arrow carries record batches and
-nothing else — so a client built on the wrong item type does not compile rather than throwing on
-its first batch.
+`WithArrowSerialization` exists only on a builder carrying `RecordBatch`: on another item type, the client does not
+compile.
 
 ## Two things this package decides for you
 
@@ -30,12 +28,9 @@ decodes chunks independently and replays them after a cut, so a chunk depending 
 once at the start would decode into nothing after the first cut. Repeating the schema is the price
 of that independence, and it is small next to a batch.
 
-**This serializer owns the batches it is given and disposes them once written.** A `RecordBatch`
-holds off-heap memory that something has to release, and this is the only place that knows the
-batch has been written. The sender does not re-serialize on a resend — the unacked buffer holds
-the serialized bytes — which is what makes disposing here safe rather than a use-after-free
-waiting for a retry. Batches you receive are yours, allocated through the `MemoryAllocator` you
-pass in, so a tracking pool can observe them.
+**This serializer takes ownership of each `RecordBatch` you send, and disposes it once written.** A resend replays the
+serialized bytes, never the batch. Batches you receive are yours, allocated through the `MemoryAllocator` you
+pass in.
 
 ## Sizing the receive buffer — read this one
 
@@ -55,8 +50,5 @@ Two things to know about that number:
 - A chunk larger than the whole budget is still admitted into an empty buffer, so a batch bigger
   than you planned for throttles the transfer rather than stalling it.
 
-The sender end is separate and also unbounded by default: `WithMaxInFlightBatches` counts batches,
-not bytes, because its slot is taken before serialization where the size is not yet known. Set it
-too: the receiver's bound stops the sender's network write, but not its serialization worker, so
-with the receiver bounded alone the serialized batches pile up in the sender instead (see
-"Backpressure" in `ResilienceArchitecture.md`).
+Bound the sender too, with `WithMaxInFlightBatches` (in batches, unbounded by default): with the receiver bounded
+alone, serialized batches pile up in the sender ("Backpressure" in `ResilienceArchitecture.md`).
