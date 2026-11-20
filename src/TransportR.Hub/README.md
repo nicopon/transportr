@@ -12,35 +12,10 @@ Provides the hub services that:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      DataHub Server                         │
-├─────────────────────────────────────────────────────────────┤
-│  ClientController (control plane)                           │
-│  ├── GET /api/client/{id}/events (server-sent events)       │
-│  ├── GET /api/client/{id}/receivers → List<ClientInfo>      │
-│  ├── POST /api/client/{id}/transfers                        │
-│  ├── POST /api/client/{id}/replies/{requestId}              │
-│  ├── POST /api/client/{id}/presence/{connectionId}          │
-│  ├── POST /api/client/{id}/transfers/{tid}/heartbeat        │
-│  ├── POST /api/client/{id}/transfers/{tid}/ping             │
-│  └── PUT /api/client/{id}/token                             │
-│                                                             │
-│  StreamController (data plane)                              │
-│  ├── GET /api/stream/{id}/send (WebSocket upgrade)          │
-│  ├── POST /api/stream/{id}/send (one segment per request)   │
-│  ├── GET /api/stream/{id}/receive                           │
-│  └── POST /api/stream/{id}/abort                            │
-├─────────────────────────────────────────────────────────────┤
-│  Services                                                   │
-│  ├── IStateStore → InMemoryStateStore or RedisStateStore    │
-│  ├── TransferManager                                        │
-│  └── TransportRServer (dumb pipe bridge)                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-A write stream arrives as a WebSocket (`GET` with an upgrade) or as segments (`POST`) on the same path ("Data Plane
-Transport" in `TransportRArchitecture.md`); what that asks of a front end is under "Deploying the hub" below.
+The control plane is served under `/api/client/{id}/…`, the data plane under `/api/stream/…`; every route is listed
+under "Communication Channels" in `TransportRArchitecture.md`. A write stream arrives as a WebSocket (`GET` with an
+upgrade) or as segments (`POST`) on the same path ("Data Plane Transport" there). What that asks of a front end is under
+"Deploying the hub" below. The hub forwards opaque chunks and never reads a payload, so it registers no serializer.
 
 ## Integration
 
@@ -71,17 +46,16 @@ app.Run();
 
 ### Before production
 
-- **Validate tokens.** `UseDevMode()` trusts whatever group a client claims. Without it the host configures JwtBearer
-  authentication, and its clients carry tokens whose `transportr:group:<name>` scopes name their groups ("Scope
+- **Validate tokens.** `UseDevMode()` trusts whatever group a client claims. Without it, the host configures JwtBearer
+  authentication. Its clients carry tokens whose `transportr:group:<name>` scopes name their groups ("Scope
   Convention" in `SecurityArchitecture.md`).
-- **Choose where the tokens come from.** An identity provider that issues client-credentials tokens is one source.
-  The other needs no provider: an issuer the host embeds exchanges a key, held by each client, for a short token. The
-  hub validates that issuer's tokens like any others, so expiry, renewal and the access sweep work unchanged, and a
-  client takes them with `WithClientCredentials`, its key as the client secret. The token carries the client's groups
-  as scopes, or the host maps its subject to groups with its own `IClientIdentityProvider`. That issuer is a security
-  component of the host: it exchanges keys over HTTPS only, stores them hashed, lets them expire and be revoked, and
-  limits failed exchanges. [DtPipe](https://github.com/nicopon/dtpipe)'s coordinator issues its nodes' tokens this
-  way. `TransportR.Auth.SimpleIdp` has the same shape for development only: its clients and secrets live in memory.
+- **Choose where the tokens come from**: an identity provider that issues client-credentials tokens, or an issuer the
+  host embeds that exchanges a key each client holds for a short token (`WithClientCredentials`, the key as client
+  secret). The hub validates both alike, so expiry, renewal and the access sweep are unchanged; the token's scopes name
+  the groups, or the host maps its subject with its own `IClientIdentityProvider`. An embedded issuer is a security
+  component: HTTPS only, keys stored hashed, expiring and revocable, failed exchanges limited.
+  [DtPipe](https://github.com/nicopon/dtpipe)'s coordinator issues its nodes' tokens this way;
+  `TransportR.Auth.SimpleIdp` has the same shape for development only (clients and secrets in memory).
 - **Register the group access rules** with `UseFlowControl`. Without an `IFlowControlService`, any client holding a
   group may open a transfer to any other ("Group Access Rules" in `SecurityArchitecture.md`).
 - **Update the hub and its clients together.** They negotiate no protocol version; a release that needs one before the
@@ -100,34 +74,35 @@ app.Run();
   the proxy's idle limit: 60 s for a default nginx, 240 s for App Service. The events stream carries the hub's
   keepalive (*Key Timings* in `ResilienceArchitecture.md`). A sender with nothing to write sends a `Ping` every presence
   interval (15 s): a byte on the receiver's data GET, and its `Pong` one on the sender's control GET. A WebSocket's
-  keepalive frames go at the same interval; whether a front end counts them as traffic has not been measured.
+  keepalive frames go at the same interval.
 - **For a WebSocket, relay the upgrade** (`Upgrade` and `Connection` on `GET /api/stream/{id}/send`) and the socket's
   bytes as they come, both ways. Where the reference proxy strips the two headers the hub answers `426` and the client
-  uses segments at once; where it accepts the upgrade and relays nothing, the client gives up on the proof after 5 s.
+  uses segments at once. Where it accepts the upgrade and relays nothing, the client gives up on the proof after 5 s.
   The route brings `UseWebSockets` with it, so the host's pipeline needs nothing.
 - **With segments, a request body is bounded by the proxy's limit**: nginx's `client_max_body_size` is 1 MB by
   default, which a segment, 512 KB, fits.
 - **HTTP/2.** TransportR clients ask for HTTP/1.1 on every request, an upgrade included; Kestrel may offer HTTP/2 to
-  other clients. A reverse proxy that speaks HTTP/2 to the hub has not been validated, App Service's front end below
-  aside, and what it spoke to the hub there was not recorded.
+  other clients. A reverse proxy that speaks HTTP/2 to the hub is not validated, App Service's front end aside.
 - **End-to-end encryption asks nothing of the hub.** A front end that terminates TLS then sees every batch sealed.
   Keep TLS all the same: the tokens, the control plane and the metadata rely on it.
 
-The hub logs the transport of each write stream it takes on, and of each client's write-transport probe, and hands them
-to `IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`: that is where to read what a client obtained
+The hub logs the transport of each write stream it takes on and of each client's write-transport probe, and hands both
+to `IHubProgressMonitor.OnWriteStreamOpened` and `OnWriteTransportProbed`. That is where to read what a client obtained
 behind a given front end.
 
 ### Validated environments
 
-- **Over a WebSocket**: Azure App Service (Linux, `http20Enabled=true`, `http20ProxyFlag=1`), with clients on Linux,
-  macOS and Windows, one of them behind a proxy taken from the system's proxy settings. Kestrel keeps accepting HTTP/1.1 there: a container restricted to HTTP/2 failed App Service's health check
-  under this flag. Also the reference proxy in `tests/TransportR.TestProxy` (YARP), which relays the upgrade and the
-  affinity cookie, and Toxiproxy for the cuts.
-- **In segments**: App Service (Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0`), with a transfer
-  of 200 items, one of 2 million and one of 460 s to a throttled receiver, each complete to the item with no 408 or
-  499 on `/send`; the last had each end's streams cut and reopened twice, for a cause not established. Also a stock
-  nginx (the `nginx-default` scenario, a `proxy_pass` that sets neither upgrade header).
-- **Not run**: a stock nginx that relays the upgrade.
+| Front end | Write stream | Run |
+|---|---|---|
+| Azure App Service, Linux, `http20Enabled=true`, `http20ProxyFlag=1` | WebSocket | clients on Linux, macOS and Windows, one behind a proxy taken from the system's proxy settings. Kestrel must keep accepting HTTP/1.1: a container restricted to HTTP/2 failed App Service's health check under this flag |
+| App Service, Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0` | segments | transfers of 200 items, of 2 million, and of 460 s to a throttled receiver, each complete to the item, no 408 or 499 on `/send` |
+| `tests/TransportR.TestProxy` (YARP) | WebSocket | relays the upgrade and the affinity cookie |
+| Toxiproxy | WebSocket | the cut scenarios |
+| stock nginx, a `proxy_pass` that sets neither upgrade header (`nginx-default`) | segments | |
+| stock nginx relaying the upgrade | not run | |
+
+Not measured or not recorded: whether a front end counts a WebSocket's keepalive frames as traffic, and which HTTP
+version App Service's front end spoke to the hub.
 
 ## Transfers the host opens
 
@@ -204,13 +179,6 @@ using var host = new HostBuilder()
 
 // Clients connect through host.GetTestServer().CreateHandler(); clock.Advance(...) runs the hub's timeouts.
 ```
-
-## Dumb Pipe Design
-
-The hub never deserializes batch payloads:
-1. Receives raw bytes from sender
-2. Forwards directly to receiver
-3. Forwards control messages (ACK) bidirectionally
 
 ## Dependencies
 
