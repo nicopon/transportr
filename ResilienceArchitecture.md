@@ -151,94 +151,89 @@ sequenceDiagram
 
 ### 1. Disconnection Detection (Client-Side)
 
-`HttpStreamManager` reports how each stream attempt ended as a `StreamOutcome`, and `DataSession` decides what follows
-(*Client Internals*, below). A stream that fails is `Retryable`, whatever the exception, unless it was cancelled, broke
-the wire protocol (`Fatal`) or met a 404 or 410 (`Gone`): the session then reconnects. The manager restarts nothing
-itself but a stream refused for an expired token, once. The Hub **DOES NOT** actively notify clients of disconnections
-over their events streams (to avoid race conditions).
+The hub **does not** notify clients of disconnections over their events streams, to avoid races. `HttpStreamManager`
+reports how each stream attempt ended as a `StreamOutcome`, and `DataSession` decides what follows (*Client
+Internals*, below). A stream that fails is `Retryable`, whatever the exception, and the session reconnects. The
+exceptions are a cancelled stream, a broken wire protocol (`Fatal`), and a 404 or 410 (`Gone`). The manager itself
+restarts only a stream refused for an expired token, once.
 
-A batch body the receiver cannot decode is not a cut: it arrived whole, so a resend would decode no better. The
-receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails instead of reconnecting; the sender's
-`SendAsync` or `CompleteAsync` throws `TransferFailedException`. The other way round, a batch the sender cannot
-serialize fails the sender's session at once, and the receiver is told with `Abort` (`SerializationFailed`). Either
-`Abort` falls back on the abort request (§6) when it cannot be written within `AbortWriteTimeout`. An end-to-end
+**A batch that does not decode or serialize is not a cut**: the session fails instead of reconnecting. An undecodable
+batch arrived whole, so a resend would decode no better.
+
+- The receiver writes `Abort` (`UndecodableBatch`) to the sender, then fails; the sender's `SendAsync` or
+  `CompleteAsync` throws `TransferFailedException`.
+- A sender whose batch does not serialize fails at once, and tells the receiver with `Abort` (`SerializationFailed`).
+
+Either `Abort` falls back on the abort request (§6) when it cannot be written within `AbortWriteTimeout`. An end-to-end
 encryption refusal ends the transfer too, with an `Abort` and no resumption ("End-to-End Encryption" in
 `TransportRArchitecture.md`).
 
-What a cut is on a write stream depends on its transport (see "Data Plane Transport" in `TransportRArchitecture.md`).
-Over segments no connection stays open between two of them to fail: a cut is a segment that fails, which ends the epoch,
-and the session reconnects with a new one. Over a WebSocket it is the socket failing, or closing with a status that is
-neither the end of the stream nor a refusal. Cuts that follow each other quickly read as a path that does not carry a
-WebSocket, and the session goes on over segments (*Key Timings*). Neither end sets a keepalive timeout, so a half-open
-WebSocket is seen no sooner by the client than a half-open read GET is.
+What a cut is on a write stream depends on its transport ("Data Plane Transport" in `TransportRArchitecture.md`, which
+also says when cuts make the session fall back on segments):
 
-A dead sender is found by its silence instead, on either transport. One with nothing to write sends a `Ping` every
-`PresenceHeartbeatInterval`, and the hub takes a data stream it has heard nothing from for two intervals as cut, the
-rule of the presence heartbeat: an epoch with no segment, or a WebSocket whose read has waited that long for a byte (the
-keepalive frames are not bytes of the stream, and a hub parked on a slow peer has no read pending, so a slow receiver is
-not taken for a silent sender). Only the sender's data stream is judged: a receiver's control stream writes what its
-read loop gives it, which a consumer holding on to a batch parks, so its silence says nothing; a dead receiver shows at
-its data GET, and the sender then fails for want of acknowledgements.
+- over segments, a segment that fails, which ends the epoch; the session reconnects with a new one. No connection stays
+  open between two segments to fail;
+- over a WebSocket, the socket failing, or closing with a status that is neither the end of the stream nor a refusal.
+  Neither end sets a keepalive timeout, so the client sees a half-open WebSocket no sooner than a half-open read GET.
+
+**A dead sender is found by its silence**, on either transport. With nothing to write, it sends a `Ping` every
+`PresenceHeartbeatInterval`, and the hub takes its data stream as cut after two intervals without a byte (the rule of
+§1b; *Key Timings*). Keepalive frames are not bytes of the stream, and a hub parked on a slow peer has no read pending,
+so a slow receiver never passes for a silent sender. A receiver's control stream is not judged: it goes quiet whenever
+the consumer holds a batch. A dead receiver shows at its data GET instead, and the sender then fails for lack of
+acknowledgements.
 
 ### 1b. Registration Lifetime (Hub-Side)
 
-A client registration is **not deleted** when its events stream ends: on an unstable network
-the same client usually opens a new one within seconds under the same `ClientId`, and removing the
-registration would break a transfer that was about to resume. The end of the stream instead stamps
-`DisconnectedAtUtc`, which `GetReceivers` exposes through `ClientInfo`.
+A client registration is **not deleted** when its events stream ends: the end stamps `DisconnectedAtUtc`, which
+`GetReceivers` exposes through `ClientInfo`. On an unstable network the same client usually opens a new stream within
+seconds under the same `ClientId`, and deleting its registration would break a transfer about to resume.
 
--   **Nothing filters on it.** A caller that finds nobody fails outright, whereas a caller that
-    tries a dead client simply retries, so hiding a briefly silent client is the worse error.
-    Callers with more than one candidate should prefer those with no value set.
--   **`DisconnectedGraceSeconds`** (default `300 s`, matching the Bridge Timeout) is how long a
-    dropped registration is kept before eviction. It is the window in which a reconnecting client
-    can claim its registration back.
--   **`ConnectedTtlSeconds`** (default `3600 s`) is a backstop for registrations orphaned by a hub
-    that died before it stamped them. It applies to stores with server-side expiry
-    (Redis); the in-memory store keeps connected registrations for the lifetime of the process.
--   **The presence heartbeat** (`POST /api/client/{id}/presence/{connectionId}`) is what refreshes it.
-    The client sends it every `PresenceHeartbeatInterval` (default `15 s`) for as long as its stream
-    is open, whether or not a transfer is running, so an idle client never expires. Keep the interval
-    well below `ConnectedTtlSeconds`.
--   **It is also the hub's view of a cut that closes nothing.** The client announces the interval when
-    it opens its stream (`heartbeatMs`), and the hub closes a stream it has heard nothing from for two
-    of them (30 s by default); any request the hub admits from the client counts, not this one alone.
-    A write to a stream whose peer vanished without closing a connection does not fail, so the hub
-    would otherwise see nothing until that connection closed. The stream's end then marks the client
-    disconnected, as any other.
+-   **Nothing filters on it**, because hiding a briefly silent client is the worse error: a caller that finds nobody
+    fails outright, one that tries a dead client retries. A caller with several candidates should prefer those with
+    no value set.
+-   **`DisconnectedGraceSeconds`** (300 s) is how long a dropped registration is kept: the window in which a
+    reconnecting client can claim it back.
+-   **`ConnectedTtlSeconds`** (3600 s) is a backstop for registrations orphaned by a hub that died before it stamped
+    them. It applies to stores with server-side expiry (Redis); the in-memory store keeps connected registrations for
+    the lifetime of the process.
+-   **The presence heartbeat** (`POST /api/client/{id}/presence/{connectionId}`) refreshes it. The client sends it
+    every `PresenceHeartbeatInterval` (15 s) while its stream is open, whether or not a transfer runs, so an idle
+    client never expires.
+-   **It is also how the hub sees a cut that closes nothing.** A write to a stream whose peer vanished without closing
+    the connection does not fail, so the hub would otherwise see nothing until that connection closed. The client
+    announces its interval when it opens its stream (`heartbeatMs`), and the hub closes a stream it has heard nothing
+    from for two intervals (*Key Timings*). That end marks the client disconnected, as any other.
 
-> **The per-transfer heartbeats cannot do this job.** The heartbeat of a transfer
-> (`POST …/transfers/{transferId}/heartbeat`) is sent by a `DataSession`, which exists only while a
-> transfer does, and it reports transfer statistics into `TransferState`. Presence is a property of
-> the client, not of a transfer.
+> **The per-transfer heartbeat cannot do this job**: a `DataSession` sends it only while its transfer runs, and it
+> reports transfer statistics into `TransferState`. Presence belongs to the client, not to a transfer.
 
 ### 1c. Losing a Registration While Connected
 
-Three things leave a client holding a stream but unknown to the hub: a hub restart, a registration
-evicted past its grace period, and another stream of the same identity that took the registration
-over, which then names that stream. In all three, discovery returns nothing for that client and
-nobody can open a transfer against it — while its own in-flight transfers keep working, because
-resumption is entirely data-plane.
+A client can hold a stream the hub has no registration for. Discovery then returns nothing for it, and nobody can open
+a transfer to it, while its own transfers in flight keep working: resumption is entirely data-plane. Three causes:
 
-Recovery is the client's, and has two paths:
+-   a hub restart;
+-   a registration evicted past its grace period;
+-   another stream of the same identity that took the registration over, which then names that stream.
 
--   The presence heartbeat is answered **`404`** when the hub holds no registration for the stream.
-    The client answers by opening a new stream, which registers it afresh, and closes the old one
-    once the new one is registered.
+Recovery is the client's, by two paths:
+
+-   The presence heartbeat is answered **`404`** when the hub holds no registration for the stream. The client then
+    opens a new stream, which registers it afresh, and closes the old one once the new one is registered.
 -   A stream that ended (cut, closed by the hub, or silent for 30 s) is opened again after a delay
-    (`ControlChannel.FirstReopenDelay` in Key Timings), and each opening registers the client. The
-    client then restarts the streams of its transfers at once rather than waiting for their next
-    failure.
+    (`ControlChannel.FirstReopenDelay` in *Key Timings*), and each opening registers the client. The client then
+    restarts the streams of its transfers at once, rather than waiting for their next failure.
 
-Without this policy the two implementations fail in opposite directions — an in-memory registration
-lives forever, and a Redis one expires on a fixed timer whether or not the client is still there.
+Without this policy the two stores would fail in opposite ways: an in-memory registration would live for ever, and a
+Redis one would expire on a fixed timer whether or not the client is still there.
 
 ### 2. Stream Handshake (Reachability & Resume)
 
-The streams are reopened only once the hub answers: a session in `Reconnecting` probes it with an ordinary request
-(`POST …/transfers/{transferId}/ping`), carrying the transfer's affinity so that it reaches the instance holding the
-bridge, because that is when its streams are worth reopening. The resume point is then not asked of the
-Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new data stream**:
+A session in `Reconnecting` reopens its streams only once the hub answers its probe: an ordinary request
+(`POST …/transfers/{transferId}/ping`) that carries the transfer's affinity, so it reaches the instance holding the
+bridge. The resume point is not asked of the hub (no "Checkpoint"): the sender asks the receiver **through the new
+data stream**:
 
 1.  **Sender** sends `ChunkType.Ping` immediately upon connecting the stream.
 2.  **Receiver** responds with `ChunkType.Pong`, carrying the `NextExpectedBatchId`.
@@ -246,9 +241,11 @@ Hub (no "Checkpoint"): the Sender asks the Receiver directly **through the new d
 
 In encrypted mode, `Ping` and `Pong` also carry the key exchange ("End-to-End Encryption" in `TransportRArchitecture.md`).
 
-This ensures that resumption is based on the **Receiver's actual state**, which is the ultimate source of truth.
+Resumption thus rests on the **receiver's actual state**, the source of truth.
 
-**A batch is the smallest thing this can name**, so the receiver hands one to its consumer whole or not at all: capacity for every item is taken before the first is published, and the hand-off is not cancellable. A batch stopped half way would raise no `NextExpectedBatchId`, be resent whole, and deliver its published prefix to the consumer twice.
+**A batch is the smallest thing this can name, so the receiver hands one to its consumer whole or not at all.** Capacity
+for every item is taken before the first is published, and the hand-off is not cancellable. A batch stopped half way
+would raise no `NextExpectedBatchId`, be resent whole, and deliver its published prefix to the consumer twice.
 
 ```csharp
 // Sender Logic
