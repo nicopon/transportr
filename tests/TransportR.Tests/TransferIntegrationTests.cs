@@ -67,6 +67,77 @@ public class TransferIntegrationTests
     }
 
     [Fact]
+    public async Task ATransferSealedEndToEnd_WithAPreSharedKey_DeliversEveryItem_EachEndAskingForItsPeersKey()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        var key = Enumerable.Range(0, 32).Select(i => (byte)(i * 7)).ToArray();
+        var askedBySender = new List<Guid>();
+        var askedByReceiver = new List<Guid>();
+
+        await using var sender = CreateClient(handler, "http://localhost", options =>
+            options.EndToEndEncryption = new EndToEndEncryption(peer => { lock (askedBySender) askedBySender.Add(peer); return key; }));
+        await using var receiver = CreateClient(handler, "http://localhost", options =>
+            options.EndToEndEncryption = new EndToEndEncryption(peer => { lock (askedByReceiver) askedByReceiver.Add(peer); return key; }));
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var expected = Enumerable.Range(0, 95).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync()) items.Add(item);
+            return items;
+        });
+
+        await send.SendAsync(expected);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal([receiver.ClientId], askedBySender);
+        Assert.Equal([sender.ClientId], askedByReceiver);
+    }
+
+    [Fact]
+    public async Task AHostInitiatedTransfer_SealedEndToEnd_DeliversEveryItem()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost", options => options.EndToEndEncryption = new EndToEndEncryption());
+        await using var receiver = CreateClient(handler, "http://localhost", options => options.EndToEndEncryption = new EndToEndEncryption());
+
+        var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
+        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, handshakeTimeout: TimeSpan.FromSeconds(20));
+        await using var send = await sendHandle.Task;
+        await using var receive = await receiveHandle.Task;
+
+        var expected = Enumerable.Range(0, 250).Select(i => $"item-{i}").ToList();
+        var consumer = Task.Run(async () =>
+        {
+            var items = new List<string>();
+            await foreach (var item in receive.ReceiveAsync()) items.Add(item);
+            return items;
+        });
+
+        await send.SendAsync(expected);
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(expected, await consumer.WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    [Fact]
     public async Task HostInitiatedTransfer_DeliversEveryItem()
     {
         using var host = TestHubServerFactory.CreateHost();
