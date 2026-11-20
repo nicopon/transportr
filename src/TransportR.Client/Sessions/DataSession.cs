@@ -984,9 +984,11 @@ internal class DataSession : IDataSession
         : SessionEncryption.MaxDataPayloadBytes(_config.Options.MaxBatchBytes);
 
     /// <summary>
-    /// Refuses, at its header, a chunk of a type the stream this end reads does not carry, in clear as
-    /// encrypted: what only the other end handles would otherwise take this one into a step of the other
-    /// role, a sender into the receiver's closing phase.
+    /// Judges a chunk at its header, before anything of its payload is read or rented. A type the stream
+    /// this end reads does not carry is refused in clear as encrypted: what only the other end handles
+    /// would otherwise take this one into a step of the other role, a sender into the receiver's closing
+    /// phase. Encrypted, a control chunk announcing another length than the protocol's is refused too,
+    /// rather than waited for.
     /// </summary>
     private void AdmitHeader(ChunkHeader header)
     {
@@ -995,6 +997,8 @@ internal class DataSession : IDataSession
             throw new WireProtocolViolationException(
                 $"A chunk of type {header.Type} came on the stream a {(IsSender ? "sender" : "receiver")} reads, which does not carry one.");
         }
+
+        _encryption?.CheckControlChunk(header);
     }
 
     private async Task ReadLoop(Stream inputStream, CancellationToken token)
@@ -1022,22 +1026,23 @@ internal class DataSession : IDataSession
                     break;
                 }
 
-                var chunkRead = IsSender
-                    ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", AdmitHeader, token)
-                    : ChunkIO.ReadOwnedChunkAsync(inputStream, MaxDataPayloadBytes, "WithMaxBatchBytes allows", AdmitHeader, token);
-                if (await chunkRead is not { } chunk)
-                {
-                    // If stream ends but we haven't received Complete, it's an error (premature disconnect)
-                    // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).
-                    if (_fsm.CurrentState != SessionState.Completed && !IsInCompletingPhase && !token.IsCancellationRequested)
-                    {
-                        throw new IOException("Stream ended unexpectedly (Premature EOF)");
-                    }
-                    break;
-                }
-
                 try
                 {
+                    // Inside the refusals below: a header can be refused for the encryption too.
+                    var chunkRead = IsSender
+                        ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", AdmitHeader, token)
+                        : ChunkIO.ReadOwnedChunkAsync(inputStream, MaxDataPayloadBytes, "WithMaxBatchBytes allows", AdmitHeader, token);
+                    if (await chunkRead is not { } chunk)
+                    {
+                        // If stream ends but we haven't received Complete, it's an error (premature disconnect)
+                        // If we ARE in completing phase, receiving EOF is the expected confirmation (Ack of Ack).
+                        if (_fsm.CurrentState != SessionState.Completed && !IsInCompletingPhase && !token.IsCancellationRequested)
+                        {
+                            throw new IOException("Stream ended unexpectedly (Premature EOF)");
+                        }
+                        break;
+                    }
+
                     // The payload is the processor's from this call on: nothing in this loop returns it.
                     await _batchProcessor.ProcessChunkAsync(chunk.Header, chunk.Payload, token);
                 }

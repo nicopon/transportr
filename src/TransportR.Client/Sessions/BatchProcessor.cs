@@ -206,8 +206,6 @@ internal class BatchProcessor : IAsyncDisposable
 
         using (payload)
         {
-            _encryption?.CheckControlChunk(header);
-
             switch (header.Type)
             {
                 case ChunkType.BatchAck:

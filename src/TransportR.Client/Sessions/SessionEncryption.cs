@@ -136,9 +136,9 @@ internal sealed class SessionEncryption : IDisposable
     };
 
     /// <summary>
-    /// Refuses a control chunk of another length than end-to-end encryption admits. A Ping or Pong
-    /// without a payload is a peer in clear. The session has refused a type its stream does not carry
-    /// before this, in both modes; a batch is bounded apart.
+    /// Refuses, at its header, a control chunk announcing another length than end-to-end encryption
+    /// admits. A Ping or Pong without a payload is a peer in clear. The session has refused a type its
+    /// stream does not carry before this, in both modes; a batch is bounded apart.
     /// </summary>
     public void CheckControlChunk(in ChunkHeader header)
     {

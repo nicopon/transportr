@@ -251,6 +251,35 @@ public class EndToEndAdversaryTests
         Assert.Equal(TransferFailureCategory.ProtocolViolation, (toSender ? outcome.Sender : outcome.Receiver)?.Category);
     }
 
+    /// <summary>
+    /// The hub relays the chunk's header alone, announcing another length than the protocol's, and none
+    /// of the payload: a reader that waited for it would wait for the next chunks, or for ever.
+    /// </summary>
+    [Theory]
+    [InlineData((byte)ChunkType.Ping, 64 * 1024 * 1024)]
+    [InlineData((byte)ChunkType.Complete, 64 * 1024 * 1024)]
+    [InlineData((byte)ChunkType.Pong, EndToEndCipher.PongPayloadSize - 1)]
+    [InlineData((byte)ChunkType.CompleteAck, EndToEndCipher.PongPayloadSize)]
+    public async Task AControlChunkAnnouncingAnotherLength_IsRefusedAtItsHeader_BeforeItsPayloadIsRead(byte wireType, int announced)
+    {
+        var type = (ChunkType)wireType;
+        var readBySender = type is ChunkType.Pong or ChunkType.CompleteAck;
+        await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed(), configureReceiver: options =>
+            options.MaxBatchBytes = 64 * 1024 * 1024);
+        var first = 0;
+        pair.Hub.Rewrite = chunk =>
+        {
+            if (chunk.Header.Type != type || Interlocked.Exchange(ref first, 1) != 0) return [chunk.Bytes];
+            var header = new byte[ChunkHeader.Size];
+            (chunk.Header with { PayloadLength = announced }).WriteTo(header);
+            return [header];
+        };
+        var outcome = await pair.RunAsync(items: 1, waitForBoth: false, reader: readBySender ? End.Sender : End.Receiver)
+            .WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(TransferFailureCategory.ProtocolViolation, (readBySender ? outcome.Sender : outcome.Receiver)?.Category);
+    }
+
     [Fact]
     public async Task AKeepalivePongWhoseConfirmationTheHubAlters_IsRefused_ByTheSender()
     {
