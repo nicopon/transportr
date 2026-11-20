@@ -38,6 +38,9 @@ internal sealed class RelayHub : HttpMessageHandler
     public IReadOnlyList<WireChunk> SenderWrote => _data.Written;
     public IReadOnlyList<WireChunk> ReceiverWrote => _control.Written;
 
+    /// <summary>Relays a chunk no end wrote, as a hub that forges one would: to the sender's control GET, or the receiver's data GET.</summary>
+    public void Inject(bool toSender, byte[] chunk) => (toSender ? _control : _data).Deliver(chunk);
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var path = request.RequestUri!.AbsolutePath;
@@ -109,6 +112,8 @@ internal sealed class RelayHub : HttpMessageHandler
         }
 
         public bool Ended { get; private set; }
+
+        public void Deliver(byte[] chunk) => _delivered.Writer.TryWrite(chunk);
 
         public void End()
         {

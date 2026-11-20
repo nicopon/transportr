@@ -37,6 +37,10 @@ internal sealed class SessionEncryption : IDisposable
     private byte[]? _pong;
     private volatile bool _hasRefused;
 
+    // The sender's: the BatchId its Complete signs, the only one a CompleteAck may acknowledge. Null
+    // until it signs one.
+    private int? _signedBatchId;
+
     private SessionEncryption(bool isSender, Guid transferId, EndToEndCipher? cipher)
     {
         _isSender = isSender;
@@ -139,7 +143,7 @@ internal sealed class SessionEncryption : IDisposable
             (true, ChunkType.BatchAck) or (_, ChunkType.Abort) => 0,
             (true, ChunkType.Pong) => EndToEndCipher.PongPayloadSize,
             (false, ChunkType.Ping) => EndToEndCipher.PingPayloadSize,
-            (true, ChunkType.CompleteAck) or (false, ChunkType.Complete) => header.PayloadLength,
+            (true, ChunkType.CompleteAck) or (false, ChunkType.Complete) => EndToEndCipher.ReceiptSize,
             _ when !Enum.IsDefined(header.Type) => header.PayloadLength,
             _ => null,
         };
@@ -231,6 +235,58 @@ internal sealed class SessionEncryption : IDisposable
         var plaintextLength = Math.Max(0, span.Length - EndToEndCipher.TagSize);
         if (!cipher.TryOpen(header, span, span[..plaintextLength])) throw Unverified();
         return sealedPayload[..plaintextLength];
+    }
+
+    /// <summary>
+    /// The sender's receipt for <paramref name="lastBatchId"/>, which Complete carries: called once every
+    /// batch is registered, so that no Complete for fewer batches exists. <c>false</c> when the keys
+    /// were refused meanwhile: the session is failing, and there is nothing to sign.
+    /// </summary>
+    public bool TrySignComplete(int lastBatchId, out byte[] receipt)
+    {
+        receipt = new byte[EndToEndCipher.ReceiptSize];
+        if (_cipher is not { HasKeys: true } cipher) return false;
+
+        try
+        {
+            cipher.WriteReceipt(lastBatchId, receipt);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+
+        _signedBatchId = lastBatchId;
+        return true;
+    }
+
+    /// <summary>
+    /// Checks the sender's receipt in a Complete for <paramref name="lastBatchId"/>, before anything
+    /// else is judged of it.
+    /// </summary>
+    public void VerifyComplete(int lastBatchId, ReadOnlySpan<byte> receipt)
+    {
+        if (!Keyed().VerifyPeerReceipt(lastBatchId, receipt)) throw Unverified();
+    }
+
+    /// <summary>
+    /// The receiver's receipt for the Complete it accepted, which CompleteAck carries, and carries again
+    /// unchanged on a reopened stream.
+    /// </summary>
+    public byte[] SignCompleteAck(int lastBatchId)
+    {
+        var receipt = new byte[EndToEndCipher.ReceiptSize];
+        Keyed().WriteReceipt(lastBatchId, receipt);
+        return receipt;
+    }
+
+    /// <summary>
+    /// Checks the receiver's receipt in a CompleteAck for the BatchId the sender's Complete signed. One
+    /// that comes before any Complete was signed acknowledges nothing, and is refused.
+    /// </summary>
+    public void VerifyCompleteAck(ReadOnlySpan<byte> receipt)
+    {
+        if (_signedBatchId is not { } signed || !Keyed().VerifyPeerReceipt(signed, receipt)) throw Unverified();
     }
 
     /// <summary>What an encrypted end raises on a batch in clear, or a Ping or Pong without a share.</summary>

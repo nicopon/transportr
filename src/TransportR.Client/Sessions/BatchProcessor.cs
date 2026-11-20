@@ -49,6 +49,10 @@ internal class BatchProcessor : IAsyncDisposable
     // Synchronization
     private TaskCompletionSource? _completeAckReceived;
 
+    // The receiver's acknowledgement of the Complete it accepted, written again as it is on a reopened
+    // stream. Set on the read loop before the closing phase begins, read on a later write loop.
+    private ControlChunkMessage? _completeAck;
+
     // Stats
     private long _itemsSent;
     private long _itemsReceived;
@@ -212,10 +216,10 @@ internal class BatchProcessor : IAsyncDisposable
                     HandlePong(header.BatchId, payload);
                     break;
                 case ChunkType.Complete:
-                    await HandleCompleteAsync(header);
+                    await HandleCompleteAsync(header, payload);
                     break;
                 case ChunkType.CompleteAck:
-                    HandleCompleteAck();
+                    HandleCompleteAck(payload);
                     break;
                 case ChunkType.Abort:
                     HandleAbort((AbortReason)header.BatchId);
@@ -491,18 +495,36 @@ internal class BatchProcessor : IAsyncDisposable
 
     private static ReadOnlySpan<byte> PayloadOf(IMemoryOwner<byte>? payload) => payload is null ? default : payload.Memory.Span;
 
+    /// <summary>
+    /// Completes once the sender holds the keys its Complete is signed with; at once in clear. Cancelled
+    /// when the session fails or is released.
+    /// </summary>
+    public Task WaitForKeysAsync(CancellationToken ct) => _encryption?.WaitForKeysAsync(ct) ?? Task.CompletedTask;
+
     public async Task SendCompleteSignalAsync()
     {
         // One for the whole closing sequence: the receiver acknowledges once, so a retry that replaced
         // it would lose an acknowledgement landing between two attempts.
         _completeAckReceived ??= new TaskCompletionSource();
+
         // Send the Last Batch ID so receiver can verify if it missed anything
-        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Complete, _maxBatchIdSent));
+        var lastBatchId = Volatile.Read(ref _maxBatchIdSent);
+        byte[]? receipt = null;
+
+        // A refusal under way has queued an Abort, and the session is failing: nothing to sign.
+        if (_encryption is { } encryption && !encryption.TrySignComplete(lastBatchId, out receipt)) return;
+
+        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Complete, lastBatchId, receipt));
     }
 
-    private async Task HandleCompleteAsync(ChunkHeader header)
+    private async Task HandleCompleteAsync(ChunkHeader header, IMemoryOwner<byte>? payload)
     {
         int lastBatchIdFromSender = header.BatchId;
+
+        // Before the Complete is judged premature: a receipt that does not hold fails the transfer
+        // whatever the batches in, rather than being asked for again.
+        _encryption?.VerifyComplete(lastBatchIdFromSender, PayloadOf(payload));
+
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
 
         // Validation: every batch up to lastBatchId must already be in.
@@ -520,14 +542,19 @@ internal class BatchProcessor : IAsyncDisposable
         _context.Logger.LogInformation("Received Valid Complete (LastBatch={Last}). NextExpected={Next}. Sending CompleteAck (Transfer={TransferId})",
             lastBatchIdFromSender, nextExpected, _transferId);
 
+        var acknowledgement = new ControlChunkMessage(ChunkType.CompleteAck, 0, _encryption?.SignCompleteAck(lastBatchIdFromSender));
+        Volatile.Write(ref _completeAck, acknowledgement);
+
         // The session enters its closing phase before the acknowledgement can be written: it reads the
         // end of the control stream that carries it as the hub having read it only in that phase.
         if (OnCompleteReceived != null) await OnCompleteReceived.Invoke();
-        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
+        await _sendChannel.Writer.WriteAsync(acknowledgement);
     }
 
-    private void HandleCompleteAck()
+    private void HandleCompleteAck(IMemoryOwner<byte>? payload)
     {
+        // Before anything takes it for the end: a forged one would report a transfer as delivered.
+        _encryption?.VerifyCompleteAck(PayloadOf(payload));
         _completeAckReceived?.TrySetResult();
         OnCompleteAckReceived?.Invoke();
     }
@@ -567,7 +594,7 @@ internal class BatchProcessor : IAsyncDisposable
     public async Task ResendCompleteAckAsync()
     {
         _context.Logger.LogInformation("Resending CompleteAck for Transfer={TransferId}", _transferId);
-        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.CompleteAck, 0));
+        await _sendChannel.Writer.WriteAsync(Volatile.Read(ref _completeAck) ?? new ControlChunkMessage(ChunkType.CompleteAck, 0));
     }
 
     /// <summary>

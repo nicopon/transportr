@@ -169,16 +169,20 @@ public class EndToEndSessionTests
     [InlineData((byte)ChunkType.Ping, 66)]
     [InlineData((byte)ChunkType.Pong, 96)]
     [InlineData((byte)ChunkType.Pong, 98)]
-    public async Task AHandshakeChunkOfAnotherLength_IsAProtocolViolation_AtTheEndThatReadsIt(byte wireType, int length)
+    [InlineData((byte)ChunkType.Complete, 0)]
+    [InlineData((byte)ChunkType.Complete, 31)]
+    [InlineData((byte)ChunkType.CompleteAck, 0)]
+    [InlineData((byte)ChunkType.CompleteAck, 33)]
+    public async Task AControlChunkOfAnotherLength_IsAProtocolViolation_AtTheEndThatReadsIt(byte wireType, int length)
     {
         var type = (ChunkType)wireType;
+        var readBySender = type is ChunkType.Pong or ChunkType.CompleteAck;
         await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
         pair.Hub.Rewrite = chunk => chunk.Header.Type == type ? [Resized(chunk.Bytes, length)] : [chunk.Bytes];
-        var outcome = await pair.RunAsync(items: 1, waitForBoth: false, reader: type == ChunkType.Ping ? End.Receiver : End.Sender);
+        var outcome = await pair.RunAsync(items: 1, waitForBoth: false, reader: readBySender ? End.Sender : End.Receiver);
 
-        var reader = type == ChunkType.Ping ? outcome.Receiver : outcome.Sender;
+        var reader = readBySender ? outcome.Sender : outcome.Receiver;
         Assert.Equal(TransferFailureCategory.ProtocolViolation, reader?.Category);
-        Assert.Equal(0, outcome.Received);
     }
 
     // ---- Sealed batches ----
@@ -318,6 +322,157 @@ public class EndToEndSessionTests
             pair.Hub.SenderWrote.Where(chunk => chunk.Epoch == 1).Select(chunk => chunk.Header.Type));
     }
 
+    // ---- Receipts and the end of a transfer ----
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ACompleteThatDoesNotSignItsBatchId_IsRefused_EvenWhileABatchIsMissing(bool lowered)
+    {
+        // The hub keeps the last batch from the receiver, and either lowers the Complete's BatchId to the
+        // batches it let through, which in clear ends the transfer short of one, or alters its receipt.
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        pair.Hub.Rewrite = chunk => chunk.Header.Type switch
+        {
+            ChunkType.SealedBatch when chunk.Header.BatchId == 1 => [],
+            ChunkType.Complete when lowered => [WithBatchId(chunk.Bytes, 0)],
+            ChunkType.Complete => [Flipped(chunk.Bytes, ChunkHeader.Size)],
+            _ => [chunk.Bytes],
+        };
+        var outcome = await pair.RunAsync(items: 2);
+
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, outcome.Receiver?.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, outcome.Sender?.Category);
+        Assert.Equal(AbortReason.VerificationFailed.Describe(), outcome.Sender?.Message);
+        Assert.DoesNotContain(pair.Hub.ReceiverWrote, chunk => chunk.Header.Type == ChunkType.CompleteAck);
+    }
+
+    public static TheoryData<string, int> ForgedAcknowledgements => new()
+    {
+        { "the sender's receipt", 32 },
+        { "zeros", 32 },
+        { "zeros", 0 },
+        { "zeros, before any Complete", 32 },
+    };
+
+    [Theory]
+    [MemberData(nameof(ForgedAcknowledgements))]
+    public async Task ACompleteAckTheHubForges_IsRefused_NeverASuccess(string forged, int length)
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        var transferId = Guid.Parse(pair.TransferId);
+        byte[] Forge(ReadOnlySpan<byte> payload)
+        {
+            using var chunk = new MemoryStream();
+            ChunkIO.WriteControlAsync(chunk, transferId, 0, ChunkType.CompleteAck, payload.ToArray()).GetAwaiter().GetResult();
+            return chunk.ToArray();
+        }
+
+        var early = forged.EndsWith("before any Complete");
+        var injected = 0;
+        pair.Hub.Rewrite = chunk =>
+        {
+            // Ahead of the first Pong, the sender has no keys yet, so no Complete either.
+            if (early && chunk.Header.Type == ChunkType.Pong && Interlocked.Exchange(ref injected, 1) == 0)
+            {
+                return [Forge(new byte[length]), chunk.Bytes];
+            }
+
+            if (!early && chunk.Header.Type == ChunkType.Complete)
+            {
+                pair.Hub.Inject(toSender: true, Forge(forged == "zeros" ? new byte[length] : chunk.Payload));
+                return [];
+            }
+
+            return [chunk.Bytes];
+        };
+        var outcome = await pair.RunAsync(items: 1, waitForBoth: false, reader: End.Sender);
+
+        Assert.Equal(
+            length == 0 ? TransferFailureCategory.ProtocolViolation : TransferFailureCategory.EndToEndEncryptionFailed,
+            outcome.Sender?.Category);
+    }
+
+    [Fact]
+    public async Task ABatchAckTheHubForges_ForABatchItKeeps_LeadsOnlyToAFailure()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted(), configureSender: options =>
+            options.CompleteStallTimeout = TimeSpan.FromSeconds(1.5));
+        var transferId = Guid.Parse(pair.TransferId);
+        pair.Hub.Rewrite = chunk =>
+        {
+            if (chunk.Header.Type != ChunkType.SealedBatch || chunk.Header.BatchId != 1) return [chunk.Bytes];
+
+            using var ack = new MemoryStream();
+            ChunkIO.WriteControlAsync(ack, transferId, 1, ChunkType.BatchAck).GetAwaiter().GetResult();
+            pair.Hub.Inject(toSender: true, ack.ToArray());
+            return [];
+        };
+        var outcome = await pair.RunAsync(items: 2);
+
+        Assert.Equal(TransferFailureCategory.AcknowledgementTimedOut, outcome.Sender?.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, outcome.Receiver?.Category);
+        Assert.Equal(1, outcome.Received);
+    }
+
+    [Fact]
+    public async Task APongWhoseResumePointTheHubForges_LeadsOnlyToAFailure()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted(), configureSender: options =>
+            options.CompleteStallTimeout = TimeSpan.FromSeconds(1.5));
+        var dropped = DropFirstStreamBatchesFrom(pair.Hub, batchId: 1, count: 2);
+        var relay = pair.Hub.Rewrite!;
+        var pongs = 0;
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.Pong && Interlocked.Increment(ref pongs) > 1
+            ? [WithBatchId(chunk.Bytes, 3)]
+            : relay(chunk);
+
+        await pair.StartAsync();
+        var receiving = pair.ReceiveAsync();
+        for (var i = 0; i < 3; i++) await pair.Sender.SendAsync($"item-{i}", CancellationToken.None);
+        await dropped.WaitAsync(Bound);
+        pair.Sender.TriggerReconnect();
+
+        var stalled = await Assert.ThrowsAsync<TransferFailedException>(() => pair.Sender.CompleteAsync().WaitAsync(Bound));
+        var abandoned = await Assert.ThrowsAsync<TransferFailedException>(() => receiving.WaitAsync(Bound));
+
+        Assert.Equal(TransferFailureCategory.AcknowledgementTimedOut, stalled.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, abandoned.Category);
+        Assert.Equal(1, pair.Received);
+    }
+
+    [Fact]
+    public async Task AnEmptyEncryptedTransfer_Succeeds_WithAReceiptInEachDirection()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(KeyA), receiver: Encrypted(KeyA));
+        var outcome = await pair.RunAsync(items: 0);
+
+        Assert.Null(outcome.Sender);
+        Assert.Null(outcome.Receiver);
+        var complete = pair.Hub.SenderWrote.Single(chunk => chunk.Header.Type == ChunkType.Complete);
+        Assert.Equal((-1, EndToEndCipher.ReceiptSize), (complete.Header.BatchId, complete.Header.PayloadLength));
+        var acknowledgement = pair.Hub.ReceiverWrote.Single(chunk => chunk.Header.Type == ChunkType.CompleteAck);
+        Assert.Equal((0, EndToEndCipher.ReceiptSize), (acknowledgement.Header.BatchId, acknowledgement.Header.PayloadLength));
+    }
+
+    [Fact]
+    public async Task ACompleteAckWrittenAgainOnAReopenedStream_IsTheSameBytes()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        var cut = 0;
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.CompleteAck && Interlocked.Exchange(ref cut, 1) == 0
+            ? throw new HttpRequestException("The segment carrying the acknowledgement was cut.")
+            : [chunk.Bytes];
+        var outcome = await pair.RunAsync(items: 2);
+
+        Assert.Null(outcome.Sender);
+        Assert.Null(outcome.Receiver);
+        var acknowledgements = pair.Hub.ReceiverWrote.Where(chunk => chunk.Header.Type == ChunkType.CompleteAck).ToList();
+        Assert.Equal([0, 1], acknowledgements.Select(chunk => chunk.Epoch));
+        Assert.Equal(EndToEndCipher.ReceiptSize, acknowledgements[0].Header.PayloadLength);
+        Assert.Equal(acknowledgements[0].Bytes, acknowledgements[1].Bytes);
+    }
+
     // ---- Harness ----
 
     private static EndToEndEncryption Encrypted(byte[]? preSharedKey = null) =>
@@ -351,6 +506,13 @@ public class EndToEndSessionTests
             Assert.True(DateTime.UtcNow < deadline, "The condition was not met in time.");
             await Task.Delay(20);
         }
+    }
+
+    private static byte[] WithBatchId(byte[] chunk, int batchId)
+    {
+        var copy = (byte[])chunk.Clone();
+        BitConverter.TryWriteBytes(copy.AsSpan(6, sizeof(int)), batchId);
+        return copy;
     }
 
     private static byte[] Retyped(byte[] chunk, ChunkType type)

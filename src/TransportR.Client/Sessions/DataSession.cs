@@ -374,6 +374,10 @@ internal class DataSession : IDataSession
         // call as it parks SendAsync, and under the same bound.
         await WhileAcknowledgingAsync(_batchProcessor.CompleteSenderAsync(cancellationToken), cancellationToken);
 
+        // Complete is signed with the keys a Pong gives, which neither an empty transfer nor a handshake
+        // that timed out has waited for. Under the same bound: a confirmed Pong is the first acknowledgement.
+        await WhileAcknowledgingAsync(_batchProcessor.WaitForKeysAsync(cancellationToken), cancellationToken);
+
         // Complete goes out with batches still in flight rather than after them: the receiver refuses
         // it while one is missing, and the loop below sends it again until the tail is in.
         if (_batchProcessor.PendingBatches > 0)
