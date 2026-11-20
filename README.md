@@ -50,6 +50,7 @@ by every sender: N × M paths.          only the hub is reachable: N + M paths.
 |--|--|--|--|--|--|
 | **Must be reachable** | The server end | The relay; both ends connect out to it | The file server | The brokers | The hub |
 | **Data at rest in between** | None | None | Files, until picked up and deleted | Retained per topic | None |
+| **Who can read the payload in between** | Whoever terminates TLS on the path | The relay, unless the application encrypts | The file server, unless the files are encrypted | The brokers, unless the application encrypts | The hub and its front end, unless end-to-end encryption is on |
 | **Receiver starts consuming** | As data is sent | As data is sent | Once the file is complete | As data is produced | As data is sent |
 | **Sender learns delivery** | If the application builds it | If the application builds it | No — only that the upload ended | No — only that the brokers have it | Yes — every batch is acknowledged by the receiver |
 | **After a network cut** | Up to the application | Up to the application | Per file, where client and server support it | From the consumer's committed offset | From the receiver's last batch |
