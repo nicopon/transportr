@@ -123,12 +123,12 @@ fi
 
 # Redis.
 #
-# This script does not provision redis, it reports where the benchmark will
-# find one. Only linux-amd64 has a static build to fetch; on macOS there is no
-# arm64 binary to download, and the scenario falls back to a container at run
-# time (scripts/lib/redis.sh). Reporting rather than warning-and-continuing is
-# the point: ha-redis is the only scenario that needs this, so an absence is
-# not a reason to fail the whole initialization — but it must be legible.
+# Only linux-amd64 has a static build to fetch, and it is fetched here. Elsewhere
+# nothing installs Redis (macOS has no arm64 binary) and the scenario falls back to
+# a native redis-server or a container at run time (scripts/lib/redis.sh). What
+# follows reports which route ha-redis will take rather than failing: it is the
+# only scenario that needs Redis, so an absence must be legible, not fatal to the
+# whole initialization.
 if [ "$PLATFORM" == "linux-amd64" ] && [ ! -f "tools/redis-server" ]; then
     download_tool \
         "https://github.com/phlummox/redis-static-binaries/releases/download/v${REDIS_VERSION}/redis-server-v${REDIS_VERSION}-x86_64" \

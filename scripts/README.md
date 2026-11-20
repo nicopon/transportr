@@ -44,14 +44,14 @@ ITEM_COUNT=500000 ./scripts/init.sh
 
 Output: `data/orders.bin`
 
-It exits non-zero as soon as something it attempted fails, which is what makes
-`test-all.sh` able to judge it. A failed download leaves no half-written binary behind.
+It exits non-zero as soon as something it attempted fails, and a failed download leaves no half-written binary behind.
 
-It does **not** provision Redis. Only `linux-amd64` has a static build to fetch; elsewhere
-it reports which route `ha-redis` will take, and that scenario resolves Redis at run time —
-a native `redis-server` when the machine has one, a `redis:7-alpine` container otherwise.
-Override the image with `REDIS_IMAGE`. With neither, `ha-redis` fails at startup rather than
-being skipped.
+Redis, by platform:
+
+- **`linux-amd64`**: it downloads a static `redis-server` into `tools/`.
+- **Elsewhere**: nothing installs Redis. It prints which route `ha-redis` will use at run time: a native `redis-server`
+  (`tools/`, `PATH` or `/opt/homebrew/bin`), else a container of `REDIS_IMAGE` (default `redis:7-alpine`).
+- **With neither a `redis-server` nor a Docker daemon**: `ha-redis` fails at start-up; it is not skipped.
 
 ### `run-benchmark.sh`
 
@@ -74,7 +74,7 @@ Unified benchmark runner with scenario support.
 | `chaos-cut-receiver` | The same cut on the receiver's link |
 | `ha-no-shared-state` | HA mode (2 hubs behind the TestProxy, sticky sessions); the hubs share state through the TestProxy's own store rather than Redis |
 | `ha-redis` | HA mode (2 hubs behind the TestProxy, sticky sessions) with the Redis state store |
-| `ha-transfer-affinity` | One sender opens two staggered transfers to two receivers placed on different hubs, then both links are cut while the first transfer is still flowing; each transfer's streams must reopen on the hub that holds its bridge, which a client that kept one affinity for all its transfers fails |
+| `ha-transfer-affinity` | One sender opens two staggered transfers to two receivers on different hubs, then both links are cut while the first transfer is still flowing. Each transfer's streams must reopen on the hub that holds its bridge, which a client with one affinity for all its transfers fails |
 | `segments-default` | The `default` transfer with both clients told to use segments only (`WRITE_TRANSPORT=SegmentsOnly`); every write stream must have opened over segments |
 | `segments-chaos-cut-sender` | `chaos-cut-sender` with segments only |
 | `ws-upgrade-refused` | HA mode with the TestProxy stripping the WebSocket upgrade (`PROXY_UPGRADE=strip`): each client must say why it has no WebSocket and carry the transfer over segments |
@@ -111,19 +111,25 @@ the receiver's own logs:
 | `EXPECT_WRITE_FALLBACK` | `true`: each side gave up on a WebSocket and said why |
 | `EXPECT_WEBSOCKET_REOPENED` | `true`: a transfer's data stream was opened over a WebSocket at least twice |
 | `EXPECT_RESUME` | `true`: each side behind the proxy (`CHAOS_CLIENTS`) went from Streaming to Reconnecting and back |
-| `EXPECT_TRANSFER_FAILURE` | `true`: the run is meant to fail. It is green only when the sender reports the failed transfer with the client's generic message, the hub says it received a write stream with no upgrade, and no CSV holds every line. The receivers are watched until `TRANSFER_TIMEOUT_SECONDS` and what became of them is printed, not judged |
+| `EXPECT_TRANSFER_FAILURE` | `true`: the run must fail. Green when the sender reports the failure with the client's generic message (`EXPECT_FAILURE_MESSAGE`), the hub logged `EXPECT_HUB_LOG`, and no CSV is complete. The receivers are printed, not judged, after `TRANSFER_TIMEOUT_SECONDS` |
 | `EXPECT_FAILURE_MESSAGE` | With `EXPECT_TRANSFER_FAILURE`: what the sender's failure message must contain. Default: `requires a WebSocket` |
-| `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket`; set empty for a run where the hub is not meant to have seen the request |
+| `EXPECT_HUB_LOG` | With `EXPECT_TRANSFER_FAILURE`: what the hub must have logged. Default: `not opened over a WebSocket` (a write stream with no upgrade); empty for a run where the hub is not meant to have seen the request |
 | `SOURCE_MAX_ITEMS` | The sender stops after that many items, which sends a prefix of the source file |
-| `BYTE_STREAM_BATCH_BYTES` | Both samples run in the byte-stream mode, with batches cut at that many bytes. The run is judged on the size and the SHA-256 of the receiver's `.bin` file, not on lines; `BATCH_SIZE`, `RECEIVE_MAX_ITEMS`, `SOURCE_MAX_ITEMS` and `CONSUME_ITEMS_PER_SECOND` count items and are refused alongside it |
+| `BYTE_STREAM_BATCH_BYTES` | Both samples run in the byte-stream mode, batches cut at that many bytes. The run is judged on the size and the SHA-256 of the receiver's `.bin` file, not on lines. `BATCH_SIZE`, `RECEIVE_MAX_ITEMS`, `SOURCE_MAX_ITEMS` and `CONSUME_ITEMS_PER_SECOND` count items and are refused with it |
 | `E2E_ENCRYPTION` | `true`: both samples seal every batch end to end (`Sender__EndToEndEncryption`, `Receiver__EndToEndEncryption`) |
-| `E2E_PRE_SHARED_KEY` | `true`, with `E2E_ENCRYPTION`: the script generates a 32-byte key for each run (`openssl rand -base64 32`), gives it to both samples, never writes or prints it, and fails the run if it is in any file of the output directory, the hub's logs included |
+| `E2E_PRE_SHARED_KEY` | `true`, with `E2E_ENCRYPTION`: a 32-byte key per run (`openssl rand -base64 32`) goes to both samples and is never written or printed. The run fails if it is in any file of the output directory, the hub's logs included |
 | `ASSERT_PROTECTION` | `None`, `Encrypted` or `EncryptedWithPreSharedKey`: every transfer of both sides journals that `TransferInfo.Protection` |
-| `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket: `pass` (the default), `strip` (remove `Upgrade` and `Connection`, so the hub sees a plain GET), `hold` (accept the upgrade and relay nothing) or `hold-late` (answer the client's first message, then read nothing) |
+| `PROXY_UPGRADE` | What the TestProxy of an HA run does with a request that asks for a WebSocket. Default `pass`; the other values are below |
 
-The chaos scenarios assert no transport: a client that has had three connections in a row cut within
-30 seconds of opening falls back to segments by design, so what they check is the line count.
-`nginx-default` asserts none either.
+`PROXY_UPGRADE` values:
+
+- `pass`: relay the request.
+- `strip`: remove `Upgrade` and `Connection`, so the hub sees a plain GET.
+- `hold`: accept the upgrade and relay nothing.
+- `hold-late`: answer the client's first message, then read nothing.
+
+The chaos scenarios and `nginx-default` assert no transport. A client with three connections in a row cut within
+30 seconds of opening falls back to segments by design, so the chaos scenarios check the line count.
 
 ### `test-all.sh`, `verify-loop.sh`
 
@@ -139,11 +145,12 @@ prints the sender's throughput for each. The runs are sequential, not interleave
 ### `client-bench.sh`
 
 Compares builds of the client by the CPU time of the client process per MiB of batch body carried
-(`tests/TransportR.ClientBench`, items or byte-stream mode, source and sink in memory). It builds the hub once, runs it
-apart, and interleaves the arms (each a Release build of the harness in its own directory) round after round, with the
-first arm run again as an A/A witness. It prints the median, mean, extremes and interquartile range of each arm, then
-the A/A gap, which is the size of a difference worth reading. It does not run a scenario, and its figures are only
-comparable within one sitting. Exits 1 when a run fails, an integrity failure of the received data included.
+(`tests/TransportR.ClientBench`, items or byte-stream mode, source and sink in memory). It does not run a scenario.
+
+It builds the hub once and runs it apart. Each arm is a Release build of the harness in its own directory; the arms
+are interleaved round after round, and the first arm runs again as an A/A witness. It prints each arm's median, mean,
+extremes and interquartile range, then the A/A gap, the size of a difference worth reading. Its figures are comparable
+only within one sitting. It exits 1 when a run fails, an integrity failure of the received data included.
 
 ```bash
 dotnet build tests/TransportR.ClientBench -c Release -o /tmp/arm-before
@@ -178,36 +185,30 @@ NUM_RECEIVERS=2
 Run: `./scripts/run-benchmark.sh custom`
 
 > [!IMPORTANT]
-> **Configuration is defined entirely in `.env` files.** Environment variables set before running the script (e.g., `BATCH_SIZE=500 ./scripts/run-benchmark.sh`) will be **overwritten** by the scenario file. To change parameters, either:
-> - Edit the existing scenario `.env` file, or
-> - Create a new scenario file with your custom configuration
->
-> This design ensures scenario coherence (e.g., `ha-redis` always uses Redis).
+> **A scenario's `.env` file sets all of its configuration.** It overwrites any variable set before the script runs
+> (`BATCH_SIZE=500 ./scripts/run-benchmark.sh` keeps the file's value), so that a scenario stays coherent (`ha-redis`
+> always uses Redis). To change a parameter, edit the scenario file or create a new one.
 
 ---
 
 ## Asserting memory
 
-A scenario that declares `MAX_RECEIVER_RSS_MB` or `MAX_SENDER_RSS_MB` turns on RSS sampling: one
-row per process per second into `$OUTPUT_DIR/rss.csv`, and a run that peaks over its ceiling fails
-the same way a wrong line count does. Scenarios that declare neither sample nothing and cost
-nothing.
+RSS sampling writes one row per process per second into `$OUTPUT_DIR/rss.csv`. A scenario turns it on with one of:
 
-This is what makes a memory claim checkable rather than asserted. `slow-receiver` holds the
-receiver under 300 MB where its control, which differs only by the byte bound, reaches 870 MB.
+| Variable | Effect |
+|----------|--------|
+| `MAX_RECEIVER_RSS_MB`, `MAX_SENDER_RSS_MB` | A ceiling: a run whose peak goes over it fails, as on a wrong line count. A ceiling with no sample behind it fails too |
+| `SAMPLE_RSS` | `true`: records and prints the peak without asserting (`slow-receiver-unbounded-bytes`) |
+
+A scenario that sets none of them samples nothing.
 
 ---
 
 ## Asserting the transfer actually succeeded
 
-The row count is not the verdict. A transfer can deliver every row and still end in
-`TransferFailedException` on the sender — its `Complete` unacknowledged within the stall bound —
-which leaves a full CSV, a clean session registry and a flat memory profile behind, and the sample
-catches the exception and exits 0. The converse holds too: a batch is acknowledged when it reaches
-the receive buffer, so the sender can report success while the receiver is still writing rows. A run can therefore be wrong in every way that matters and still satisfy
-every other check on this page.
+The line count is not enough. A sender can deliver every row and still fail with `TransferFailedException`
+(its `Complete` unacknowledged within the stall bound) while the sample exits 0. Conversely, a batch is acknowledged
+when it reaches the receive buffer, so a sender can report success while the receiver is still writing rows.
 
-So the runner also requires each sender to have logged `[SENDER][STATS] Transfer <id> complete:`,
-which only happens on the path where `CompleteAsync` returned. That line is the sender's own word
-that the receiver acknowledged everything, and it is the only check here that distinguishes a
-delivered transfer from a delivered file.
+The runner therefore also requires each sender to log `[SENDER][STATS] Transfer <id> complete:`, written only once
+`CompleteAsync` has returned. It is the only check here that tells a delivered transfer from a delivered file.
