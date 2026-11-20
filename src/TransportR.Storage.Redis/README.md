@@ -32,8 +32,8 @@ builder.Services.AddDataHub()
 ## Requirements
 
 - Tested against Redis 7.0: the test suite runs on a `redis:7.0` container.
-- Sticky sessions at the load balancer level (see "High Availability" in `TransportRArchitecture.md`).
-- The per-transfer progress counters are not stored here; see "High Availability" in `TransportRArchitecture.md`.
+- Sticky sessions at the load balancer, because the per-transfer progress counters are not stored here ("High Availability" in
+  `TransportRArchitecture.md`).
 
 ## Dependencies
 
