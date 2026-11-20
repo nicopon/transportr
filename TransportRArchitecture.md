@@ -315,7 +315,8 @@ function and the BCL has no portable X25519.
   the key confirmation is the payload of every `Pong`, 97 bytes; a `Pong`'s `BatchId` keeps the resume point. A share
   that is not a point of the curve, or differs from the first one a session accepted, is refused. The `Ping` heads
   every stream the sender opens, so the receiver holds the keys before the first batch; the sender seals nothing, and
-  signs no `Complete`, before a `Pong` whose confirmation holds.
+  signs no `Complete`, before a `Pong` whose confirmation holds, and fails without one as without an acknowledgement
+  (`WithAcknowledgementTimeout`).
 - **Keys.** The transcript `T` is 227 bytes, in this order: the protocol identifier, one byte of length (47) then the
   ASCII `transportr e2e v1 P-256 HKDF-SHA256 AES-256-GCM`, length-prefixed so that no identifier another suite or
   version takes yields the same bytes; the mode (1 byte: `0x00`, `0x01` with a PSK); the `TransferId`, the sender's
@@ -332,27 +333,34 @@ function and the BCL has no portable X25519.
   little-endian) followed by 8 zero bytes; the associated data is the 30-byte header as written on the wire, its type
   and sealed length included; the payload is the ciphertext then the 16-byte tag. A `BatchId` is spent once per
   session, never wraps (an encrypted transfer carries at most 2³¹ batches), and a resend replays the sealed bytes: no
-  nonce covers two plaintexts.
+  nonce covers two plaintexts. The receiver opens a batch before it judges the batch's place in the order, and
+  acknowledges none that does not open.
 - **Receipts.** `Complete` carries `HMAC-SHA256(sender receipt key, TransferId ‖ BatchId)`, the `BatchId` being the
   last one (int32, little-endian); `CompleteAck` carries the same under the receiver receipt key, for the `BatchId` of
   the `Complete` it accepted, and its header keeps `BatchId` 0. The sender signs only its final `BatchId`, once every
   batch is registered, so no `Complete` for fewer batches exists; the receiver checks the receipt before it judges a
-  `Complete` premature. `BatchAck`, a `Pong`'s `BatchId` and `Abort` carry no MAC: forged, they lead only to a failure
-  (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer ended).
+  `Complete` premature, and writes the same `CompleteAck` again on a reopened stream; a `CompleteAck` that comes before
+  the sender has signed a `Complete` is refused. `BatchAck`, a `Pong`'s `BatchId` and `Abort` carry no MAC: forged,
+  they lead only to a failure (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer
+  ended).
 - **Bounds.** `WithMaxBatchBytes` bounds the plaintext, and the reader admits a sealed batch 16 bytes longer. In
   encrypted mode a receiver admits a `Ping` of exactly 65 bytes and a `Complete` of exactly 32, whatever its
   `WithMaxBatchBytes`, and a sender's control stream admits a `Pong` of exactly 97 and a `CompleteAck` of exactly 32;
-  any other length is a protocol violation.
+  `BatchAck` and `Abort` carry nothing. Any other length is a protocol violation, and so is a chunk of a type the
+  stream does not carry, such as a `Ping` on the sender's control stream.
 - **Refusals.** An encrypted end refuses a `Ping` or `Pong` without a payload and a batch in clear, and aborts with
   `AbortReason.EncryptionModeMismatch` (5). A clear end is unchanged: it ignores a `Ping`'s payload and refuses a
-  sealed batch by its type, so the encrypted peer finds the mismatch at the `Pong`. A tag, confirmation or receipt that
-  does not verify, a share that changes, or a sealed batch before the keys aborts with `AbortReason.VerificationFailed`
-  (6); a PSK on one end only, or two different ones, fails at the confirmation, before any batch. The end that refuses
-  fails with `TransferFailureCategory.EndToEndEncryptionFailed` and a message that names no key; its peer learns it as
-  `AbandonedByPeer`. Nothing is resent: the batch arrived whole.
+  sealed batch by its type, as a batch of a kind it does not carry (`UndecodableBatch`), so the encrypted peer finds
+  the mismatch at the `Pong`. A tag, confirmation or receipt that does not verify, a share that changes, or a sealed
+  batch before the keys aborts with `AbortReason.VerificationFailed` (6); a PSK on one end only, or two different ones,
+  fails at the confirmation, before any batch. An end whose provider gives no key refuses the transfer when its first
+  stream opens, which carries its `Abort` (`VerificationFailed`) and nothing else. The end that refuses fails with
+  `TransferFailureCategory.EndToEndEncryptionFailed` and a message that names no key; its peer learns it as
+  `AbandonedByPeer`. Nothing is resent, neither the refused batch, which arrived whole, nor any other: the `Abort`
+  goes first.
 - **The PSK.** The provider is called once per transfer, synchronously, with the peer's client id, and returns 32
-  bytes; `null` or another length refuses the transfer and never falls back to no PSK. Ignoring the id gives one key per
-  trust domain. `TransferInfo.Protection` (`TransferProtection.None`, `Encrypted`, `EncryptedWithPreSharedKey`) says
+  bytes; `null`, another length or an exception refuses the transfer and never falls back to no PSK. Ignoring the id
+  gives one key per trust domain. `TransferInfo.Protection` (`TransferProtection.None`, `Encrypted`, `EncryptedWithPreSharedKey`) says
   which level a transfer runs at.
 
 A transfer in clear is byte for byte what it was: version 2, the same header, no payload on a control chunk.
