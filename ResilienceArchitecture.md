@@ -325,9 +325,9 @@ Both are `null` by default because the right figure depends on item size, which 
 record-sized payloads an unbounded buffer is a memory spike, for multi-megabyte ones it is the process. A guessed
 default would look handled and go unchecked. `Build()` warns when neither end is set.
 
-**WAN and high-throughput sizing.** The sender's in-flight window must satisfy the bandwidth-delay product:
-$$\text{Window} = \text{MaxInFlightBatches} \times \text{batch size} \ge \text{RTT} \times \text{Bandwidth}$$
-On a 25 ms link aiming for 60–100 MB/s, BDP is 1.5–2.5 MB. A window smaller than this (such as 8 batches of 64 KB = 512 KB) starves the producer while waiting for acknowledgements across round-trips. For continuous streaming across WAN or cloud regions, 256 KB or 512 KB batches with an in-flight window of 4–8 MB maintain pipeline saturation while keeping memory bounded.
+**WAN and high-throughput sizing.** On a long round trip the sender's window, in bytes, must cover the bandwidth-delay
+product; the formula and worked figures are under "Sizing for WAN and high-throughput streaming" in
+`src/TransportR.Client/README.md`.
 
 **A producer parked on a full window fails once nothing has been acknowledged for `CompleteStallTimeout`**, with
 `TransferFailedException`, the rule `CompleteAsync` applies. Only an acknowledgement releases it, so a receiver that

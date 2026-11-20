@@ -111,6 +111,10 @@ A batch's size in bytes is `batchBytes` on a `ByteStreamClient`; on an item clie
 item's serialized size, after compression. The window lifts no other bound: in segments, the fallback, a sender moves
 one 512 KB segment per round trip whatever its window ("Performance, and its conditions" in the repository's `README.md`).
 
+Worked figures: on a 25 ms link aiming for 60-100 MB/s, the product is 1.5-2.5 MB. A window below it, such as 8 batches
+of 64 KB (512 KB), starves the producer while it waits for acknowledgements. For continuous streaming across a WAN or
+cloud regions, 256 KB or 512 KB batches with a window of 4-8 MB keep the pipeline full and memory bounded.
+
 ## Advanced Configuration
 
 ### Authentication
