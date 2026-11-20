@@ -1,10 +1,6 @@
 # DataHub
 
-Sample TransportR hub server application.
-
-## Purpose
-
-Demonstrates how to host a TransportR hub using ASP.NET Core, providing both the control plane (requests and a stream of server-sent events) and the HTTP streaming data plane endpoints.
+Sample TransportR hub server application: it hosts a hub with ASP.NET Core, the control plane and the HTTP streaming data plane.
 
 ## Quick Start
 
@@ -17,13 +13,8 @@ dotnet run --urls http://localhost:5252
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
-| `GET /api/client/{id}/events` | A client's stream of server-sent events: opening it registers the client |
-| `/api/client/{id}/…` | The other control requests: discovery, transfers, replies, presence, heartbeats and probe (see "Communication Channels" in `TransportRArchitecture.md`) |
-| `GET /api/stream/{id}/send` | Data upload over a WebSocket (an upgrade request) |
-| `POST /api/stream/{id}/send` | Data upload, one segment of a write stream per request |
-| `GET /api/stream/{id}/receive` | Data download |
-| `POST /api/stream/{id}/abort` | A participant ends its transfer when its `Abort` cannot be written to the stream |
-| `PUT /api/client/{id}/token` | A client renews its token |
+
+The hub's own routes are listed under "Communication Channels" in `TransportRArchitecture.md`.
 
 ## Configuration
 
@@ -53,5 +44,7 @@ DataHub/
 │   └── TransferIdMiddleware.cs   # Reads the X-Transfer-Id header
 └── Services/
     ├── DataProxyMetrics.cs       # Metrics of the data plane
-    └── ProgressMonitorService.cs # Progress tracking service
+    ├── ProgressMonitorService.cs # Progress tracking service
+    ├── TestProxyStateStore.cs    # IStateStore kept in the TestProxy (HA harness)
+    └── TestProxyStoreExtensions.cs
 ```
