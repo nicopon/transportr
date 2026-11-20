@@ -49,7 +49,7 @@ curl -X POST <idp-url>/connect/token \
 
 ## Clients
 
-The package holds no clients of its own. `samples/TestIdp` seeds `sender`, `receiver` and `test-client` from its `appsettings.json`.
+The package holds no clients of its own. `samples/TestIdp` seeds its clients from its `appsettings.json`, which lists them.
 
 ## Configuration
 
