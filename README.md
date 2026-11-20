@@ -11,8 +11,8 @@ both sides call out to, resuming after network cuts, with bounded memory.**
 
 TransportR is a library, not a broker: a sender streams typed records to one receiver, the hub relays the
 bytes without decoding or keeping them, and the sender learns that the receiver acknowledged every batch.
-An acknowledged batch is in the receiver's buffer, not yet taken by the code that consumes it: a receiver that
-dies once `CompleteAsync` has returned loses what it had not consumed, and confirming that a batch was
+An acknowledged batch is in the receiver's buffer, not yet taken by the code that consumes it. A receiver that
+dies once `CompleteAsync` has returned loses what it had not consumed; confirming that a batch was
 processed is left to the application.
 
 ---
@@ -59,8 +59,12 @@ by every sender: N × M paths.          only the hub is reachable: N + M paths.
 | **To operate** | Nothing | A relay: a managed service (Azure Relay Hybrid Connections) or a reverse tunnel you host | A file server | A cluster | One ASP.NET Core app (+ Redis and a sticky load balancer for HA) |
 
 An outbound relay that carries gRPC gives the same N + M topology, with outbound connections only. What it leaves
-to each application is what TransportR is for: an acknowledgement for every batch, resumption from the receiver's
-last batch, a memory bound at each end for a caller that sets one, and groups that decide who may send to whom.
+to each application is what TransportR is for:
+
+- an acknowledgement for every batch;
+- resumption from the receiver's last batch;
+- a memory bound at each end, for a caller that sets one;
+- groups that decide who may send to whom.
 
 ---
 
@@ -160,9 +164,9 @@ await Task.Delay(Timeout.Infinite, stop.Token).ConfigureAwait(ConfigureAwaitOpti
 
 ## What it guarantees, and how that is checked
 
-Each behaviour below is exercised by a scenario that runs real processes — hub, sender, receiver, and where
-needed an identity provider, a fault-injecting proxy or a second hub — and asserts its outcome: the exact
-number of rows received (2,000,000), the sender's own report that every batch was acknowledged, and, where
+Each behaviour below is exercised by a scenario that runs real processes: hub, sender and receiver, and where
+needed an identity provider, a fault-injecting proxy or a second hub. A scenario asserts the exact
+number of rows received (2,000,000), the sender's own report that every batch was acknowledged and, where
 stated, a memory ceiling. `./scripts/test-all.sh` runs them all; see [`scripts/README.md`](./scripts/README.md).
 
 | Behaviour | Checked by |
@@ -179,23 +183,22 @@ Unit and in-process integration tests run in CI; the scenarios run on demand.
 ### Performance, and its conditions
 
 On one machine over loopback, the `default` scenario moves 2 million orders (about 500 bytes each as JSON) at
-450,000 to 630,000 items per second on the sender side, whether MessagePack or JSON carries them
+450,000 to 630,000 items per second on the sender side. The range covers MessagePack and JSON
 (five interleaved runs each). The sample receiver, which writes every row to CSV, holds the end-to-end rate near
 135,000 items per second. Over a real network, bandwidth and item size decide.
 
-One transfer has a ceiling of its own: its sender serializes on one worker, and its data crosses one connection on
-each hop, sender to hub and hub to receiver. Over a long round trip, the first hop sends one segment per round
-trip when the write stream is sent in segments, the fallback; the second is bounded by one TCP connection's window, and
-nothing spreads a transfer over several connections. For the first hop in segments, over loopback behind a proxy that
-injects the latency (simulated latency, not a WAN), a transfer moved about 22, 9.3 and 4.7 MB/s at 20, 50 and 100 ms of
-round trip: 84 to 90 % of one 512 KB segment per round trip. The bound is the price of a segment being a short request,
-which is what lets a transfer through a front end that holds a request body back.
+**One transfer has a ceiling of its own**: one serialization worker, and one connection per hop, never spread over
+several. Over a long round trip:
 
-A write stream goes over a WebSocket where the path to the hub carries one (it waits for no answer between messages),
-and falls back on segments otherwise (`WithWriteTransport`). The front end has to relay the upgrade and the socket's
-bytes; one that does not relay the upgrade, or holds back the proof that follows it, is found when the stream opens, and
-the transfer goes on in segments. No WebSocket rate is
-given here, and the figures above are those of segments. Details: [Architecture](./TransportRArchitecture.md#data-plane-transport-http11-websocket-or-segments).
+- **hub to receiver**: one TCP connection's window;
+- **sender to hub in segments** (the fallback): one 512 KB segment per round trip, the price of a segment being a short
+  request, which passes a front end that holds request bodies back. Over loopback behind a latency-injecting proxy (not
+  a WAN), a transfer moved about 22, 9.3 and 4.7 MB/s at 20, 50 and 100 ms of round trip, 84 to 90 % of that bound.
+
+Where the path carries a WebSocket, a write stream uses it and waits for no answer between messages; otherwise it falls
+back on segments when the stream opens (`WithWriteTransport`;
+[Architecture](./TransportRArchitecture.md#data-plane-transport-http11-websocket-or-segments)).
+The figures above are those of segments; no WebSocket rate is published.
 
 ---
 
@@ -216,9 +219,8 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | `ConfigureHttpHandler(configure)` | none | The `SocketsHttpHandler` of every request, for a proxy, a client certificate or a certificate authority: `Build()` refuses cookies and automatic decompression |
 | `WithEndToEndEncryption(...)` | off | Seals every batch from one end to the other, with an optional pre-shared key; both ends set it alike |
 
-**Both backpressure bounds are opt-in, and `Build()` warns when neither is set.** The right figure depends on
-how large an item is, which only the caller knows. Set both: either one alone moves the backlog to the other
-process.
+**Set both backpressure bounds.** Out of the box there is none, and either bound alone moves the backlog to the
+other process; `Build()` warns when neither is set ("Backpressure" in [Resilience](./ResilienceArchitecture.md)).
 
 ### Serialization
 
@@ -227,11 +229,10 @@ process.
 | `TransportR.Serialization.MessagePack` | Binary + LZ4 | Any POCO, no attributes or schema needed. Recommended default |
 | `TransportR.Serialization.Json` | Text + Zstd | `compress: false` puts plain JSON on the wire, for debugging |
 | `TransportR.Serialization.Arrow` | Arrow IPC + LZ4 | Apache Arrow `RecordBatch` only; bound the receiver in bytes |
-| `new ByteStreamClientBuilder(batchBytes)`, in `TransportR.Client` | Raw bytes, never compressed | A client of its own: no serializer, no codec, no item type. A batch is cut at `batchBytes` bytes, so no boundary of the sender's calls reaches the receiver; feed the `ByteSend` it gives with `CopyFromAsync` or `WriteAsync`, read the `ByteReceive` with `CopyToAsync` or `ReadAsync` |
+| `new ByteStreamClientBuilder(batchBytes)`, in `TransportR.Client` | Raw bytes, never compressed | A client of its own: no serializer, no codec, no item type ("Moving raw bytes" in the [client README](./src/TransportR.Client/README.md#moving-raw-bytes)) |
 
-JSON is about 20 % slower than MessagePack to produce in our benchmark. Both ends of a
-transfer must use the same serializer and settings, or both be `ByteStreamClient`s: a batch the receiver
-cannot decode fails the transfer, and so does a transfer whose ends are not of the same kind, on both sides.
+Both ends of a transfer use the same serializer and settings, or are both `ByteStreamClient`s; otherwise the
+transfer fails.
 
 ### Security
 
@@ -258,11 +259,9 @@ hub. See the [Security guide](./SecurityArchitecture.md).
 - **The hub is on the path.** All traffic crosses it. High availability needs the Redis state store and
   effective session affinity at the load balancer, not merely preferred affinity
   (see [Architecture](./TransportRArchitecture.md#high-availability-ha)).
-- **Tested on a limited set of environments**: two reverse proxies (YARP, a stock nginx), Azure App Service, a
-  client behind a proxy, clients on Windows, Linux and macOS, two identity providers, and the scenarios above on
-  developer machines. Write streams crossed App Service and the proxy over a WebSocket, and nginx in segments; each
-  environment's settings are under "Deploying the hub" in the
-  [hub's README](./src/TransportR.Hub/README.md#deploying-the-hub). Reports from other environments are welcome.
+- **Tested on a limited set of environments**: YARP and a stock nginx, Azure App Service, a client behind a proxy,
+  clients on Windows, Linux and macOS, two identity providers, each with its settings under
+  ["Deploying the hub"](./src/TransportR.Hub/README.md#deploying-the-hub). Reports from other environments are welcome.
 
 ---
 
