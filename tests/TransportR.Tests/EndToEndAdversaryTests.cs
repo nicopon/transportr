@@ -503,6 +503,95 @@ public class EndToEndAdversaryTests
         Assert.True(sealedWhole > 0 && refused > 0, $"{sealedWhole} sealed, {refused} refused: the release never met the seal.");
     }
 
+    [Fact]
+    public void ACipherReleasedWhileItChecksAReceipt_NeverTakesOneSignedUnderAZeroKey()
+    {
+        var transferId = Guid.NewGuid();
+        var input = new byte[20];
+        transferId.TryWriteBytes(input);
+        var forged = HMACSHA256.HashData(new byte[32], input); // BatchId 0, little-endian zeros
+        var (accepted, trials) = (0, 0);
+        for (var trial = 0; trial < 5_000; trial++, trials++)
+        {
+            using var sender = EndToEndCipher.ForSender(transferId, Guid.Empty, Guid.Empty, null);
+            var receiver = EndToEndCipher.ForReceiver(transferId, Guid.Empty, Guid.Empty, null);
+            var ping = new byte[EndToEndCipher.PingPayloadSize];
+            sender.WritePing(ping);
+            Assert.True(receiver.TryAcceptPing(ping));
+            using var go = new Barrier(2);
+            var checking = new Thread(() =>
+            {
+                go.SignalAndWait();
+                try
+                {
+                    if (receiver.VerifyPeerReceipt(0, forged)) Interlocked.Increment(ref accepted);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Released before the check began: refused.
+                }
+            });
+            checking.Start();
+            go.SignalAndWait();
+            Thread.SpinWait(trial % 64);
+            receiver.Dispose();
+            checking.Join();
+        }
+
+        Assert.True(accepted == 0, $"{accepted} of {trials} trials took the receipt.");
+    }
+
+    [Fact]
+    public void ACipherReleasedWhileItSignsAReceipt_EitherRefusesOrSignsUnderItsOwnKey_NeverUnderAZeroOne()
+    {
+        var transferId = Guid.NewGuid();
+        var (signedWhole, refused) = (0, 0);
+        for (var trial = 0; trial < 5_000; trial++)
+        {
+            var receiver = EndToEndCipher.ForReceiver(transferId, Guid.Empty, Guid.Empty, null);
+            using var sender = EndToEndCipher.ForSender(transferId, Guid.Empty, Guid.Empty, null);
+            var ping = new byte[EndToEndCipher.PingPayloadSize];
+            sender.WritePing(ping);
+            Assert.True(receiver.TryAcceptPing(ping));
+            var pong = new byte[EndToEndCipher.PongPayloadSize];
+            receiver.WritePong(pong);
+            Assert.True(sender.TryAcceptPong(pong));
+
+            var receipt = new byte[EndToEndCipher.ReceiptSize];
+            var signedThisTrial = false;
+            using var go = new Barrier(2);
+            var signing = new Thread(() =>
+            {
+                go.SignalAndWait();
+                try
+                {
+                    receiver.WriteReceipt(0, receipt);
+                    signedThisTrial = true;
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+                {
+                    // Released before, or its keys already taken: refused either way.
+                }
+            });
+            signing.Start();
+            go.SignalAndWait();
+            Thread.SpinWait(trial % 64);
+            receiver.Dispose();
+            signing.Join();
+
+            if (!signedThisTrial)
+            {
+                refused++;
+                continue;
+            }
+
+            signedWhole++;
+            Assert.True(sender.VerifyPeerReceipt(0, receipt), $"Trial {trial} signed under another key.");
+        }
+
+        Assert.True(signedWhole > 0 && refused > 0, $"{signedWhole} signed, {refused} refused: the release never met the signature.");
+    }
+
     // ---- In clear ----
 
     [Fact]

@@ -22,8 +22,10 @@ namespace TransportR.Client.Protocol;
 /// <para>
 /// <b>Threading.</b> The peer's share is accepted on the read loop. The keys are published once, whole,
 /// and from then on sealing (the send worker), receipts (the caller of <c>CompleteAsync</c>) and checks
-/// (the read loop) may run at the same time. <see cref="Dispose"/> erases the keys they use, so it
-/// must not run alongside any of them.
+/// (the read loop) may run at the same time. <see cref="Dispose"/> erases the keys they use. Receipts,
+/// written and checked once per transfer, take the lock it takes, so that a release crossing one leaves
+/// it refused rather than signed or checked under erased keys; sealing and opening do not, and rest on
+/// <see cref="AesGcm"/>, which holds its key behind its handle until the call in flight returns.
 /// </para>
 /// </remarks>
 internal sealed class EndToEndCipher : IDisposable
@@ -326,22 +328,28 @@ internal sealed class EndToEndCipher : IDisposable
     /// </summary>
     public void WriteReceipt(int lastBatchId, Span<byte> receipt)
     {
-        var keys = EnsureProducing(sender: null)
-                   ?? throw new InvalidOperationException("No keys yet: there is nothing to sign with.");
-        RequireLength(receipt.Length, ReceiptSize, nameof(receipt));
-        ComputeReceipt(_isSender ? keys.SenderReceipt : keys.ReceiverReceipt, lastBatchId, receipt);
+        lock (_gate)
+        {
+            var keys = EnsureProducing(sender: null)
+                       ?? throw new InvalidOperationException("No keys yet: there is nothing to sign with.");
+            RequireLength(receipt.Length, ReceiptSize, nameof(receipt));
+            ComputeReceipt(_isSender ? keys.SenderReceipt : keys.ReceiverReceipt, lastBatchId, receipt);
+        }
     }
 
     /// <summary>Checks the peer's receipt for <paramref name="lastBatchId"/>.</summary>
     public bool VerifyPeerReceipt(int lastBatchId, ReadOnlySpan<byte> receipt)
     {
-        EnsureChecking(sender: null);
-        if (_failed) return false;
-        if (Volatile.Read(ref _keys) is not { } keys || receipt.Length != ReceiptSize) return Refuse();
-
         Span<byte> expected = stackalloc byte[ReceiptSize];
-        ComputeReceipt(_isSender ? keys.ReceiverReceipt : keys.SenderReceipt, lastBatchId, expected);
-        return CryptographicOperations.FixedTimeEquals(expected, receipt) || Refuse();
+        lock (_gate)
+        {
+            EnsureChecking(sender: null);
+            if (_failed) return false;
+            if (Volatile.Read(ref _keys) is not { } keys || receipt.Length != ReceiptSize) return Refuse();
+
+            ComputeReceipt(_isSender ? keys.ReceiverReceipt : keys.SenderReceipt, lastBatchId, expected);
+            return CryptographicOperations.FixedTimeEquals(expected, receipt) || Refuse();
+        }
     }
 
     public override string ToString()
