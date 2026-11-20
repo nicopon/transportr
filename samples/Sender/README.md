@@ -1,14 +1,6 @@
 # Sender
 
-Sample TransportR sender application that reads data and sends it to a receiver through the hub.
-
-## Purpose
-
-Demonstrates how to use `TransportRClient<T>` as a data sender to:
-1. Connect to a TransportR hub
-2. Discover available receivers
-3. Initiate a transfer
-4. Send data in batches with automatic retry
+Sample TransportR sender application: it uses `TransportRClient<T>` as a data sender, reading data and sending it to a receiver through the hub.
 
 ## Usage
 
@@ -42,5 +34,5 @@ dotnet run
 2. Connect to hub (`ConnectAsync`, group `senders` by default)
 3. Wait for receiver to connect
 4. Initiate transfer
-5. Stream items through batches
+5. Stream items through batches, with automatic retry
 6. Send the completion signal and wait for the receiver to acknowledge everything (`CompleteAsync`)
