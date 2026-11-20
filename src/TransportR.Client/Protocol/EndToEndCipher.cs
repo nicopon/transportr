@@ -48,9 +48,14 @@ internal sealed class EndToEndCipher : IDisposable
     private const byte UncompressedPoint = 0x04;
     private const byte WithoutPreSharedKey = 0x00;
     private const byte WithPreSharedKey = 0x01;
-    private const int TransferIdSize = 16;
-    private const int TranscriptSize = 1 + TransferIdSize + 2 * ShareSize;
-    private const int ReceiptInputSize = TransferIdSize + sizeof(int);
+    private const int IdSize = 16;
+    private const int ReceiptInputSize = IdSize + sizeof(int);
+
+    // Length-prefixed in the transcript, so that no identifier of another length yields the same
+    // bytes. Another suite, or another layout of the transcript, takes another identifier.
+    private static ReadOnlySpan<byte> ProtocolId => "transportr e2e v1 P-256 HKDF-SHA256 AES-256-GCM"u8;
+
+    private static int TranscriptSize => 1 + ProtocolId.Length + 1 + 3 * IdSize + 2 * ShareSize;
 
     private static ReadOnlySpan<byte> BatchLabel => "transportr e2e batch"u8;
     private static ReadOnlySpan<byte> ConfirmationLabel => "transportr e2e confirmation"u8;
@@ -60,6 +65,8 @@ internal sealed class EndToEndCipher : IDisposable
     private readonly object _gate = new();
     private readonly bool _isSender;
     private readonly Guid _transferId;
+    private readonly Guid _senderId;
+    private readonly Guid _receiverId;
     private readonly bool _usesPreSharedKey;
     private readonly byte[] _localShare;
 
@@ -77,29 +84,45 @@ internal sealed class EndToEndCipher : IDisposable
     private volatile bool _failed;
     private volatile bool _disposed;
 
-    private EndToEndCipher(bool isSender, Guid transferId, byte[]? preSharedKey)
+    /// <param name="ephemeral">
+    /// This end's P-256 key pair, the cipher's from here on, even when it throws. Private, and reached
+    /// from outside by the known-answer test alone, through <c>UnsafeAccessor</c>, so that no assembly
+    /// the client opens its internals to can inject one: a pair that is not fresh loses forward
+    /// secrecy, and the same pairs on two sessions of one transfer repeat nonces under one key.
+    /// </param>
+    private EndToEndCipher(
+        bool isSender, Guid transferId, Guid senderId, Guid receiverId, byte[]? preSharedKey, ECDiffieHellman ephemeral)
     {
-        if (preSharedKey is not null && preSharedKey.Length != PreSharedKeySize)
+        try
         {
-            throw new ArgumentException($"A pre-shared key is {PreSharedKeySize} bytes.", nameof(preSharedKey));
+            if (preSharedKey is not null && preSharedKey.Length != PreSharedKeySize)
+            {
+                throw new ArgumentException($"A pre-shared key is {PreSharedKeySize} bytes.", nameof(preSharedKey));
+            }
+
+            var point = ephemeral.ExportParameters(includePrivateParameters: false).Q;
+            if (point.X is not { Length: CoordinateSize } || point.Y is not { Length: CoordinateSize })
+            {
+                throw new CryptographicException("The platform exported a P-256 public key of an unexpected size.");
+            }
+
+            _localShare = new byte[ShareSize];
+            _localShare[0] = UncompressedPoint;
+            point.X.CopyTo(_localShare, 1);
+            point.Y.CopyTo(_localShare, 1 + CoordinateSize);
+        }
+        catch
+        {
+            ephemeral.Dispose();
+            throw;
         }
 
+        _ephemeral = ephemeral;
         _isSender = isSender;
         _transferId = transferId;
+        _senderId = senderId;
+        _receiverId = receiverId;
         _usesPreSharedKey = preSharedKey is not null;
-
-        _ephemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-        var point = _ephemeral.ExportParameters(includePrivateParameters: false).Q;
-        if (point.X is not { Length: CoordinateSize } || point.Y is not { Length: CoordinateSize })
-        {
-            _ephemeral.Dispose();
-            throw new CryptographicException("The platform exported a P-256 public key of an unexpected size.");
-        }
-
-        _localShare = new byte[ShareSize];
-        _localShare[0] = UncompressedPoint;
-        point.X.CopyTo(_localShare, 1);
-        point.Y.CopyTo(_localShare, 1 + CoordinateSize);
 
         // Last, so that no failure above leaves a copy nobody erases. Copied, and the caller's array
         // left alone: a provider may hand the same array to every transfer. Pinned, so that no
@@ -111,14 +134,25 @@ internal sealed class EndToEndCipher : IDisposable
         }
     }
 
+    /// <param name="senderId">
+    /// The sending client's id as this end knows it: its own at the sender, the one the hub announces
+    /// at the receiver.
+    /// </param>
+    /// <param name="receiverId">
+    /// The receiving client's id as this end knows it: the target named or announced at the sender,
+    /// its own at the receiver. Both ids enter every key, so a hub that names another peer to either
+    /// end fails the confirmation.
+    /// </param>
     /// <param name="preSharedKey">
     /// <c>null</c> for encryption alone, or exactly <see cref="PreSharedKeySize"/> bytes. Copied; the
     /// array passed is neither kept nor erased.
     /// </param>
-    public static EndToEndCipher ForSender(Guid transferId, byte[]? preSharedKey) => new(isSender: true, transferId, preSharedKey);
+    public static EndToEndCipher ForSender(Guid transferId, Guid senderId, Guid receiverId, byte[]? preSharedKey)
+        => new(isSender: true, transferId, senderId, receiverId, preSharedKey, NewEphemeral());
 
     /// <inheritdoc cref="ForSender"/>
-    public static EndToEndCipher ForReceiver(Guid transferId, byte[]? preSharedKey) => new(isSender: false, transferId, preSharedKey);
+    public static EndToEndCipher ForReceiver(Guid transferId, Guid senderId, Guid receiverId, byte[]? preSharedKey)
+        => new(isSender: false, transferId, senderId, receiverId, preSharedKey, NewEphemeral());
 
     public bool UsesPreSharedKey => _usesPreSharedKey;
 
@@ -363,12 +397,7 @@ internal sealed class EndToEndCipher : IDisposable
             }
 
             Span<byte> transcript = stackalloc byte[TranscriptSize];
-            transcript[0] = _usesPreSharedKey ? WithPreSharedKey : WithoutPreSharedKey;
-            _transferId.TryWriteBytes(transcript.Slice(1, TransferIdSize));
-            ReadOnlySpan<byte> senderShare = _isSender ? _localShare : peerShare;
-            ReadOnlySpan<byte> receiverShare = _isSender ? peerShare : _localShare;
-            senderShare.CopyTo(transcript.Slice(1 + TransferIdSize, ShareSize));
-            receiverShare.CopyTo(transcript.Slice(1 + TransferIdSize + ShareSize, ShareSize));
+            WriteTranscript(peerShare, transcript);
 
             Span<byte> noPreSharedKey = stackalloc byte[PreSharedKeySize];
             HKDF.Extract(HashAlgorithmName.SHA256, secret, _preSharedKey ?? noPreSharedKey, pseudoRandomKey);
@@ -397,6 +426,24 @@ internal sealed class EndToEndCipher : IDisposable
             _preSharedKey = null;
         }
     }
+
+    private void WriteTranscript(ReadOnlySpan<byte> peerShare, Span<byte> transcript)
+    {
+        ReadOnlySpan<byte> senderShare = _isSender ? _localShare : peerShare;
+        ReadOnlySpan<byte> receiverShare = _isSender ? peerShare : _localShare;
+
+        transcript[0] = (byte)ProtocolId.Length;
+        ProtocolId.CopyTo(transcript[1..]);
+        var rest = transcript[(1 + ProtocolId.Length)..];
+        rest[0] = _usesPreSharedKey ? WithPreSharedKey : WithoutPreSharedKey;
+        _transferId.TryWriteBytes(rest.Slice(1, IdSize));
+        _senderId.TryWriteBytes(rest.Slice(1 + IdSize, IdSize));
+        _receiverId.TryWriteBytes(rest.Slice(1 + 2 * IdSize, IdSize));
+        senderShare.CopyTo(rest.Slice(1 + 3 * IdSize, ShareSize));
+        receiverShare.CopyTo(rest.Slice(1 + 3 * IdSize + ShareSize, ShareSize));
+    }
+
+    private static ECDiffieHellman NewEphemeral() => ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
     private static ECDiffieHellman? ImportShare(ReadOnlySpan<byte> share)
     {
@@ -432,8 +479,8 @@ internal sealed class EndToEndCipher : IDisposable
     private void ComputeReceipt(byte[] key, int lastBatchId, Span<byte> receipt)
     {
         Span<byte> input = stackalloc byte[ReceiptInputSize];
-        _transferId.TryWriteBytes(input[..TransferIdSize]);
-        BinaryPrimitives.WriteInt32LittleEndian(input[TransferIdSize..], lastBatchId);
+        _transferId.TryWriteBytes(input[..IdSize]);
+        BinaryPrimitives.WriteInt32LittleEndian(input[IdSize..], lastBatchId);
         HMACSHA256.HashData(key, input, receipt);
     }
 

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using TransportR.Client.Protocol;
@@ -19,6 +20,8 @@ public class EndToEndCipherTests
     private const ChunkType SealedStreamBatch = (ChunkType)0x0A;
 
     private readonly Guid _transferId = Guid.NewGuid();
+    private readonly Guid _senderId = Guid.NewGuid();
+    private readonly Guid _receiverId = Guid.NewGuid();
 
     // ---- The handshake and a sealed batch ---------------------------------------------------------
 
@@ -28,8 +31,8 @@ public class EndToEndCipherTests
     public void A_batch_sealed_by_the_sender_opens_at_the_receiver(bool withPreSharedKey)
     {
         var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
-        using var sender = EndToEndCipher.ForSender(_transferId, psk);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, psk);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk);
 
         Assert.True(Handshake(sender, receiver));
         Assert.True(sender.HasKeys);
@@ -205,7 +208,7 @@ public class EndToEndCipherTests
         var (sender, receiver) = Connected();
         using (sender)
         using (receiver)
-        using (var early = EndToEndCipher.ForReceiver(_transferId, null))
+        using (var early = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null))
         {
             var (header, sealedPayload) = SealOne(sender, plaintextLength: 64);
 
@@ -218,8 +221,8 @@ public class EndToEndCipherTests
     [Fact]
     public void A_different_pre_shared_key_fails_the_confirmation()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, RandomNumberGenerator.GetBytes(32));
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, RandomNumberGenerator.GetBytes(32));
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, RandomNumberGenerator.GetBytes(32));
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, RandomNumberGenerator.GetBytes(32));
 
         Assert.False(Handshake(sender, receiver));
     }
@@ -230,8 +233,8 @@ public class EndToEndCipherTests
     public void A_pre_shared_key_on_one_end_only_fails_the_confirmation(bool senderHasIt)
     {
         var psk = RandomNumberGenerator.GetBytes(32);
-        using var sender = EndToEndCipher.ForSender(_transferId, senderHasIt ? psk : null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, senderHasIt ? null : psk);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, senderHasIt ? psk : null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, senderHasIt ? null : psk);
 
         Assert.False(Handshake(sender, receiver));
     }
@@ -239,8 +242,8 @@ public class EndToEndCipherTests
     [Fact]
     public void An_all_zero_pre_shared_key_does_not_pass_for_none()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, new byte[32]);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, new byte[32]);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         Assert.False(Handshake(sender, receiver));
     }
@@ -255,9 +258,9 @@ public class EndToEndCipherTests
     public void A_substituted_receiver_share_fails_the_confirmation(bool withPreSharedKey)
     {
         var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
-        using var sender = EndToEndCipher.ForSender(_transferId, psk);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, psk);
-        using var hub = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk);
+        using var hub = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         var ping = Ping(sender);
         Assert.True(receiver.TryAcceptPing(ping));
@@ -278,8 +281,8 @@ public class EndToEndCipherTests
     [InlineData(true)]
     public void A_pong_forged_without_the_pre_shared_key_fails_the_confirmation(bool hubGuessesAKey)
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, RandomNumberGenerator.GetBytes(32));
-        using var hub = EndToEndCipher.ForReceiver(_transferId, hubGuessesAKey ? RandomNumberGenerator.GetBytes(32) : null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, RandomNumberGenerator.GetBytes(32));
+        using var hub = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, hubGuessesAKey ? RandomNumberGenerator.GetBytes(32) : null);
 
         Assert.True(hub.TryAcceptPing(Ping(sender)));
 
@@ -294,9 +297,9 @@ public class EndToEndCipherTests
     public void A_substituted_sender_share_fails_the_confirmation()
     {
         var psk = RandomNumberGenerator.GetBytes(32);
-        using var sender = EndToEndCipher.ForSender(_transferId, psk);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, psk);
-        using var hub = EndToEndCipher.ForSender(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk);
+        using var hub = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
 
         Assert.True(receiver.TryAcceptPing(Ping(hub)));
 
@@ -328,14 +331,85 @@ public class EndToEndCipherTests
         }
     }
 
+    // ---- What a hub that hands a transfer to another node, or names another sender, meets ---------
+
+    /// <summary>
+    /// A, B and C hold one pre-shared key, their trust domain's. A asks for B, and the hub hands the
+    /// transfer to C, which takes it as A's transfer to C: had the confirmation passed, A would take
+    /// C's receipt for B's.
+    /// </summary>
+    [Fact]
+    public void A_transfer_handed_to_another_node_of_the_domain_fails_the_confirmation()
+    {
+        var domainKey = RandomNumberGenerator.GetBytes(32);
+        var (a, b, c) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        using var sender = EndToEndCipher.ForSender(_transferId, senderId: a, receiverId: b, domainKey);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, senderId: a, receiverId: c, domainKey);
+
+        Assert.False(Handshake(sender, receiver));
+    }
+
+    /// <summary>A sends to C, and the hub tells C that D sends.</summary>
+    [Fact]
+    public void A_sender_misnamed_to_the_receiver_fails_the_confirmation()
+    {
+        var domainKey = RandomNumberGenerator.GetBytes(32);
+        var (a, c, d) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        using var sender = EndToEndCipher.ForSender(_transferId, senderId: a, receiverId: c, domainKey);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, senderId: d, receiverId: c, domainKey);
+
+        Assert.False(Handshake(sender, receiver));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Ids_swapped_between_the_roles_fail_the_confirmation(bool withPreSharedKey)
+    {
+        var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, senderId: _receiverId, receiverId: _senderId, psk);
+
+        Assert.False(Handshake(sender, receiver));
+    }
+
+    /// <summary>
+    /// The two ends agree on every input but one id, which one of them sees otherwise.
+    /// </summary>
+    [Theory]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, true)]
+    public void One_id_the_two_ends_see_differently_fails_the_confirmation(bool senderIdDiffers, bool atTheSender, bool withPreSharedKey)
+    {
+        var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
+        var other = Guid.NewGuid();
+        var senderId = senderIdDiffers ? other : _senderId;
+        var receiverId = senderIdDiffers ? _receiverId : other;
+
+        using var sender = atTheSender
+            ? EndToEndCipher.ForSender(_transferId, senderId, receiverId, psk)
+            : EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        using var receiver = atTheSender
+            ? EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk)
+            : EndToEndCipher.ForReceiver(_transferId, senderId, receiverId, psk);
+
+        Assert.False(Handshake(sender, receiver));
+    }
+
     // ---- The share, once per session --------------------------------------------------------------
 
     [Fact]
     public void The_same_share_is_accepted_again_and_another_is_refused_at_the_receiver()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
-        using var other = EndToEndCipher.ForSender(_transferId, null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var other = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         Assert.True(receiver.TryAcceptPing(Ping(sender)));
         var pong = Pong(receiver);
@@ -349,9 +423,9 @@ public class EndToEndCipherTests
     [Fact]
     public void The_same_pong_is_accepted_again_and_another_is_refused_at_the_sender()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
-        using var other = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
+        using var other = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         var ping = Ping(sender);
         Assert.True(receiver.TryAcceptPing(ping));
@@ -367,7 +441,7 @@ public class EndToEndCipherTests
     [Fact]
     public void Each_ping_carries_the_same_share()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
 
         Assert.Equal(Ping(sender), Ping(sender));
     }
@@ -375,8 +449,8 @@ public class EndToEndCipherTests
     [Fact]
     public void A_share_off_the_curve_is_refused()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         var ping = Ping(sender);
         ping[^1] ^= 0x01;
@@ -389,8 +463,8 @@ public class EndToEndCipherTests
     [InlineData(0x00)] // The point at infinity's
     public void A_share_not_in_uncompressed_form_is_refused(byte prefix)
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         var ping = Ping(sender);
         ping[0] = prefix;
@@ -404,7 +478,7 @@ public class EndToEndCipherTests
     [InlineData(EndToEndCipher.PingPayloadSize + 1)]
     public void A_ping_of_another_length_is_refused(int length)
     {
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         Assert.False(receiver.TryAcceptPing(new byte[length]));
     }
@@ -415,7 +489,7 @@ public class EndToEndCipherTests
     [InlineData(EndToEndCipher.PongPayloadSize + 1)]
     public void A_pong_of_another_length_is_refused(int length)
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
 
         Assert.False(sender.TryAcceptPong(new byte[length]));
     }
@@ -461,8 +535,8 @@ public class EndToEndCipherTests
         var (sender, receiver) = Connected(psk);
         using (sender)
         using (receiver)
-        using (var otherSender = EndToEndCipher.ForSender(otherTransferId, psk))
-        using (var otherReceiver = EndToEndCipher.ForReceiver(otherTransferId, psk))
+        using (var otherSender = EndToEndCipher.ForSender(otherTransferId, _senderId, _receiverId, psk))
+        using (var otherReceiver = EndToEndCipher.ForReceiver(otherTransferId, _senderId, _receiverId, psk))
         {
             Assert.True(Handshake(otherSender, otherReceiver));
 
@@ -523,7 +597,7 @@ public class EndToEndCipherTests
     [Fact]
     public void A_receipt_is_refused_before_the_keys()
     {
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         Assert.False(receiver.VerifyPeerReceipt(0, new byte[EndToEndCipher.ReceiptSize]));
     }
@@ -552,8 +626,8 @@ public class EndToEndCipherTests
     [Fact]
     public void After_a_refused_confirmation_the_sender_seals_nothing()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, RandomNumberGenerator.GetBytes(32));
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, RandomNumberGenerator.GetBytes(32));
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, RandomNumberGenerator.GetBytes(32));
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, RandomNumberGenerator.GetBytes(32));
         Assert.False(Handshake(sender, receiver));
 
         var header = Header(batchId: 0, count: 1, plaintextLength: 8);
@@ -565,8 +639,8 @@ public class EndToEndCipherTests
     [Fact]
     public void Nothing_is_sealed_or_signed_before_the_keys()
     {
-        using var sender = EndToEndCipher.ForSender(_transferId, null);
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, null);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, null);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, null);
 
         var header = Header(batchId: 0, count: 1, plaintextLength: 8);
         Assert.Throws<InvalidOperationException>(() => sender.Seal(header, new byte[8], new byte[header.PayloadLength]));
@@ -635,7 +709,7 @@ public class EndToEndCipherTests
     {
         var psk = RandomNumberGenerator.GetBytes(length);
 
-        var refusal = Assert.Throws<ArgumentException>(() => EndToEndCipher.ForSender(_transferId, psk));
+        var refusal = Assert.Throws<ArgumentException>(() => EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk));
 
         if (length > 0) AssertNotIn(refusal.ToString(), psk);
     }
@@ -657,12 +731,12 @@ public class EndToEndCipherTests
     public void ToString_carries_no_secret()
     {
         var psk = RandomNumberGenerator.GetBytes(32);
-        using var sender = EndToEndCipher.ForSender(_transferId, psk);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
         using var specReceiver = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         var senderShare = Ping(sender);
         var receiverShare = Share(specReceiver);
-        var keys = DeriveAsSpecified(specReceiver, senderShare, psk, _transferId, senderShare, receiverShare);
+        var keys = DeriveAsSpecified(specReceiver, senderShare, psk, senderShare, receiverShare);
         Assert.True(sender.TryAcceptPong([.. receiverShare, .. keys.Confirmation]));
 
         var text = sender.ToString();
@@ -705,7 +779,7 @@ public class EndToEndCipherTests
     public void The_sender_derives_what_the_specification_states(bool withPreSharedKey)
     {
         var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
-        using var sender = EndToEndCipher.ForSender(_transferId, psk);
+        using var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
         using var specReceiver = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         var senderShare = Ping(sender);
@@ -713,7 +787,7 @@ public class EndToEndCipherTests
         Assert.Equal(0x04, senderShare[0]);
 
         var receiverShare = Share(specReceiver);
-        var keys = DeriveAsSpecified(specReceiver, senderShare, psk, _transferId, senderShare, receiverShare);
+        var keys = DeriveAsSpecified(specReceiver, senderShare, psk, senderShare, receiverShare);
         Assert.True(sender.TryAcceptPong([.. receiverShare, .. keys.Confirmation]));
 
         var plaintext = RandomNumberGenerator.GetBytes(100);
@@ -742,7 +816,7 @@ public class EndToEndCipherTests
     public void The_receiver_derives_what_the_specification_states(bool withPreSharedKey)
     {
         var psk = withPreSharedKey ? RandomNumberGenerator.GetBytes(32) : null;
-        using var receiver = EndToEndCipher.ForReceiver(_transferId, psk);
+        using var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk);
         using var specSender = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
 
         var senderShare = Share(specSender);
@@ -750,7 +824,7 @@ public class EndToEndCipherTests
         var pong = Pong(receiver);
         var receiverShare = pong[..EndToEndCipher.ShareSize];
 
-        var keys = DeriveAsSpecified(specSender, receiverShare, psk, _transferId, senderShare, receiverShare);
+        var keys = DeriveAsSpecified(specSender, receiverShare, psk, senderShare, receiverShare);
         Assert.Equal(keys.Confirmation, pong[EndToEndCipher.ShareSize..]);
 
         var plaintext = RandomNumberGenerator.GetBytes(100);
@@ -773,13 +847,121 @@ public class EndToEndCipherTests
         Assert.Equal(HMACSHA256.HashData(keys.ReceiverReceipt, ReceiptInput(_transferId, -1)), Receipt(receiver, -1));
     }
 
+    // ---- The known-answer vector ------------------------------------------------------------------
+
+    /// <summary>
+    /// Every byte of the handshake, of one sealed batch and of both receipts, for fixed inputs, as a
+    /// script written from the specification alone computed them with other implementations of each
+    /// primitive (Python's <c>cryptography</c>). Whatever changes one of them changes the wire.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_wire_matches_the_known_answer_vector(bool withPreSharedKey)
+    {
+        var expected = withPreSharedKey ? KnownAnswer.WithPreSharedKey : KnownAnswer.WithoutPreSharedKey;
+        var psk = withPreSharedKey ? Convert.FromHexString(KnownAnswer.PreSharedKey) : null;
+        var transferId = Guid.Parse(KnownAnswer.TransferId);
+        var senderId = Guid.Parse(KnownAnswer.SenderId);
+        var receiverId = Guid.Parse(KnownAnswer.ReceiverId);
+
+        using var sender = NewCipher(isSender: true, transferId, senderId, receiverId, psk, FixedEphemeral(KnownAnswer.SenderPrivateKey));
+        using var receiver = NewCipher(isSender: false, transferId, senderId, receiverId, psk, FixedEphemeral(KnownAnswer.ReceiverPrivateKey));
+
+        var ping = Ping(sender);
+        Assert.Equal(expected.Ping, Convert.ToHexString(ping));
+        Assert.True(receiver.TryAcceptPing(ping));
+        var pong = Pong(receiver);
+        Assert.Equal(expected.Pong, Convert.ToHexString(pong));
+        Assert.True(sender.TryAcceptPong(pong));
+
+        var plaintext = Encoding.ASCII.GetBytes(KnownAnswer.Plaintext);
+        var header = new ChunkHeader
+        {
+            Version = ChunkHeader.CurrentVersion,
+            Type = SealedBatch,
+            PayloadLength = plaintext.Length + EndToEndCipher.TagSize,
+            BatchId = KnownAnswer.BatchId,
+            Count = KnownAnswer.Count,
+            TransferId = transferId,
+        };
+        var wireHeader = new byte[ChunkHeader.Size];
+        header.WriteTo(wireHeader);
+        Assert.Equal(expected.SealedHeader, Convert.ToHexString(wireHeader));
+
+        var sealedPayload = new byte[header.PayloadLength];
+        sender.Seal(header, plaintext, sealedPayload);
+        Assert.Equal(expected.SealedPayload, Convert.ToHexString(sealedPayload));
+        var opened = new byte[plaintext.Length];
+        Assert.True(receiver.TryOpen(header, sealedPayload, opened));
+        Assert.Equal(plaintext, opened);
+
+        var senderReceipt = Receipt(sender, KnownAnswer.BatchId);
+        var receiverReceipt = Receipt(receiver, KnownAnswer.BatchId);
+        Assert.Equal(expected.SenderReceipt, Convert.ToHexString(senderReceipt));
+        Assert.Equal(expected.ReceiverReceipt, Convert.ToHexString(receiverReceipt));
+        Assert.True(receiver.VerifyPeerReceipt(KnownAnswer.BatchId, senderReceipt));
+        Assert.True(sender.VerifyPeerReceipt(KnownAnswer.BatchId, receiverReceipt));
+    }
+
+    /// <summary>The inputs and outputs of the script; its values, copied as it prints them.</summary>
+    private static class KnownAnswer
+    {
+        public const string SenderPrivateKey = "6C0B4B6A2D1F3E5A7C9E8D7B6A5F4E3D2C1B0A99887766554433221100FFEEDD";
+        public const string ReceiverPrivateKey = "1D2C3B4A59687786950A1B2C3D4E5F60718293A4B5C6D7E8F901122334455667";
+        public const string TransferId = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+        public const string SenderId = "a0a1a2a3-b0b1-c0c1-d0d1-d2d3d4d5d6d7";
+        public const string ReceiverId = "e0e1e2e3-f0f1-0010-1112-131415161718";
+        public const string PreSharedKey = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F";
+        public const string Plaintext = "TransportR known-answer batch";
+        public const int BatchId = 0x01020304;
+        public const int Count = 3;
+
+        public static readonly Vector WithoutPreSharedKey = new(
+            Ping: "046B46386A43E4DE2AE1F28625599E677DEA82E97BB03CC10E6A4B37F6F934A1AD001956A10AD25986BFAE42E0A9A8941151A9736F60FE747F65EB4B5054AB0341",
+            Pong: "04CB41CC669DAD5137068331728B34806AC10A52E5EBFB536F5520D09B69007A4EB29FA1F77DFE236EF991B1835BE2409BEC73A65A1DE55287323EDD829B48054DE74E1FD757F26FCF63BB35CA7B9C3CE2D4A012869BA973A92BA7A42B9717072C",
+            SealedHeader: "02092D00000004030201030000003C2D1E0F5A4B78698796A5B4C3D2E1F0",
+            SealedPayload: "A1EA925ECCB87C39C9B0ECB7B2C2129226FFC866647705657EC077239A4C8FE912EEFBDFAAE1A88E366767080E",
+            SenderReceipt: "158CF27775C1F08694F82839871666A04DF8342244213E2CE87E88E2815156E0",
+            ReceiverReceipt: "12707A719408FC08DAD803DE5889FDE96D5DD3DC539E9D434DE8DC2D366A5882");
+
+        public static readonly Vector WithPreSharedKey = new(
+            Ping: "046B46386A43E4DE2AE1F28625599E677DEA82E97BB03CC10E6A4B37F6F934A1AD001956A10AD25986BFAE42E0A9A8941151A9736F60FE747F65EB4B5054AB0341",
+            Pong: "04CB41CC669DAD5137068331728B34806AC10A52E5EBFB536F5520D09B69007A4EB29FA1F77DFE236EF991B1835BE2409BEC73A65A1DE55287323EDD829B48054D1DA163C8A3152D684BBD3730C3975D192A9846A72AA80880D04CB83965E6C695",
+            SealedHeader: "02092D00000004030201030000003C2D1E0F5A4B78698796A5B4C3D2E1F0",
+            SealedPayload: "1F3BA61B5AEEB032E77416B4D8CA7063F78451DDE79F80B56E1AE283BFD62CC747DCBA2B61C1D1A9D47FA3C853",
+            SenderReceipt: "BA9DB56107E542C7696542ADE61CD8A490982781E4D642EB12BE6C70E502AD47",
+            ReceiverReceipt: "C9E276DF219ACFF6B2860AABF6B17D6589FC34AFCC270DD22644B109FFF1B429");
+
+        public sealed record Vector(
+            string Ping, string Pong, string SealedHeader, string SealedPayload, string SenderReceipt, string ReceiverReceipt);
+    }
+
+    /// <summary>
+    /// The cipher's private constructor, the only one that takes a key pair instead of drawing it:
+    /// nothing the client opens its internals to can reach it.
+    /// </summary>
+    [UnsafeAccessor(UnsafeAccessorKind.Constructor)]
+    private static extern EndToEndCipher NewCipher(
+        bool isSender, Guid transferId, Guid senderId, Guid receiverId, byte[]? preSharedKey, ECDiffieHellman ephemeral);
+
+    /// <summary>
+    /// The private key alone, so that the platform computes the public point and the Ping compared
+    /// with the vector is not the point the test gave it.
+    /// </summary>
+    private static ECDiffieHellman FixedEphemeral(string privateKey) => ECDiffieHellman.Create(new ECParameters
+    {
+        Curve = ECCurve.NamedCurves.nistP256,
+        D = Convert.FromHexString(privateKey),
+    });
+
     // ---- Helpers ----------------------------------------------------------------------------------
 
     private sealed record SpecifiedKeys(
         byte[] Batch, byte[] ConfirmationKey, byte[] SenderReceipt, byte[] ReceiverReceipt, byte[] Confirmation);
 
-    private static SpecifiedKeys DeriveAsSpecified(
-        ECDiffieHellman ownKey, byte[] peerShare, byte[]? psk, Guid transferId, byte[] senderShare, byte[] receiverShare)
+    private SpecifiedKeys DeriveAsSpecified(
+        ECDiffieHellman ownKey, byte[] peerShare, byte[]? psk, byte[] senderShare, byte[] receiverShare)
     {
         using var peer = ECDiffieHellman.Create(new ECParameters
         {
@@ -788,11 +970,17 @@ public class EndToEndCipherTests
         });
         var secret = ownKey.DeriveRawSecretAgreement(peer.PublicKey);
 
-        var transcript = new byte[1 + 16 + 2 * EndToEndCipher.ShareSize];
-        transcript[0] = psk is null ? (byte)0x00 : (byte)0x01;
-        transferId.TryWriteBytes(transcript.AsSpan(1, 16));
-        senderShare.CopyTo(transcript, 17);
-        receiverShare.CopyTo(transcript, 17 + EndToEndCipher.ShareSize);
+        var protocol = Encoding.ASCII.GetBytes("transportr e2e v1 P-256 HKDF-SHA256 AES-256-GCM");
+        byte[] transcript =
+        [
+            (byte)protocol.Length, .. protocol,
+            psk is null ? (byte)0x00 : (byte)0x01,
+            .. _transferId.ToByteArray(),
+            .. _senderId.ToByteArray(),
+            .. _receiverId.ToByteArray(),
+            .. senderShare,
+            .. receiverShare,
+        ];
 
         var prk = HKDF.Extract(HashAlgorithmName.SHA256, secret, psk ?? new byte[32]);
         byte[] Expand(string label) =>
@@ -823,8 +1011,8 @@ public class EndToEndCipherTests
 
     private (EndToEndCipher Sender, EndToEndCipher Receiver) Connected(byte[]? psk = null)
     {
-        var sender = EndToEndCipher.ForSender(_transferId, psk);
-        var receiver = EndToEndCipher.ForReceiver(_transferId, psk);
+        var sender = EndToEndCipher.ForSender(_transferId, _senderId, _receiverId, psk);
+        var receiver = EndToEndCipher.ForReceiver(_transferId, _senderId, _receiverId, psk);
         Assert.True(Handshake(sender, receiver));
         return (sender, receiver);
     }
