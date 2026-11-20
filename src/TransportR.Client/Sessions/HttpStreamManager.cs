@@ -294,13 +294,15 @@ internal class HttpStreamManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// A batch this side cannot decode is told apart from the rest of the protocol: the peer is sent
-    /// an Abort for the one, and both ends use the same serializer and settings to cure it.
+    /// A batch this side cannot decode, and a refusal of end-to-end encryption, are told apart from the
+    /// rest of the protocol: the peer is sent an Abort for them, and each has its own cure.
     /// </summary>
-    private static TransferFailureCategory FailureOf(WireProtocolViolationException violation) =>
-        violation is UndecodableBatchException
-            ? TransferFailureCategory.UndecodableOrUnserializableBatch
-            : TransferFailureCategory.ProtocolViolation;
+    private static TransferFailureCategory FailureOf(WireProtocolViolationException violation) => violation switch
+    {
+        UndecodableBatchException => TransferFailureCategory.UndecodableOrUnserializableBatch,
+        EndToEndEncryptionException => TransferFailureCategory.EndToEndEncryptionFailed,
+        _ => TransferFailureCategory.ProtocolViolation,
+    };
 
     private void CountRupture(long openedAtMs)
     {

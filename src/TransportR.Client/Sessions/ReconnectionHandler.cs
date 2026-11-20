@@ -59,9 +59,15 @@ internal class ReconnectionHandler : IDisposable
         _pongNextExpectedBatchId = -1;
     }
 
-    public async Task<int> ExecuteHandshakeAsync(Stream outputStream, Guid transferGuid, CancellationToken token)
+    /// <summary>
+    /// Writes the Ping at the head of a sender's data stream and, on a stream reopened after a cut, waits
+    /// for the Pong. Returns the receiver's next expected batch, or -1 when no Pong is waited for or none
+    /// came in time.
+    /// </summary>
+    /// <param name="pingPayload">The sender's share in an encrypted transfer; empty in clear.</param>
+    public async Task<int> ExecuteHandshakeAsync(Stream outputStream, Guid transferGuid, ReadOnlyMemory<byte> pingPayload, CancellationToken token)
     {
-        await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, token);
+        await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, pingPayload, token);
         await outputStream.FlushAsync(token);
 
         if (_streamPongReceived == null) return -1;
@@ -80,6 +86,12 @@ internal class ReconnectionHandler : IDisposable
             return -1; // Fail
         }
     }
+
+    /// <summary>
+    /// Lets a handshake that waits for a Pong go on without one: the session refused what came instead,
+    /// and its write loop has an Abort to write.
+    /// </summary>
+    public void AbandonHandshake() => _streamPongReceived?.TrySetResult();
 
     public void Dispose()
     {

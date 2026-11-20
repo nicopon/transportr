@@ -43,6 +43,9 @@ internal class BatchProcessor : IAsyncDisposable
     // Receiver State
     private ReceiverState? _receiverState;
 
+    // Null for a transfer in clear.
+    private SessionEncryption? _encryption;
+
     // Synchronization
     private TaskCompletionSource? _completeAckReceived;
 
@@ -89,6 +92,11 @@ internal class BatchProcessor : IAsyncDisposable
         _openSink = openSink;
         _sendChannel = Channel.CreateUnbounded<IControlMessage>();
     }
+
+    /// <summary>
+    /// Encrypts the transfer end to end: called once, before the sender or receiver starts.
+    /// </summary>
+    public void EncryptWith(SessionEncryption encryption) => _encryption = encryption;
 
     public Task StartSenderAsync(CancellationToken token)
     {
@@ -161,6 +169,7 @@ internal class BatchProcessor : IAsyncDisposable
     public void AbandonSender()
     {
         _source?.Abandon();
+        _encryption?.Abandon();
     }
 
     public Task WaitForCompleteAckAsync(CancellationToken token)
@@ -189,16 +198,18 @@ internal class BatchProcessor : IAsyncDisposable
 
         using (payload)
         {
+            _encryption?.CheckControlChunk(header);
+
             switch (header.Type)
             {
                 case ChunkType.BatchAck:
                     HandleBatchAck(header.BatchId);
                     break;
                 case ChunkType.Ping:
-                    await HandlePingAsync();
+                    await HandlePingAsync(payload);
                     break;
                 case ChunkType.Pong:
-                    HandlePong(header.BatchId);
+                    HandlePong(header.BatchId, payload);
                     break;
                 case ChunkType.Complete:
                     await HandleCompleteAsync(header);
@@ -266,6 +277,10 @@ internal class BatchProcessor : IAsyncDisposable
             if (payloadLength > _context.Options.MaxBatchBytes)
                 throw new InvalidOperationException(
                     $"A batch of {payloadLength} bytes is over WithMaxBatchBytes ({_context.Options.MaxBatchBytes} bytes).");
+
+            // The worker starts before the first Pong: nothing goes out before the keys are known to be
+            // the receiver's too.
+            if (_encryption is { } encryption) await encryption.WaitForKeysAsync(ct);
 
             entry = new BatchEntry(batch.Body, batch.Body.GetReadOnlySequence());
             await RegisterBatchAsync(entry, batch.BatchId, batch.Count, () => registered = true, ct);
@@ -421,10 +436,11 @@ internal class BatchProcessor : IAsyncDisposable
         }
     }
 
-    private async Task HandlePingAsync()
+    private async Task HandlePingAsync(IMemoryOwner<byte>? payload)
     {
+        var pong = _encryption?.AnswerPing(PayloadOf(payload));
         int nextExpected = _receiverState?.NextExpectedBatchId ?? 0;
-        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Pong, nextExpected));
+        await _sendChannel.Writer.WriteAsync(new ControlChunkMessage(ChunkType.Pong, nextExpected, pong));
         _context.Logger.LogDebug("Received Ping, sent Pong(nextExpected={NextExpected}) for Transfer={TransferId}", nextExpected, _transferId);
     }
 
@@ -439,10 +455,13 @@ internal class BatchProcessor : IAsyncDisposable
     /// </summary>
     public event Action<Exception>? OnSerializationFailed;
 
-    private void HandlePong(int nextExpectedBatchId)
+    private void HandlePong(int nextExpectedBatchId, IMemoryOwner<byte>? payload)
     {
+        _encryption?.AcceptPong(PayloadOf(payload));
         OnPongReceived?.Invoke(nextExpectedBatchId);
     }
+
+    private static ReadOnlySpan<byte> PayloadOf(IMemoryOwner<byte>? payload) => payload is null ? default : payload.Memory.Span;
 
     public async Task SendCompleteSignalAsync()
     {
@@ -603,6 +622,7 @@ internal class BatchProcessor : IAsyncDisposable
     {
         _sendChannel.Writer.TryComplete();
         _sendWorker = null;
+        _encryption?.Abandon();
 
         // Dispose the source first: its accumulator cancels its own token, which releases a
         // producer parked on the in-flight window before that window is disposed underneath it.

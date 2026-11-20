@@ -21,8 +21,8 @@ internal sealed record WireChunk(bool FromSender, int Epoch, ChunkHeader Header,
 /// </summary>
 /// <remarks>
 /// A GET opened again reads on from the same relay, so a session that reconnects finds what its peer
-/// wrote since. The end of the sender's data stream ends the receiver's data GET; the sender's control
-/// GET stays open until its session lets go of it.
+/// wrote since. The end of the sender's data stream ends the receiver's data GET, and a data GET opened
+/// after it is answered 410; the sender's control GET stays open until its session lets go of it.
 /// </remarks>
 internal sealed class RelayHub : HttpMessageHandler
 {
@@ -55,6 +55,9 @@ internal sealed class RelayHub : HttpMessageHandler
 
         if (request.Method == HttpMethod.Get && path.EndsWith($"/{WireRoutes.ReceiveSegment}"))
         {
+            // As the hub answers a data stream whose source has finished.
+            if (relay.Ended) return new HttpResponseMessage(HttpStatusCode.Gone);
+
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new RelayedStream(relay.Delivered)) };
         }
 
@@ -105,7 +108,13 @@ internal sealed class RelayHub : HttpMessageHandler
             }
         }
 
-        public void End() => _delivered.Writer.TryComplete();
+        public bool Ended { get; private set; }
+
+        public void End()
+        {
+            Ended = true;
+            _delivered.Writer.TryComplete();
+        }
     }
 
     /// <summary>The relayed chunks, one after the other, until the relay ends.</summary>

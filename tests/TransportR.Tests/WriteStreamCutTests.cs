@@ -48,7 +48,7 @@ public class WriteStreamCutTests
             writeAction: async (stream, token) =>
             {
                 handshake.PrepareForHandshake();
-                await handshake.ExecuteHandshakeAsync(stream, transferId, token);
+                await handshake.ExecuteHandshakeAsync(stream, transferId, ReadOnlyMemory<byte>.Empty, token);
                 await Task.Delay(Timeout.Infinite, token);
             },
             readAction: ReadUntilCancelledAsync,
@@ -103,7 +103,7 @@ public class WriteStreamCutTests
         handshake.PrepareForHandshake();
 
         using var attempt = new CancellationTokenSource();
-        var waiting = handshake.ExecuteHandshakeAsync(Stream.Null, Guid.NewGuid(), attempt.Token);
+        var waiting = handshake.ExecuteHandshakeAsync(Stream.Null, Guid.NewGuid(), ReadOnlyMemory<byte>.Empty, attempt.Token);
 
         await Task.Delay(100);
         Assert.False(waiting.IsCompleted);

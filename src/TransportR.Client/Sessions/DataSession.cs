@@ -68,6 +68,9 @@ internal class DataSession : IDataSession
     private readonly DataSessionStateMachine _fsm;
     private bool _isSender;
 
+    // Set when the session starts, null for a transfer in clear; disposed once its loops have stopped.
+    private SessionEncryption? _encryption;
+
     /// <summary>
     /// Set before the session moves to Failed, by whatever fails it - a peer's Abort, a stream the
     /// hub refuses for good, the acknowledgement timeout - and read from another thread by whatever
@@ -194,6 +197,7 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Sender Session {TransferId}...", TransferId);
         _isSender = true;
+        Encrypt();
 
         _batchProcessor.StartSenderAsync(_cts.Token);
         _config.Logger.LogInformation("Started serialization worker for {TransferId}", TransferId);
@@ -207,11 +211,23 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Receiver Session {TransferId}...", TransferId);
         _isSender = false;
+        Encrypt();
 
         await _batchProcessor.StartReceiverAsync();
 
         _fsm.TransitionTo(SessionState.Starting);
         _ = RunSessionLoop(_cts.Token);
+    }
+
+    /// <summary>
+    /// Sets up the session's end-to-end encryption, if the options ask for it, calling the pre-shared key
+    /// provider once. A provider that gives no key fails nothing yet: the first stream refuses the
+    /// transfer, and tells the peer.
+    /// </summary>
+    private void Encrypt()
+    {
+        _encryption = SessionEncryption.Open(_config.Options, IsSender, TransferId, _parties, _config.Logger);
+        if (_encryption is not null) _batchProcessor.EncryptWith(_encryption);
     }
 
     // IsCompletedSuccessfully, not IsCompleted: a call that lost the race against an Abort or a
@@ -597,6 +613,7 @@ internal class DataSession : IDataSession
 
         _heartbeatTimer.Dispose();
         _cts.Dispose();
+        _encryption?.Dispose();
         _control.RemoveSession(TransferId);
     }
 
@@ -817,13 +834,18 @@ internal class DataSession : IDataSession
     {
         var transferGuid = Guid.Parse(TransferId);
 
-        if (IsSender)
+        if (_encryption is { Refused: true })
+        {
+            // No key for this peer: nothing of the transfer is written, and the peer is told why it ends.
+            RefuseUnkeyedTransfer();
+        }
+        else if (IsSender)
         {
             // Every stream starts with the handshake, new or resumed alike. Doing it only on a
             // flagged reconnection would make the sender's idea of where the receiver stands
             // depend on the client having noticed the cut, which is exactly what it cannot be
             // trusted to know. Returns -1 on timeout, otherwise the receiver's NextExpectedId.
-            int nextExpectedFromPong = await _reconnectionHandler.ExecuteHandshakeAsync(outputStream, transferGuid, token);
+            int nextExpectedFromPong = await _reconnectionHandler.ExecuteHandshakeAsync(outputStream, transferGuid, PingPayload, token);
             bool didPingPong = nextExpectedFromPong >= 0;
 
             // Step 2: Resend unacked batches (targeted if ping/pong succeeded)
@@ -843,6 +865,20 @@ internal class DataSession : IDataSession
 
         // Step 3: Process send channel (normal operation)
         await ProcessSendChannelAsync(outputStream, transferGuid, token);
+    }
+
+    private ReadOnlyMemory<byte> PingPayload => _encryption?.PingPayload ?? ReadOnlyMemory<byte>.Empty;
+
+    /// <summary>
+    /// Fails a transfer this end has no key for, and queues the Abort the write loop then writes, alone:
+    /// the peer learns of it as a peer that gave up.
+    /// </summary>
+    private void RefuseUnkeyedTransfer()
+    {
+        if (IsStopped) return;
+
+        FailTransfer(TransferFailureCategory.EndToEndEncryptionFailed, SessionEncryption.NoKey);
+        AbortPeer(AbortReason.VerificationFailed);
     }
 
 
@@ -926,17 +962,22 @@ internal class DataSession : IDataSession
             }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
-                await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, token);
+                await ChunkIO.WriteControlAsync(outputStream, transferGuid, 0, ChunkType.Ping, PingPayload, token);
                 await outputStream.FlushAsync(token);
             }
         }
     }
 
     /// <summary>
-    /// What a chunk read off a sender's control stream may carry: acknowledgements, Pongs and Aborts are
-    /// a header and nothing more.
+    /// What a chunk read off a sender's control stream may carry: in clear, acknowledgements, Pongs and
+    /// Aborts are a header and nothing more; encrypted, a Pong is the longest.
     /// </summary>
-    private const int MaxControlPayloadBytes = 0;
+    private int MaxControlPayloadBytes => _encryption is null ? 0 : SessionEncryption.MaxControlPayloadBytes;
+
+    /// <summary>What a chunk read off a receiver's data stream may carry: a batch, and its tag when it is sealed.</summary>
+    private int MaxDataPayloadBytes => _encryption is null
+        ? _config.Options.MaxBatchBytes
+        : SessionEncryption.MaxDataPayloadBytes(_config.Options.MaxBatchBytes);
 
     private async Task ReadLoop(Stream inputStream, CancellationToken token)
     {
@@ -965,7 +1006,7 @@ internal class DataSession : IDataSession
 
                 var chunkRead = IsSender
                     ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", token)
-                    : ChunkIO.ReadOwnedChunkAsync(inputStream, _config.Options.MaxBatchBytes, "WithMaxBatchBytes allows", token);
+                    : ChunkIO.ReadOwnedChunkAsync(inputStream, MaxDataPayloadBytes, "WithMaxBatchBytes allows", token);
                 if (await chunkRead is not { } chunk)
                 {
                     // If stream ends but we haven't received Complete, it's an error (premature disconnect)
@@ -981,6 +1022,16 @@ internal class DataSession : IDataSession
                 {
                     // The payload is the processor's from this call on: nothing in this loop returns it.
                     await _batchProcessor.ProcessChunkAsync(chunk.Header, chunk.Payload, token);
+                }
+                catch (EndToEndEncryptionException ex) when (!_cts.IsCancellationRequested && !IsStopped)
+                {
+                    // As for a batch it cannot decode, the peer is told first. A sender's write loop may be
+                    // waiting for the Pong this refused: it is let go, so that the Abort is not held behind it.
+                    _config.Logger.LogError("End-to-end encryption refused Transfer={TransferId} ({Reason}): {Message}", TransferId, ex.Reason, ex.Message);
+                    _reconnectionHandler.AbandonHandshake();
+                    AbortPeer(ex.Reason);
+                    await DeliverWriteSideEndAsync();
+                    throw;
                 }
                 catch (UndecodableBatchException ex) when (!_cts.IsCancellationRequested && !IsStopped)
                 {
