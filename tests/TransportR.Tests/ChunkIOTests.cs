@@ -155,6 +155,40 @@ public class ChunkIOTests
     }
 
     [Fact]
+    public async Task WriteControlAsync_WithAPayload_WritesItAfterTheHeader_WhichAnnouncesItsLength()
+    {
+        var transferId = Guid.NewGuid();
+        var payload = Enumerable.Range(0, 65).Select(i => (byte)i).ToArray();
+        using var ms = new MemoryStream();
+
+        await ChunkIO.WriteControlAsync(ms, transferId, 7, ChunkType.Ping, payload);
+        ms.Position = 0;
+
+        var chunk = await WireChunks.ReadAsync(ms);
+        Assert.NotNull(chunk);
+        using var owner = chunk.Value.Payload;
+        Assert.Equal(ChunkType.Ping, chunk.Value.Header.Type);
+        Assert.Equal(7, chunk.Value.Header.BatchId);
+        Assert.Equal(0, chunk.Value.Header.Count);
+        Assert.Equal(65, chunk.Value.Header.PayloadLength);
+        Assert.Equal(payload, owner!.Memory.ToArray());
+        Assert.Equal(ChunkHeader.Size + 65, ms.Length);
+    }
+
+    [Fact]
+    public async Task WriteControlAsync_WithAnEmptyPayload_WritesTheBytesOfAControlChunkWithoutOne()
+    {
+        var transferId = Guid.NewGuid();
+        using var without = new MemoryStream();
+        using var empty = new MemoryStream();
+
+        await ChunkIO.WriteControlAsync(without, transferId, 3, ChunkType.CompleteAck);
+        await ChunkIO.WriteControlAsync(empty, transferId, 3, ChunkType.CompleteAck, ReadOnlyMemory<byte>.Empty);
+
+        Assert.Equal(without.ToArray(), empty.ToArray());
+    }
+
+    [Fact]
     public async Task ChunkIO_WriteComplete_And_ReadOwnedChunk_RoundTrip()
     {
         // Arrange
@@ -328,6 +362,8 @@ public class ChunkIOTests
         Assert.Equal(0x06, (byte)ChunkType.Pong);
         Assert.Equal(0x07, (byte)ChunkType.Abort);
         Assert.Equal(0x08, (byte)ChunkType.StreamBatch);
+        Assert.Equal(0x09, (byte)ChunkType.SealedBatch);
+        Assert.Equal(0x0A, (byte)ChunkType.SealedStreamBatch);
     }
 
     [Fact]

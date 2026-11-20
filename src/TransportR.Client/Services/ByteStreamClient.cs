@@ -160,11 +160,11 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// A session with the ends the client builds for it, and the stream manager that serves its batches:
     /// the session holds the only reference, so the memory it pooled goes with it.
     /// </summary>
-    private ByteClientSession NewSession(string transferId, int batchSize, string? affinity)
+    private ByteClientSession NewSession(string transferId, int batchSize, string? affinity, TransferParties parties)
     {
         var send = new ByteBatchSource(_batchBytes, _options.BatchFlushIntervalMs, new RecyclableMemoryStreamManager());
         var receive = new ByteReceivePort(_options.ReceiveBufferCapacity);
-        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, send, receive.OpenSink);
+        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, parties, send, receive.OpenSink);
         return new ByteClientSession(session, send, receive);
     }
 }

@@ -537,6 +537,8 @@ public class ByteSendReceiveTests
         public SessionState State => SessionState.Streaming;
         public WriteTransport? WriteTransport => null;
         public string? WriteTransportFallback => null;
+        public bool IsEncrypted => false;
+        public bool UsesPreSharedKey => false;
         public long ItemsProcessed => 0;
         public long BytesTransferred => 0;
         public long AcksReceived => 0;

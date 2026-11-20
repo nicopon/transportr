@@ -90,6 +90,7 @@ public class SendWindowStallTests
 
         await using var session = new DataSession(
             context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null,
+            new TransferParties(Guid.NewGuid(), Guid.NewGuid()),
             new ByteBatchSource(4, context.Options.BatchFlushIntervalMs, context.StreamManager),
             new ByteReceivePort(context.Options.ReceiveBufferCapacity).OpenSink);
         await session.StartSenderAsync();

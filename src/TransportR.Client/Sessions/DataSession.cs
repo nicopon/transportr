@@ -58,6 +58,7 @@ internal class DataSession : IDataSession
 
     private readonly IControlPlane _control;
     private readonly string? _affinity;
+    private readonly TransferParties _parties;
     private readonly ISessionConfig _config;
 
     private readonly CancellationTokenSource _cts;
@@ -94,6 +95,8 @@ internal class DataSession : IDataSession
     public SessionState State => _fsm.CurrentState;
     public WriteTransport? WriteTransport => _httpStreamManager.WriteTransport;
     public string? WriteTransportFallback => _httpStreamManager.WriteTransportFallback;
+    public bool IsEncrypted => _config.Options.EndToEndEncryption is not null;
+    public bool UsesPreSharedKey => _config.Options.EndToEndEncryption?.PreSharedKey is not null;
 
     /// <summary>
     /// True once the session has stopped, whether it succeeded or failed.
@@ -118,6 +121,7 @@ internal class DataSession : IDataSession
     /// The cookies that reach the hub instance holding the transfer's bridge, which every request of
     /// the session carries: its streams, its heartbeats, its probe and its abort.
     /// </param>
+    /// <param name="parties">The transfer's two clients, as this end holds them.</param>
     /// <param name="batches">
     /// Where the batches of a sending session come from; the session opens it when it starts sending.
     /// </param>
@@ -127,10 +131,11 @@ internal class DataSession : IDataSession
     /// </param>
     public DataSession(
         ISessionContext context, string transferId, int batchSize, string dataUrl, string? affinity,
-        IBatchSource batches, Func<IChunkSink> openSink)
+        TransferParties parties, IBatchSource batches, Func<IChunkSink> openSink)
     {
         _control = context;
         _affinity = affinity;
+        _parties = parties;
         _config = context; // ISessionContext implements ISessionConfig
 
         TransferId = transferId;
@@ -869,7 +874,7 @@ internal class DataSession : IDataSession
                 }
                 else if (message is ControlChunkMessage ctrlMsg)
                 {
-                    await ChunkIO.WriteControlAsync(outputStream, transferGuid, ctrlMsg.BatchId, ctrlMsg.Type, token);
+                    await ChunkIO.WriteControlAsync(outputStream, transferGuid, ctrlMsg.BatchId, ctrlMsg.Type, ctrlMsg.Payload, token);
 
                     if (ctrlMsg.Type == ChunkType.Abort)
                     {

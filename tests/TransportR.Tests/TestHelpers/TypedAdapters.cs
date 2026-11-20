@@ -18,15 +18,17 @@ internal sealed class TestSession : DataSession
     private readonly HttpSend<string> _send;
     private readonly HttpReceive<string> _receive;
 
-    public TestSession(StubSessionContext context, string transferId, int batchSize, string dataUrl, string? affinity)
-        : this(context, transferId, batchSize, dataUrl, affinity, context.CreatePorts(batchSize))
+    /// <param name="parties">The two clients as this end holds them; two ids of no client when not given.</param>
+    public TestSession(
+        StubSessionContext context, string transferId, int batchSize, string dataUrl, string? affinity, TransferParties? parties = null)
+        : this(context, transferId, batchSize, dataUrl, affinity, parties ?? new TransferParties(Guid.NewGuid(), Guid.NewGuid()), context.CreatePorts(batchSize))
     {
     }
 
     private TestSession(
-        StubSessionContext context, string transferId, int batchSize, string dataUrl, string? affinity,
+        StubSessionContext context, string transferId, int batchSize, string dataUrl, string? affinity, TransferParties parties,
         (ISendPort<string> Send, IReceivePort<string> Receive) ports)
-        : base(context, transferId, batchSize, dataUrl, affinity, ports.Send.Source, ports.Receive.OpenSink)
+        : base(context, transferId, batchSize, dataUrl, affinity, parties, ports.Send.Source, ports.Receive.OpenSink)
     {
         _send = new HttpSend<string>(this, ports.Send);
         _receive = new HttpReceive<string>(this, ports.Receive);

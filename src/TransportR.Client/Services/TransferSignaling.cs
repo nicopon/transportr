@@ -25,7 +25,7 @@ internal class TransferSignaling<TSession, TSend, TReceive>
 {
     private readonly ControlChannel _channel;
     private readonly SessionRegistry<TSession> _sessionRegistry;
-    private readonly Func<string, int, string?, TSession> _newSession;
+    private readonly Func<string, int, string?, TransferParties, TSession> _newSession;
     private readonly Func<TSession, TSend> _makeSend;
     private readonly Func<TSession, TReceive> _makeReceive;
     private readonly ILogger _logger;
@@ -34,9 +34,9 @@ internal class TransferSignaling<TSession, TSend, TReceive>
     private readonly Func<Func<TSend, Task>?> _sendRequestedHandler;
 
     /// <param name="newSession">
-    /// Makes the session of a transfer, given its id, its batch size and the affinity that reached the
-    /// instance holding its bridge. Building the sending and receiving ends is where a client that
-    /// cannot carry what it was asked to is refused.
+    /// Makes the session of a transfer, given its id, its batch size, the affinity that reached the
+    /// instance holding its bridge and its two clients as this end holds them. Building the sending and
+    /// receiving ends is where a client that cannot carry what it was asked to is refused.
     /// </param>
     /// <param name="makeSend">The handle of a session a sender starts.</param>
     /// <param name="makeReceive">The handle of a session a receiver starts.</param>
@@ -48,7 +48,7 @@ internal class TransferSignaling<TSession, TSend, TReceive>
     public TransferSignaling(
         ControlChannel channel,
         SessionRegistry<TSession> sessionRegistry,
-        Func<string, int, string?, TSession> newSession,
+        Func<string, int, string?, TransferParties, TSession> newSession,
         Func<TSession, TSend> makeSend,
         Func<TSession, TReceive> makeReceive,
         ILogger logger,
@@ -127,7 +127,8 @@ internal class TransferSignaling<TSession, TSend, TReceive>
         CallbackOutcome outcome;
         try
         {
-            var session = _sessionRegistry.GetOrAdd(ready.TransferId, id => _newSession(id, _defaultBatchSize, affinity));
+            var parties = new TransferParties(ready.SenderId, _channel.ClientId);
+            var session = _sessionRegistry.GetOrAdd(ready.TransferId, id => _newSession(id, _defaultBatchSize, affinity, parties));
             await session.Session.StartReceiverAsync();
 
             var transfer = _makeReceive(session);
@@ -161,7 +162,8 @@ internal class TransferSignaling<TSession, TSend, TReceive>
             throw new InvalidOperationException($"Session {transferId} already exists. Cannot overwrite.");
         }
 
-        var session = _sessionRegistry.GetOrAdd(transferId, id => _newSession(id, size, affinity));
+        var parties = new TransferParties(_channel.ClientId, receiverId);
+        var session = _sessionRegistry.GetOrAdd(transferId, id => _newSession(id, size, affinity, parties));
         await session.Session.StartSenderAsync();
         return _makeSend(session);
     }
@@ -201,7 +203,8 @@ internal class TransferSignaling<TSession, TSend, TReceive>
 
         _logger.LogDebug("Starting requested send session: TransferId={TransferId}, ReceiverId={ReceiverId}", request.TransferId, request.ReceiverId);
 
-        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => _newSession(id, _defaultBatchSize, affinity));
+        var parties = new TransferParties(_channel.ClientId, request.ReceiverId);
+        var session = _sessionRegistry.GetOrAdd(request.TransferId, id => _newSession(id, _defaultBatchSize, affinity, parties));
         await session.Session.StartSenderAsync();
 
         var transfer = _makeSend(session);

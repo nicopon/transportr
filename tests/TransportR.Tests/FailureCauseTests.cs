@@ -27,7 +27,8 @@ public class FailureCauseTests
         var (port, receive) = context.CreatePorts(batchSize: 1);
         var source = new HeldRelease(port.Source);
         await using var session = new DataSession(
-            context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null, source, receive.OpenSink);
+            context, Guid.NewGuid().ToString(), batchSize: 1, dataUrl: "http://test/data", affinity: null,
+            new TransferParties(Guid.NewGuid(), Guid.NewGuid()), source, receive.OpenSink);
         var send = new HttpSend<string>(session, port);
         await session.StartSenderAsync();
 

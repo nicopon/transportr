@@ -49,4 +49,13 @@ public enum TransferFailureCategory
     /// and the path to the hub does not carry one.
     /// </summary>
     Other,
+
+    /// <summary>
+    /// End-to-end encryption refused the transfer at this end: the peer does not encrypt, or encrypts
+    /// where this end does not; a confirmation, receipt or sealed batch did not verify, which a stream
+    /// altered on its way and two different pre-shared keys both cause; or the pre-shared key provider
+    /// gave no 32-byte key for the peer. The message names no key. The peer learns it as
+    /// <see cref="AbandonedByPeer"/>.
+    /// </summary>
+    EndToEndEncryptionFailed,
 }

@@ -178,10 +178,10 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     /// A session with the sending and receiving ends the client builds for it, and the stream manager that
     /// serves its batches: the session holds the only reference, so the memory it pooled goes with it.
     /// </summary>
-    private ClientSession<T> NewSession(string transferId, int batchSize, string? affinity)
+    private ClientSession<T> NewSession(string transferId, int batchSize, string? affinity, TransferParties parties)
     {
         var (send, receive) = SessionPorts.Create(_options, _serializer, new RecyclableMemoryStreamManager(), batchSize);
-        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, send.Source, receive.OpenSink);
+        var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, parties, send.Source, receive.OpenSink);
         return new ClientSession<T>(session, send, receive);
     }
 

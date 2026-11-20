@@ -142,5 +142,11 @@ internal class ClientOptions
     /// </remarks>
     public int MaxBatchBytes { get; set; } = DefaultMaxBatchBytes;
 
+    /// <summary>
+    /// Seals every batch of this client's transfers end to end. <c>null</c> (the default) leaves them in
+    /// clear, byte for byte as a client without it writes them.
+    /// </summary>
+    public EndToEndEncryption? EndToEndEncryption { get; set; }
+
     public const int DefaultMaxBatchBytes = 256 * 1024 * 1024;
 }

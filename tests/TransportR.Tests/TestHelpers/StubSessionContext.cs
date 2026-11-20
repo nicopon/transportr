@@ -20,7 +20,8 @@ internal class StubSessionContext : ISessionContext
     {
         var (send, receive) = CreatePorts(batchSize);
         return new ClientSession<string>(
-            new DataSession(this, transferId, batchSize, dataUrl, affinity, send.Source, receive.OpenSink), send, receive);
+            new DataSession(this, transferId, batchSize, dataUrl, affinity, new TransferParties(Guid.NewGuid(), ClientId), send.Source, receive.OpenSink),
+            send, receive);
     }
     public HttpClient HttpClient { get; }
 

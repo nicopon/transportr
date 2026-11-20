@@ -41,6 +41,12 @@ internal interface IDataSession : IAsyncDisposable
     /// <summary>Why this session does not use a WebSocket, once it has given up on one.</summary>
     string? WriteTransportFallback { get; }
 
+    /// <summary>Whether this session seals its batches end to end.</summary>
+    bool IsEncrypted { get; }
+
+    /// <summary>Whether a pre-shared key enters this session's keys; never without <see cref="IsEncrypted"/>.</summary>
+    bool UsesPreSharedKey { get; }
+
 
     /// <summary>
     /// Number of items processed (sent or received).

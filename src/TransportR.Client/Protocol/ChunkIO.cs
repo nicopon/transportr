@@ -78,15 +78,35 @@ internal static class ChunkIO
     /// <summary>
     /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.
     /// </summary>
+    public static Task WriteControlAsync(
+        Stream stream,
+        Guid transferId,
+        int batchId,
+        ChunkType type,
+        CancellationToken ct = default) =>
+        WriteControlAsync(stream, transferId, batchId, type, ReadOnlyMemory<byte>.Empty, ct);
+
+    /// <summary>
+    /// Writes a control chunk followed by <paramref name="payload"/>, whose length its header announces.
+    /// An empty payload writes the bytes of a control chunk without one.
+    /// </summary>
     public static async Task WriteControlAsync(
         Stream stream,
         Guid transferId,
         int batchId,
         ChunkType type,
+        ReadOnlyMemory<byte> payload,
         CancellationToken ct = default)
     {
-        var header = ChunkHeader.CreateControl(transferId, batchId, type);
-        await WriteHeaderOnlyAsync(stream, header, ct).ConfigureAwait(false);
+        var header = ChunkHeader.CreateControl(transferId, batchId, type) with { PayloadLength = payload.Length };
+        if (payload.IsEmpty)
+        {
+            await WriteHeaderOnlyAsync(stream, header, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await WriteChunkAsync(stream, header, payload, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
