@@ -137,12 +137,15 @@ Each is described where its pointer leads. A change that undoes one is the owner
   transcript, a label or a size breaks the wire, and the frozen vector of `EndToEndCipherTests` is then recomputed by
   `tests/vectors/end_to_end_kat.py`, not by the C# code.
 
-## Working conventions (from `.agent/workflows/coding-guidelines.md`)
+## Working conventions
 
 - English only, in code, comments, and docs.
+- **Be objective and critical.** No flattery. Challenge an idea you see a problem in, and state an uncertainty
+  rather than speculate with confidence.
 - Present a plan before any major refactor and wait for confirmation before executing it.
 - Client-facing error messages must stay generic (no internal paths/group names/config); put
-  diagnostic detail only in server-side logs.
+  diagnostic detail only in server-side logs. A security trade-off goes to the owner as options, each with
+  its implications.
 - **Strict over tolerant**: don't silently auto-correct dirty input or add backward-compat shims in
   code — if a tolerance mechanism seems useful, propose it as an explicit option instead of building
   it in quietly.
@@ -170,9 +173,11 @@ Each is described where its pointer leads. A change that undoes one is the owner
   and report the spread, not just the means.
 - **Scope discipline**: TransportR is deliberately not a message broker. Flag (rather than silently
   implement) anything that pushes it toward pub/sub, hub-side persistence/replay, or topic routing —
-  point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces before
-  building it. A host coordinates its own clients over a channel of its own: TransportR's control
-  plane offers it no hook, and a hook, a group of event streams or a fan-out proposed there is the same
-  drift toward pub/sub. Ask of each addition a consumer requests whether it is transport or
-  orchestration; orchestration belongs to the host.
+  point to Kafka/RabbitMQ instead. Question any addition needing more than 2-3 new interfaces, or new
+  infrastructure to operate, before building it. A host coordinates its own clients over a channel of
+  its own: TransportR's control plane offers it no hook, and a hook, a group of event streams or a
+  fan-out proposed there is the same drift toward pub/sub. Ask of each addition a consumer requests
+  whether it is transport or orchestration; orchestration belongs to the host.
+  - **Other languages**: not excluded, and best left to outside contributors. The wire format ports easily; the resilience
+    logic (reconnection, Ping/Pong, resumption) does not, and each language multiplies bug parity and testing: flag that cost.
 - No generation dates in documentation.
