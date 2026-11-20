@@ -91,12 +91,11 @@ public class TransportRClientBuilder<T>
     /// This is the only backpressure path from the receiver back to the producer. Left unset, a
     /// slow receiver makes the sender hold the whole source in memory: TCP throttles the HTTP
     /// write, but nothing upstream of it. The window counts batches, so it bounds roughly
-    /// <c>max × batch size</c> — see "Backpressure" in <c>ResilienceArchitecture.md</c> for sizing.
+    /// <c>max × batch size</c>.
     /// </para>
     /// <para>
-    /// On high-latency or WAN links, size the in-flight window to at least the bandwidth-delay product
-    /// (<c>RTT × bandwidth</c>) to avoid starving the sender while waiting for acknowledgements across
-    /// round-trips.
+    /// On a long round trip, the window in bytes (<c>max × batch size</c>) must cover
+    /// <c>RTT × bandwidth</c>, or acknowledgements set the rate.
     /// </para>
     /// </remarks>
     public TransportRClientBuilder<T> WithMaxInFlightBatches(int max)
@@ -113,8 +112,8 @@ public class TransportRClientBuilder<T>
     /// <para>
     /// Pass a count, a wire-byte budget, or both; the first one reached is the one that binds,
     /// so an Arrow consumer is held by the bytes and a record consumer by the count without
-    /// either having to disable the other. At least one is required — calling this to bound
-    /// nothing is a contradiction, and not calling it is how you say that.
+    /// either having to disable the other. At least one is required; to bound nothing, do not
+    /// call this method.
     /// </para>
     /// <para>
     /// Raise the byte figure for throughput on a fast consumer, lower it to cap the receiver's
@@ -139,29 +138,17 @@ public class TransportRClientBuilder<T>
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A receiver refuses a chunk that announces a larger payload before it reserves any memory for
-    /// it: the transfer fails as a protocol violation, and the error names this setting. A sender
-    /// refuses a larger batch before it is sent: an item client fails the transfer on a serialized
-    /// batch above its own bound, and a byte client's <c>Build</c> refuses a batch size above it.
+    /// Both ends need a bound at least as large as the largest batch the sender cuts; it can be raised,
+    /// not removed. A receiver refuses a chunk that announces more before reserving memory for it, and
+    /// the transfer fails as a protocol violation naming this setting. An item client fails on a
+    /// serialized batch above its own bound; a byte client's <c>Build</c> refuses a batch size above it.
     /// </para>
     /// <para>
-    /// Both ends of a transfer need a bound at least as large as the largest batch the sender cuts.
-    /// The bound can be raised, not removed.
-    /// </para>
-    /// <para>
-    /// It also bounds what a compressed batch may expand to on receipt: the serializers of the
-    /// <c>With*Serialization</c> extensions refuse a batch that decompresses to more, without
-    /// decompressing the rest, and the transfer fails as a protocol violation. A serializer passed to
-    /// <c>WithSerializer</c> is not given this figure: see <see cref="WithSerializer"/>.
-    /// </para>
-    /// <para>
-    /// The sender's side of that bound is not the same for every serializer. The Json serializer
-    /// refuses, at serialization, a batch that is more than the bound before compression, so a
-    /// receiver at the same bound takes whatever it sends. The MessagePack and Arrow serializers do
-    /// not: they send a batch that expands past the bound, and it is the receiver that refuses it and
-    /// fails the transfer. The sender must therefore size its batches so that they do not. For Arrow, what
-    /// counts against the bound is the compressed body of a batch plus every buffer once decompressed,
-    /// which is more than the size of the record batch.
+    /// With the <c>With*Serialization</c> extensions it also bounds a batch once decompressed: the
+    /// receiver refuses one that expands past it, without decompressing the rest. The Json serializer
+    /// checks this when it serializes; the MessagePack and Arrow serializers do not, so their sender
+    /// must cut batches the receiver accepts (for Arrow, the compressed body plus every buffer once
+    /// decompressed). A serializer passed to <see cref="WithSerializer"/> is not given this figure.
     /// </para>
     /// </remarks>
     /// <param name="maxBytes">The largest batch payload accepted, in bytes.</param>
