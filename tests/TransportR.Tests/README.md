@@ -62,3 +62,6 @@ test. They are skipped only when neither exists (`RedisServer.cs`).
 ## Notes
 
 - For end-to-end runs with real processes, use `./scripts/run-benchmark.sh`.
+- `tests/vectors/end_to_end_kat.py` recomputes, in Python and from the specification alone, the vector
+  `EndToEndCipherTests` freezes, and checks the test carries every value. In a venv with `cryptography`:
+  `<venv>/bin/python -I tests/vectors/end_to_end_kat.py tests/TransportR.Tests/EndToEndCipherTests.cs`.

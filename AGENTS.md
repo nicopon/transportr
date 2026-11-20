@@ -134,7 +134,8 @@ Each is described where its pointer leads. A change that undoes one is the owner
   `SecurityArchitecture.md`).
 - **One suite, never negotiated.** Noise and TLS were examined and set aside: the construction is theirs in substance,
   written out (the first paragraph of "End-to-End Encryption" in `TransportRArchitecture.md`). Changing the
-  transcript, a label or a size breaks the wire.
+  transcript, a label or a size breaks the wire, and the frozen vector of `EndToEndCipherTests` is then recomputed by
+  `tests/vectors/end_to_end_kat.py`, not by the C# code.
 
 ## Working conventions (from `.agent/workflows/coding-guidelines.md`)
 
