@@ -105,6 +105,7 @@ pre-shared key (PSK) can be added; the protocol is under "End-to-End Encryption"
 |---|---|---|
 | Whoever reads the path: a front end or proxy that terminates TLS, the hub's logs and memory image, a network capture | protected | protected |
 | A hub, or whoever runs it, that modifies: substitutes the shares, alters, moves or truncates batches, forges an acknowledgement | **not protected**: the key exchange is not authenticated, and a hub that answers each end with a share of its own reads and rewrites everything | protected: the transfer fails, never a false success |
+| A hub that hands a transfer to a node other than the one the sender named, or announces another sender to the receiver | **not protected** | protected: each end binds the two client ids it holds into every key, so the confirmation fails before any batch, whether the PSK is per trust domain or per pair |
 
 - **Without a PSK the protection holds only against whoever reads.** Whoever can rewrite the streams can stand between
   the two ends unseen.

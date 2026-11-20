@@ -279,6 +279,9 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 └──────────────────────────────────────────────────────────────┘
 ```
 
+Integers are little-endian. A GUID is the 16 bytes `Guid.ToByteArray()` gives: the first three fields of its text form
+(4, 2 and 2 bytes) little-endian, the last 8 bytes in order.
+
 ### ChunkType Values
 
 | Type | Value | Description |
@@ -302,18 +305,25 @@ The transport protocol uses a **30-byte fixed header** followed by an **opaque b
 `WithEndToEndEncryption(Func<Guid, byte[]?> preSharedKey)` also mixes a 32-byte pre-shared key (PSK) into the keys. Both
 ends are built alike, and `Build()` refuses where `AesGcm.IsSupported` is false. What each level protects, and against
 whom, is under "End-to-End Encryption" in [SecurityArchitecture.md](./SecurityArchitecture.md#end-to-end-encryption).
-One suite, never negotiated, all in the BCL: ECDH on P-256, HKDF-SHA256, AES-256-GCM, HMAC-SHA256.
+One suite, never negotiated, all in the BCL: ECDH on P-256, HKDF-SHA256, AES-256-GCM, HMAC-SHA256. In substance the
+construction is Noise `NNpsk0`'s and TLS 1.3's PSK-DHE key schedule, written out here because Noise defines no P-256
+function and the BCL has no portable X25519.
 
 - **Shares.** Each end draws an ephemeral P-256 key pair per session, kept across its reconnections and erased once the
   keys are derived. The sender's share is the payload of every `Ping`, the handshake's and the keepalive's: 65 bytes,
-  the uncompressed point (`0x04`, X, Y). The receiver's share followed by the key confirmation is the payload of every
-  `Pong`, 97 bytes; a `Pong`'s `BatchId` keeps the resume point. A share that is not a point of the curve, or differs
-  from the first one a session accepted, is refused. The `Ping` heads every stream the sender opens, so the receiver
-  holds the keys before the first batch; the sender seals nothing, and signs no `Complete`, before a `Pong` whose
-  confirmation holds.
-- **Keys.** The transcript `T` is the mode (1 byte: `0x00`, `0x01` with a PSK), the `TransferId` (16 bytes, as in the
-  header), the sender's share and the receiver's. `PRK = HKDF-Extract(salt = PSK or 32 zero bytes, IKM = the ECDH
-  secret, its X coordinate)`, and each 32-byte key is `HKDF-Expand(PRK, label ‖ T)`, with the ASCII labels
+  the uncompressed point of SEC 1 (`0x04`, then X and Y, 32 bytes each, big-endian). The receiver's share followed by
+  the key confirmation is the payload of every `Pong`, 97 bytes; a `Pong`'s `BatchId` keeps the resume point. A share
+  that is not a point of the curve, or differs from the first one a session accepted, is refused. The `Ping` heads
+  every stream the sender opens, so the receiver holds the keys before the first batch; the sender seals nothing, and
+  signs no `Complete`, before a `Pong` whose confirmation holds.
+- **Keys.** The transcript `T` is 227 bytes, in this order: the protocol identifier, one byte of length (47) then the
+  ASCII `transportr e2e v1 P-256 HKDF-SHA256 AES-256-GCM`, length-prefixed so that no identifier another suite or
+  version takes yields the same bytes; the mode (1 byte: `0x00`, `0x01` with a PSK); the `TransferId`, the sender's
+  client id and the receiver's, 16 bytes each, written as the header writes the `TransferId`; the sender's share and
+  the receiver's. Each end writes the two ids as it holds them: the sender, its own and the target it named to
+  `InitTransferAsync`, or, for a transfer the host opens, the receiver the hub announces; the receiver, its own and the
+  sender the hub announces. `PRK = HKDF-Extract(salt = PSK or 32 zero bytes, IKM = the ECDH secret, its X coordinate,
+  32 bytes big-endian)`, and each 32-byte key is `HKDF-Expand(PRK, label ‖ T)`, with the ASCII labels
   `transportr e2e batch`, `transportr e2e confirmation`, `transportr e2e sender receipt` and
   `transportr e2e receiver receipt`. The confirmation is `HMAC-SHA256(confirmation key, T)`, all 32 bytes, as for both
   receipts: they cross once per stream opening or transfer, and an untruncated MAC needs no rule of its own. The mode
