@@ -32,7 +32,7 @@ dotnet run
 
 1. Read orders from binary file
 2. Connect to hub (`ConnectAsync`, group `senders` by default)
-3. Wait for receiver to connect
+3. Discover the receivers and wait for one to connect
 4. Initiate transfer
 5. Stream items through batches, with automatic retry
 6. Send the completion signal and wait for the receiver to acknowledge everything (`CompleteAsync`)
