@@ -258,26 +258,40 @@ if (pong.NextExpectedBatchId > currentBatch.Id) {
 
 ### 3. Hub-Driven Timeout (Dead Transfer Cleanup)
 
-The Hub employs a **TransferCleanupService** that monitors all active transfers. `BridgeCleanupService` judges something
-else: it ends, through `ITransferTerminator`, the transfer of a bridge left short of `Active` for `BridgeTimeoutSeconds`,
-waiting for a peer, and skips `Active` bridges, left to the policies below.
+Two reapers end transfers on the hub:
 
--   **LastActivityUtc**: Updates on the per-transfer heartbeats, on the probe request (`…/ping`), and on every read the hub makes from one of the transfer's streams: the bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' heartbeats are silent.
+-   **`TransferCleanupService`** watches every active transfer, by the policies below.
+-   **`BridgeCleanupService`** ends, through `ITransferTerminator`, the transfer of a bridge left short of `Active` for
+    `BridgeTimeoutSeconds`, waiting for its peer. It skips `Active` bridges, left to the policies below.
+
+What `TransferCleanupService` judges:
+
+-   **LastActivityUtc**: updated by the per-transfer heartbeats, the probe request (`…/ping`), and every read the hub makes from one of the transfer's streams, whose bytes are counted, never read. A transfer whose streams carry data stays alive while its participants' heartbeats are silent.
+-   **LastProgressUtc**: updated ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
 -   **Which hub instance judges**: the one that registered the transfer, or that accepted one of its streams. An instance that only looks the transfer up in the shared store (a misrouted request, a check whether the hub still holds it) starts no state, so its sweep never ends a transfer it does not carry.
--   **LastProgressUtc**: Updates ONLY when `ItemsSent`, `AcksReceived`, `ItemsReceived` or `AcksSent` increases.
--   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, default `60 s`): a transfer with no activity at all — neither a heartbeat nor a byte — is terminated, whether or not it ever reported: the hub knows a transfer from its registration, or from the first of its streams it accepts. Because heartbeats and probes refresh `LastActivityUtc`, this deliberately does **not** fire for a peer that is connected but stuck.
--   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, default **disabled**): a transfer that is alive but whose counters have not moved is terminated. This is the "Zombie" case (a deadlock or a client issue).
--   **Why the second one is opt-in**: from the hub, a reconnection is indistinguishable from a stall — no progress happens during either. A value at or below the Bridge Timeout would kill transfers that would have recovered, so the hub refuses it when it starts, and the deployment has to name the longest outage it intends to survive before enabling it.
--   **What the clients see**: a transfer the hub ends (these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request, §6) is cancelled on both clients with a `cancel-transfer` event. Each session then *fails* with "The hub ended the transfer before it completed.": a parked `SendAsync`, a `CompleteAsync` waiting for the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync` throw `TransferFailedException` as the session stops, and nothing is sent to the peer, which the hub told. The streams the clients then cut end at the hub as `Information` lines, because it no longer holds the transfer; the same cut on a transfer it still holds is a warning, a client that should reconnect. A host releasing its handle is a different ending and says so ("released before the transfer completed").
+-   **Inactivity policy** (`TransferInactivityTimeoutSeconds`, 60 s): a transfer with no activity at all, neither a heartbeat nor a byte, is ended, whether or not it ever reported. The hub knows a transfer from its registration, or from the first of its streams it accepts. Heartbeats and probes refresh `LastActivityUtc`, so this deliberately does **not** fire for a peer that is connected but stuck.
+-   **Stalled-progress policy** (`StalledProgressTimeoutSeconds`, **disabled** by default): a transfer alive but whose counters have not moved is ended. This is the "Zombie" case (a deadlock or a client issue).
+-   **Why the second is opt-in**: from the hub, a reconnection looks like a stall, since neither makes progress. Enabling it means naming the longest outage the deployment intends to survive; a value at or below `BridgeTimeoutSeconds` would kill transfers that would have recovered, and the hub refuses it when it starts.
 -   **Not a liveness check**: a transfer whose participant's token ran out, or whose groups may no longer reach each other, is ended by the access sweep instead (see "Token Renewal" in `SecurityArchitecture.md`).
+
+**What the clients see.** A transfer the hub ends is cancelled on both clients with a `cancel-transfer` event, whatever
+ended it: these policies, a bridge past its timeout, the access sweep, a host, or a participant's abort request (§6).
+
+-   Each session *fails* with "The hub ended the transfer before it completed.", and sends nothing to its peer, which
+    the hub told.
+-   As the session stops, `TransferFailedException` is thrown by a parked `SendAsync`, a `CompleteAsync` waiting for
+    the acknowledgement, the enumeration (after the items already received) and `WaitForCompletionAsync`.
+-   The streams the clients then cut end at the hub as `Information` lines, since it no longer holds the transfer. The
+    same cut on a transfer it still holds is a warning: a client that should reconnect.
+-   A host releasing its handle is a different ending, and says so ("released before the transfer completed").
 
 ### 4. Affinity Handoff (HA)
 
-In a multi-hub deployment behind a load balancer with sticky sessions, a sender is sent to the instance holding its receiver's stream, and each transfer then carries the affinity of the instance holding its bridge (the mechanism is under "High Availability" in `TransportRArchitecture.md`). What that means for a transfer in trouble:
+Behind a load balancer with sticky sessions, a sender is sent to the instance holding its receiver's stream, and each transfer then carries the affinity of the instance holding its bridge ("High Availability" in `TransportRArchitecture.md`). For a transfer in trouble:
 
 -   **After a cut,** a session reopens its streams and sends its probe, heartbeats and `abort` with its own transfer's affinity, whatever the client's other transfers have done since. A client that kept one affinity for all its transfers would send the first one's streams to the instance of the second, where no bridge exists (`ha-transfer-affinity`).
--   **A lost instance** ends its clients' events streams. They open them again on another instance and register there; the bridges the lost instance held are lost with it.
--   **What does not cross instances.** The hub tells a client through the stream it holds, so a `cancel-transfer` for a participant held by another instance is not sent, and that participant learns of the end from the data plane. A transfer the host opens through `ITransferInitiator` is refused, with affinity handoff on, unless both clients' streams are on the instance that opens it.
+-   **A lost instance** ends its clients' events streams, which they open again on another instance and register there. The bridges it held are lost with it.
+-   **What does not cross instances.** The hub tells a client through the stream it holds, so it sends no `cancel-transfer` to a participant held by another instance; that participant learns of the end from the data plane. With affinity handoff on, a transfer the host opens through `ITransferInitiator` is refused unless both clients' streams are on the instance that opens it.
 
 ### 5. Backpressure (Both Ends, Data Plane Only)
 
