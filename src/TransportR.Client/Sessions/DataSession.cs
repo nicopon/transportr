@@ -983,6 +983,20 @@ internal class DataSession : IDataSession
         ? _config.Options.MaxBatchBytes
         : SessionEncryption.MaxDataPayloadBytes(_config.Options.MaxBatchBytes);
 
+    /// <summary>
+    /// Refuses, at its header, a chunk of a type the stream this end reads does not carry, in clear as
+    /// encrypted: what only the other end handles would otherwise take this one into a step of the other
+    /// role, a sender into the receiver's closing phase.
+    /// </summary>
+    private void AdmitHeader(ChunkHeader header)
+    {
+        if (!ChunkIO.IsReadBy(IsSender, header.Type))
+        {
+            throw new WireProtocolViolationException(
+                $"A chunk of type {header.Type} came on the stream a {(IsSender ? "sender" : "receiver")} reads, which does not carry one.");
+        }
+    }
+
     private async Task ReadLoop(Stream inputStream, CancellationToken token)
     {
         // If we already received Complete, do not restart reading (prevents hanging on retry)
@@ -1009,8 +1023,8 @@ internal class DataSession : IDataSession
                 }
 
                 var chunkRead = IsSender
-                    ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", token)
-                    : ChunkIO.ReadOwnedChunkAsync(inputStream, MaxDataPayloadBytes, "WithMaxBatchBytes allows", token);
+                    ? ChunkIO.ReadOwnedChunkAsync(inputStream, MaxControlPayloadBytes, "a control stream carries", AdmitHeader, token)
+                    : ChunkIO.ReadOwnedChunkAsync(inputStream, MaxDataPayloadBytes, "WithMaxBatchBytes allows", AdmitHeader, token);
                 if (await chunkRead is not { } chunk)
                 {
                     // If stream ends but we haven't received Complete, it's an error (premature disconnect)

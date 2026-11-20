@@ -187,6 +187,71 @@ public class EndToEndAdversaryTests
     }
 
     [Fact]
+    public async Task ASealedBatchOnTheSendersControlStream_IsAProtocolViolation()
+    {
+        await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed());
+        var injected = 0;
+        pair.Hub.Rewrite = chunk =>
+        {
+            if (chunk.Header.Type == ChunkType.SealedBatch && Interlocked.Exchange(ref injected, 1) == 0) pair.Hub.Inject(toSender: true, chunk.Bytes);
+            return [chunk.Bytes];
+        };
+        var outcome = await pair.RunAsync(items: 2, waitForBoth: false, reader: End.Sender);
+
+        Assert.Equal(TransferFailureCategory.ProtocolViolation, outcome.Sender?.Category);
+    }
+
+    public static TheoryData<string, bool> ChunksOfTheOtherDirection
+    {
+        get
+        {
+            var data = new TheoryData<string, bool>();
+            foreach (var misplaced in new[]
+            {
+                "a Complete, to the sender", "a Ping, to the sender", "a batch, to the sender",
+                "a Pong, to the receiver", "a BatchAck, to the receiver", "a CompleteAck, to the receiver",
+            })
+            {
+                data.Add(misplaced, false);
+                data.Add(misplaced, true);
+            }
+
+            return data;
+        }
+    }
+
+    /// <summary>
+    /// A chunk only the other end reads, without a payload, forged as the sender's first batch passes: the
+    /// Complete's BatchId -1 is one a sender with no receiver state of its own would take as complete.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ChunksOfTheOtherDirection))]
+    public async Task AChunkOfATypeTheStreamDoesNotCarry_IsAProtocolViolation_InClearAsEncrypted(string misplaced, bool encrypted)
+    {
+        await using var pair = new SessionPair(sender: encrypted ? Keyed() : null, receiver: encrypted ? Keyed() : null);
+        var transferId = Guid.Parse(pair.TransferId);
+        var toSender = misplaced.EndsWith("to the sender");
+        var forged = misplaced switch
+        {
+            "a Complete, to the sender" => Control(transferId, ChunkType.Complete, -1, []),
+            "a Ping, to the sender" => Control(transferId, ChunkType.Ping, 0, []),
+            "a batch, to the sender" => encrypted ? SealedChunk(transferId, 0, []) : Retyped(SealedChunk(transferId, 0, []), ChunkType.Batch),
+            "a Pong, to the receiver" => Control(transferId, ChunkType.Pong, 0, []),
+            "a BatchAck, to the receiver" => Control(transferId, ChunkType.BatchAck, 0, []),
+            _ => Control(transferId, ChunkType.CompleteAck, 0, []),
+        };
+        var injected = 0;
+        pair.Hub.Rewrite = chunk =>
+        {
+            if (IsBatch(chunk) && Interlocked.Exchange(ref injected, 1) == 0) pair.Hub.Inject(toSender, forged);
+            return [chunk.Bytes];
+        };
+        var outcome = await pair.RunAsync(items: 2, waitForBoth: false, reader: toSender ? End.Sender : End.Receiver);
+
+        Assert.Equal(TransferFailureCategory.ProtocolViolation, (toSender ? outcome.Sender : outcome.Receiver)?.Category);
+    }
+
+    [Fact]
     public async Task AKeepalivePongWhoseConfirmationTheHubAlters_IsRefused_ByTheSender()
     {
         await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed(), configureSender: options =>
@@ -516,6 +581,13 @@ public class EndToEndAdversaryTests
     {
         var copy = (byte[])chunk.Clone();
         copy[at] ^= 0x01;
+        return copy;
+    }
+
+    private static byte[] Retyped(byte[] chunk, ChunkType type)
+    {
+        var copy = (byte[])chunk.Clone();
+        copy[1] = (byte)type;
         return copy;
     }
 

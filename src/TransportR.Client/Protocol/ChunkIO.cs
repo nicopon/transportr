@@ -80,6 +80,16 @@ internal static class ChunkIO
         type is ChunkType.Batch or ChunkType.StreamBatch or ChunkType.SealedBatch or ChunkType.SealedStreamBatch;
 
     /// <summary>
+    /// Whether the stream a sender reads, or the one a receiver reads, carries <paramref name="type"/>: the
+    /// sender's carries what the receiver writes, BatchAck, Pong, CompleteAck and Abort; the receiver's what
+    /// the sender writes, Ping, the batches, Complete and Abort. Which kind of batch a transfer carries is
+    /// judged apart, by the end that decodes it.
+    /// </summary>
+    public static bool IsReadBy(bool sender, ChunkType type) => sender
+        ? type is ChunkType.BatchAck or ChunkType.Pong or ChunkType.CompleteAck or ChunkType.Abort
+        : type is ChunkType.Ping or ChunkType.Complete or ChunkType.Abort || IsBatch(type);
+
+    /// <summary>
     /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.
     /// </summary>
     public static Task WriteControlAsync(
@@ -128,8 +138,17 @@ internal static class ChunkIO
     /// can be copied, so that no copy of it can return that memory: whoever the caller hands the owner
     /// to returns it, once.
     /// </returns>
+    internal static ValueTask<(ChunkHeader Header, IMemoryOwner<byte>? Payload)?> ReadOwnedChunkAsync(
+        Stream stream, int maxPayloadLength, string allowedBy, CancellationToken ct) =>
+        ReadOwnedChunkAsync(stream, maxPayloadLength, allowedBy, admit: null, ct);
+
+    /// <inheritdoc cref="ReadOwnedChunkAsync(Stream, int, string, CancellationToken)"/>
+    /// <param name="admit">
+    /// Judges the header once its length is known to be within <paramref name="maxPayloadLength"/>, before
+    /// anything of the payload is read or rented; it refuses the chunk by throwing.
+    /// </param>
     internal static async ValueTask<(ChunkHeader Header, IMemoryOwner<byte>? Payload)?> ReadOwnedChunkAsync(
-        Stream stream, int maxPayloadLength, string allowedBy, CancellationToken ct)
+        Stream stream, int maxPayloadLength, string allowedBy, Action<ChunkHeader>? admit, CancellationToken ct)
     {
         var read = await ChunkHeader.ReadFromStreamAsync(stream, ct).ConfigureAwait(false);
         if (read is not { } header) return null;
@@ -138,12 +157,14 @@ internal static class ChunkIO
             throw new WireProtocolViolationException($"A chunk announced a payload of {header.PayloadLength} bytes.");
         }
 
-        if (header.PayloadLength == 0) return (header, null);
         if (header.PayloadLength > maxPayloadLength)
         {
             throw new WireProtocolViolationException(
                 $"A chunk announced a payload of {header.PayloadLength} bytes, over the {maxPayloadLength} bytes {allowedBy}.");
         }
+
+        admit?.Invoke(header);
+        if (header.PayloadLength == 0) return (header, null);
 
         var payload = new PooledPayload(header.PayloadLength);
         try

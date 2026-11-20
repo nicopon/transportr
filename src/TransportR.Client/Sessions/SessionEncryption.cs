@@ -15,8 +15,8 @@ namespace TransportR.Client.Sessions;
 /// </summary>
 /// <remarks>
 /// A refusal is raised as an <see cref="EndToEndEncryptionException"/>, which tells the peer, or as a
-/// <see cref="WireProtocolViolationException"/> for a length or a chunk the stream does not carry. The
-/// session disposes it once its loops have stopped, as the cipher requires.
+/// <see cref="WireProtocolViolationException"/> for a control chunk of another length. The session
+/// disposes it once its loops have stopped, as the cipher requires.
 /// </remarks>
 internal sealed class SessionEncryption : IDisposable
 {
@@ -30,7 +30,6 @@ internal sealed class SessionEncryption : IDisposable
     /// <summary>What the end that has no key fails with. The log says why: no key from the provider, or no P-256.</summary>
     public const string NoKey = "This end could not set up end-to-end encryption for its peer: the transfer is refused.";
 
-    private readonly bool _isSender;
     private readonly Guid _transferId;
     private readonly EndToEndCipher? _cipher;
     private readonly byte[] _ping = [];
@@ -45,7 +44,6 @@ internal sealed class SessionEncryption : IDisposable
 
     private SessionEncryption(bool isSender, Guid transferId, EndToEndCipher? cipher)
     {
-        _isSender = isSender;
         _transferId = transferId;
         _cipher = cipher;
         if (isSender && cipher is not null)
@@ -133,35 +131,30 @@ internal sealed class SessionEncryption : IDisposable
     };
 
     /// <summary>
-    /// Refuses a control chunk this end's stream does not carry when it is encrypted, or carries at
-    /// another length. A sender's control stream carries BatchAck, Pong, CompleteAck and Abort; a
-    /// receiver's data stream Ping, Complete and Abort. A Ping or Pong without a payload is a peer in
-    /// clear. An unknown type is left to the dispatch, which refuses it.
+    /// Refuses a control chunk of another length than end-to-end encryption admits. A Ping or Pong
+    /// without a payload is a peer in clear. The session has refused a type its stream does not carry
+    /// before this, in both modes; a batch is bounded apart.
     /// </summary>
     public void CheckControlChunk(in ChunkHeader header)
     {
-        int? admitted = (_isSender, header.Type) switch
+        int? admitted = header.Type switch
         {
-            (true, ChunkType.BatchAck) or (_, ChunkType.Abort) => 0,
-            (true, ChunkType.Pong) => EndToEndCipher.PongPayloadSize,
-            (false, ChunkType.Ping) => EndToEndCipher.PingPayloadSize,
-            (true, ChunkType.CompleteAck) or (false, ChunkType.Complete) => EndToEndCipher.ReceiptSize,
-            _ when !Enum.IsDefined(header.Type) => header.PayloadLength,
+            ChunkType.BatchAck or ChunkType.Abort => 0,
+            ChunkType.Ping => EndToEndCipher.PingPayloadSize,
+            ChunkType.Pong => EndToEndCipher.PongPayloadSize,
+            ChunkType.Complete or ChunkType.CompleteAck => EndToEndCipher.ReceiptSize,
             _ => null,
         };
 
-        if (admitted == header.PayloadLength) return;
+        if (admitted is not { } length || length == header.PayloadLength) return;
 
         if (header.PayloadLength == 0 && header.Type is ChunkType.Ping or ChunkType.Pong)
         {
             throw PeerInClear();
         }
 
-        throw admitted is { } length
-            ? new WireProtocolViolationException(
-                $"A {header.Type} chunk carried {header.PayloadLength} bytes, where end-to-end encryption admits {length}.")
-            : new WireProtocolViolationException(
-                $"A {header.Type} chunk came on the stream an encrypted {(_isSender ? "sender" : "receiver")} reads, which does not carry one.");
+        throw new WireProtocolViolationException(
+            $"A {header.Type} chunk carried {header.PayloadLength} bytes, where end-to-end encryption admits {length}.");
     }
 
     /// <summary>
