@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using TransportR.Client;
+using TransportR.Client.Batching;
 using TransportR.Client.Configuration;
+using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 using TransportR.Client.Sessions;
 using TransportR.Tests.TestHelpers;
@@ -179,6 +181,143 @@ public class EndToEndSessionTests
         Assert.Equal(0, outcome.Received);
     }
 
+    // ---- Sealed batches ----
+
+    [Fact]
+    public async Task ASealedTransferOfItems_GoesThroughAReconnection_TheResendReplayingTheSameBytes()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(KeyA), receiver: Encrypted(KeyA));
+        var dropped = DropFirstStreamBatchesFrom(pair.Hub, batchId: 1, count: 2);
+
+        await pair.StartAsync();
+        var receiving = pair.ReceiveAsync();
+        for (var i = 0; i < 3; i++) await pair.Sender.SendAsync($"item-{i}", CancellationToken.None);
+        await dropped.WaitAsync(Bound);
+
+        pair.Sender.TriggerReconnect();
+        await WaitUntilAsync(() => pair.Received == 3);
+        await pair.Sender.CompleteAsync().WaitAsync(Bound);
+        await receiving.WaitAsync(Bound);
+
+        var batches = pair.Hub.SenderWrote.Where(IsBatch).ToList();
+        Assert.All(batches, batch => Assert.Equal(ChunkType.SealedBatch, batch.Header.Type));
+        foreach (var batchId in new[] { 1, 2 })
+        {
+            Assert.Equal(
+                batches.Single(batch => batch.Epoch == 0 && batch.Header.BatchId == batchId).Bytes,
+                batches.Single(batch => batch.Epoch == 1 && batch.Header.BatchId == batchId).Bytes);
+        }
+
+        var pings = pair.Hub.SenderWrote.Where(chunk => chunk.Header.Type == ChunkType.Ping).ToList();
+        Assert.Equal([0, 1], pings.Select(ping => ping.Epoch));
+        Assert.Equal(pings[0].Bytes, pings[1].Bytes);
+    }
+
+    [Fact]
+    public async Task ASealedTransferOfBytes_GoesThroughAReconnection_AndCarriesNoPlaintext_UnderAPlaintextBound()
+    {
+        // WithMaxBatchBytes bounds the plaintext at both ends: the receiver admits the tag on top of it.
+        await using var pair = new BytePair(Encrypted(), Encrypted(), batchBytes: 16, options => options.MaxBatchBytes = 16);
+        var dropped = DropFirstStreamBatchesFrom(pair.Hub, batchId: 1, count: 2);
+        var sent = Enumerable.Range(0, 48).Select(i => (byte)(0xA0 + i)).ToArray();
+
+        await pair.StartAsync();
+        var receiving = pair.ReceiveAsync();
+        await pair.Send.WriteAsync(sent);
+        await dropped.WaitAsync(Bound);
+
+        pair.Sender.TriggerReconnect();
+        await WaitUntilAsync(() => pair.ReceivedCount == sent.Length);
+        await pair.Send.CompleteAsync().WaitAsync(Bound);
+        Assert.Equal(sent, await receiving.WaitAsync(Bound));
+
+        var batches = pair.Hub.SenderWrote.Where(IsBatch).ToList();
+        Assert.All(batches, batch =>
+        {
+            Assert.Equal(ChunkType.SealedStreamBatch, batch.Header.Type);
+            Assert.Equal(16, batch.Header.Count);
+            Assert.Equal(16 + EndToEndCipher.TagSize, batch.Header.PayloadLength);
+            Assert.Equal(-1, batch.Payload.IndexOf(sent.AsSpan(16 * batch.Header.BatchId, 4)));
+        });
+        Assert.Equal(
+            batches.Single(batch => batch.Epoch == 0 && batch.Header.BatchId == 1).Bytes,
+            batches.Single(batch => batch.Epoch == 1 && batch.Header.BatchId == 1).Bytes);
+    }
+
+    [Theory]
+    [InlineData(6)]  // BatchId
+    [InlineData(10)] // Count
+    [InlineData(20)] // TransferId
+    [InlineData(30)] // the ciphertext
+    [InlineData(-1)] // the tag
+    public async Task ASealedBatchAlteredOnItsWay_FailsTheTransfer_AndIsNeverAcknowledged(int at)
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.SealedBatch && chunk.Header.BatchId == 0
+            ? [Flipped(chunk.Bytes, at < 0 ? chunk.Bytes.Length + at : at)]
+            : [chunk.Bytes];
+        var outcome = await pair.RunAsync(items: 2);
+
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, outcome.Receiver?.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, outcome.Sender?.Category);
+        Assert.Equal(AbortReason.VerificationFailed.Describe(), outcome.Sender?.Message);
+        Assert.DoesNotContain(pair.Hub.ReceiverWrote, chunk => chunk.Header.Type == ChunkType.BatchAck);
+        Assert.Equal(0, outcome.Received);
+    }
+
+    [Fact]
+    public async Task ABatchInClear_IsRefusedByAnEncryptedReceiver_AsAPeerInClear()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.SealedBatch ? [Retyped(chunk.Bytes, ChunkType.Batch)] : [chunk.Bytes];
+        var outcome = await pair.RunAsync(items: 1);
+
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, outcome.Receiver?.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, outcome.Sender?.Category);
+        Assert.Equal(AbortReason.EncryptionModeMismatch.Describe(), outcome.Sender?.Message);
+        Assert.DoesNotContain(pair.Hub.ReceiverWrote, chunk => chunk.Header.Type == ChunkType.BatchAck);
+    }
+
+    [Fact]
+    public async Task ASealedBatch_IsRefusedByAReceiverInClear_ByItsType()
+    {
+        await using var pair = new SessionPair(sender: null, receiver: null);
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.Batch ? [Retyped(chunk.Bytes, ChunkType.SealedBatch)] : [chunk.Bytes];
+        var outcome = await pair.RunAsync(items: 1);
+
+        Assert.Equal(TransferFailureCategory.UndecodableOrUnserializableBatch, outcome.Receiver?.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, outcome.Sender?.Category);
+        Assert.DoesNotContain(pair.Hub.ReceiverWrote, chunk => chunk.Header.Type == ChunkType.BatchAck);
+    }
+
+    [Fact]
+    public async Task AShareThatChangesOnAReopenedStream_IsRefused_AndNothingIsResentBeforeTheAbort()
+    {
+        await using var pair = new SessionPair(sender: Encrypted(), receiver: Encrypted());
+        var dropped = DropFirstStreamBatchesFrom(pair.Hub, batchId: 1, count: 1);
+        var pongs = 0;
+        var relay = pair.Hub.Rewrite!;
+        pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.Pong && Interlocked.Increment(ref pongs) > 1
+            ? [WithShare(chunk.Bytes, NewShare())]
+            : relay(chunk);
+
+        await pair.StartAsync();
+        var receiving = pair.ReceiveAsync();
+        for (var i = 0; i < 2; i++) await pair.Sender.SendAsync($"item-{i}", CancellationToken.None);
+        await dropped.WaitAsync(Bound);
+        pair.Sender.TriggerReconnect();
+
+        var abandoned = await Assert.ThrowsAsync<TransferFailedException>(() => receiving.WaitAsync(Bound));
+        await WaitUntilAsync(() => pair.Sender.State == Client.Models.SessionState.Failed);
+        var refused = await Assert.ThrowsAsync<TransferFailedException>(() => pair.Sender.CompleteAsync().WaitAsync(Bound));
+
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, refused.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, abandoned.Category);
+        Assert.Equal(
+            [ChunkType.Ping, ChunkType.Abort],
+            pair.Hub.SenderWrote.Where(chunk => chunk.Epoch == 1).Select(chunk => chunk.Header.Type));
+    }
+
     // ---- Harness ----
 
     private static EndToEndEncryption Encrypted(byte[]? preSharedKey = null) =>
@@ -186,6 +325,40 @@ public class EndToEndSessionTests
 
     private static bool IsBatch(WireChunk chunk) =>
         chunk.Header.Type is ChunkType.Batch or ChunkType.StreamBatch or ChunkType.SealedBatch or ChunkType.SealedStreamBatch;
+
+    /// <summary>
+    /// Drops the batches of the sender's first stream from <paramref name="batchId"/> on, as a cut would;
+    /// completes once <paramref name="count"/> of them have been dropped.
+    /// </summary>
+    private static Task DropFirstStreamBatchesFrom(RelayHub hub, int batchId, int count)
+    {
+        var dropped = 0;
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        hub.Rewrite = chunk =>
+        {
+            if (!(chunk.FromSender && chunk.Epoch == 0 && IsBatch(chunk) && chunk.Header.BatchId >= batchId)) return [chunk.Bytes];
+            if (Interlocked.Increment(ref dropped) == count) done.TrySetResult();
+            return [];
+        };
+        return done.Task;
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + Bound;
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "The condition was not met in time.");
+            await Task.Delay(20);
+        }
+    }
+
+    private static byte[] Retyped(byte[] chunk, ChunkType type)
+    {
+        var copy = (byte[])chunk.Clone();
+        copy[1] = (byte)type;
+        return copy;
+    }
 
     private static byte[] Flipped(byte[] chunk, int at)
     {
@@ -218,6 +391,76 @@ public class EndToEndSessionTests
         using var key = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         var point = key.ExportParameters(includePrivateParameters: false).Q;
         return [0x04, .. point.X!, .. point.Y!];
+    }
+
+    /// <summary>
+    /// A sending and a receiving session of bytes over a <see cref="RelayHub"/>, through the handles a
+    /// <see cref="ByteStreamClient"/> gives; a probe after a cut finds the hub answering.
+    /// </summary>
+    internal sealed class BytePair : IAsyncDisposable
+    {
+        private readonly List<byte> _received = [];
+
+        public RelayHub Hub { get; } = new();
+        public TransferParties Parties { get; } = new(Guid.NewGuid(), Guid.NewGuid());
+        public string TransferId { get; } = Guid.NewGuid().ToString();
+        public DataSession Sender { get; }
+        public DataSession Receiver { get; }
+        public HttpByteSend Send { get; }
+        public HttpByteReceive Receive { get; }
+
+        public int ReceivedCount
+        {
+            get { lock (_received) return _received.Count; }
+        }
+
+        public BytePair(EndToEndEncryption? sender, EndToEndEncryption? receiver, int batchBytes, Action<ClientOptions>? configure = null)
+        {
+            var senderContext = Context(sender, configure);
+            var source = new ByteBatchSource(batchBytes, senderContext.Options.BatchFlushIntervalMs, senderContext.StreamManager);
+            Sender = new DataSession(senderContext, TransferId, 1000, "http://test/data", null, Parties, source, new ByteReceivePort(null).OpenSink);
+            Send = new HttpByteSend(Sender, source.SendBytesAsync);
+
+            var receiverContext = Context(receiver, configure);
+            var port = new ByteReceivePort(null);
+            Receiver = new DataSession(receiverContext, TransferId, 1000, "http://test/data", null, Parties,
+                new ByteBatchSource(batchBytes, receiverContext.Options.BatchFlushIntervalMs, receiverContext.StreamManager), port.OpenSink);
+            Receive = new HttpByteReceive(Receiver, port.ReadAllAsync);
+        }
+
+        private StubSessionContext Context(EndToEndEncryption? encryption, Action<ClientOptions>? configure)
+        {
+            var context = new StubSessionContext(new HttpClient(Hub)) { ProbeAnswers = true };
+            context.Options.EndToEndEncryption = encryption;
+            context.Options.CompleteStallTimeout = TimeSpan.FromSeconds(5);
+            configure?.Invoke(context.Options);
+            return context;
+        }
+
+        public async Task StartAsync()
+        {
+            await Receiver.StartReceiverAsync();
+            await Sender.StartSenderAsync();
+        }
+
+        /// <summary>Reads the bytes until the transfer ends, and returns them.</summary>
+        public Task<byte[]> ReceiveAsync() => Task.Run(async () =>
+        {
+            var buffer = new byte[64];
+            int read;
+            while ((read = await Receive.ReadAsync(buffer)) > 0)
+            {
+                lock (_received) _received.AddRange(buffer.AsSpan(0, read));
+            }
+
+            lock (_received) return _received.ToArray();
+        });
+
+        public async ValueTask DisposeAsync()
+        {
+            await Send.DisposeAsync();
+            await Receive.DisposeAsync();
+        }
     }
 
     internal enum End { Sender, Receiver }

@@ -22,8 +22,8 @@ internal static class ChunkIO
     }
 
     /// <summary>
-    /// Writes a batch chunk of the given type (<see cref="ChunkType.Batch"/> or
-    /// <see cref="ChunkType.StreamBatch"/>) to the stream.
+    /// Writes a batch chunk of the given type (<see cref="ChunkType.Batch"/>,
+    /// <see cref="ChunkType.StreamBatch"/> or either sealed) to the stream.
     /// </summary>
     /// <remarks>
     /// The type tells the receiver how the payload is to be read. A receiver expecting the other one
@@ -38,7 +38,7 @@ internal static class ChunkIO
         ReadOnlyMemory<byte> payload,
         CancellationToken ct = default)
     {
-        if (type is not (ChunkType.Batch or ChunkType.StreamBatch))
+        if (!IsBatch(type))
             throw new ArgumentOutOfRangeException(nameof(type), type, "Not a batch chunk type.");
 
         var header = ChunkHeader.CreateBatch(transferId, batchId, count, payload.Length) with { Type = type };
@@ -63,7 +63,7 @@ internal static class ChunkIO
         ReadOnlySequence<byte> payload,
         CancellationToken ct = default)
     {
-        if (type is not (ChunkType.Batch or ChunkType.StreamBatch))
+        if (!IsBatch(type))
             throw new ArgumentOutOfRangeException(nameof(type), type, "Not a batch chunk type.");
 
         var header = ChunkHeader.CreateBatch(transferId, batchId, count, checked((int)payload.Length)) with { Type = type };
@@ -74,6 +74,10 @@ internal static class ChunkIO
             await stream.WriteAsync(segment, ct).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Whether <paramref name="type"/> carries a batch, in clear or sealed.</summary>
+    public static bool IsBatch(ChunkType type) =>
+        type is ChunkType.Batch or ChunkType.StreamBatch or ChunkType.SealedBatch or ChunkType.SealedStreamBatch;
 
     /// <summary>
     /// Writes a control chunk (BatchAck, Complete, CompleteAck, Ping or Pong) to the stream.

@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Configuration;
@@ -21,21 +23,24 @@ internal sealed class SessionEncryption : IDisposable
     /// <summary>The largest payload an encrypted sender's control stream carries: a Pong.</summary>
     public const int MaxControlPayloadBytes = EndToEndCipher.PongPayloadSize;
 
-    private const string PeerInClear = "The peer does not encrypt end to end, and this end does.";
+    private const string PeerInClearMessage = "The peer does not encrypt end to end, and this end does.";
     private const string NotVerified =
         "End-to-end encryption could not be verified: the streams were altered on their way, or the two ends do not hold the same pre-shared key.";
     /// <summary>What the end that has no key fails with. The log says why: no key from the provider, or no P-256.</summary>
     public const string NoKey = "This end could not set up end-to-end encryption for its peer: the transfer is refused.";
 
     private readonly bool _isSender;
+    private readonly Guid _transferId;
     private readonly EndToEndCipher? _cipher;
     private readonly byte[] _ping = [];
     private readonly TaskCompletionSource _keys = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private byte[]? _pong;
+    private volatile bool _hasRefused;
 
-    private SessionEncryption(bool isSender, EndToEndCipher? cipher)
+    private SessionEncryption(bool isSender, Guid transferId, EndToEndCipher? cipher)
     {
         _isSender = isSender;
+        _transferId = transferId;
         _cipher = cipher;
         if (isSender && cipher is not null)
         {
@@ -54,6 +59,7 @@ internal sealed class SessionEncryption : IDisposable
     {
         if (options.EndToEndEncryption is not { } settings) return null;
 
+        var id = Guid.Parse(transferId);
         var peer = isSender ? parties.ReceiverId : parties.SenderId;
         byte[]? preSharedKey = null;
         if (settings.PreSharedKey is { } provider)
@@ -65,7 +71,7 @@ internal sealed class SessionEncryption : IDisposable
             catch (Exception ex)
             {
                 logger.LogError(ex, "The pre-shared key provider failed for peer {PeerId}: Transfer={TransferId} is refused", peer, transferId);
-                return new SessionEncryption(isSender, cipher: null);
+                return new SessionEncryption(isSender, id, cipher: null);
             }
 
             if (preSharedKey is not { Length: EndToEndCipher.PreSharedKeySize })
@@ -73,21 +79,20 @@ internal sealed class SessionEncryption : IDisposable
                 logger.LogError(
                     "The pre-shared key provider gave {Given} for peer {PeerId}, where {Expected} bytes are needed: Transfer={TransferId} is refused",
                     preSharedKey is null ? "no key" : $"{preSharedKey.Length} bytes", peer, EndToEndCipher.PreSharedKeySize, transferId);
-                return new SessionEncryption(isSender, cipher: null);
+                return new SessionEncryption(isSender, id, cipher: null);
             }
         }
 
         try
         {
-            var id = Guid.Parse(transferId);
-            return new SessionEncryption(isSender, isSender
+            return new SessionEncryption(isSender, id, isSender
                 ? EndToEndCipher.ForSender(id, parties.SenderId, parties.ReceiverId, preSharedKey)
                 : EndToEndCipher.ForReceiver(id, parties.SenderId, parties.ReceiverId, preSharedKey));
         }
         catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
         {
             logger.LogError(ex, "End-to-end encryption is not available here: Transfer={TransferId} is refused", transferId);
-            return new SessionEncryption(isSender, cipher: null);
+            return new SessionEncryption(isSender, id, cipher: null);
         }
     }
 
@@ -106,6 +111,20 @@ internal sealed class SessionEncryption : IDisposable
 
     /// <summary>The payload of every Ping the sender writes: its share.</summary>
     public ReadOnlyMemory<byte> PingPayload => _ping;
+
+    /// <summary>
+    /// Whether this end has refused something it read: from then on a sender writes nothing but its
+    /// Abort, which a resend would only hold back.
+    /// </summary>
+    public bool HasRefused => _hasRefused;
+
+    /// <summary>The type a batch of <paramref name="clear"/>'s kind is written with, sealed.</summary>
+    public static ChunkType SealedTypeOf(ChunkType clear) => clear switch
+    {
+        ChunkType.Batch => ChunkType.SealedBatch,
+        ChunkType.StreamBatch => ChunkType.SealedStreamBatch,
+        _ => throw new ArgumentOutOfRangeException(nameof(clear), clear, "Not a batch chunk type."),
+    };
 
     /// <summary>
     /// Refuses a control chunk this end's stream does not carry when it is encrypted, or carries at
@@ -129,7 +148,7 @@ internal sealed class SessionEncryption : IDisposable
 
         if (header.PayloadLength == 0 && header.Type is ChunkType.Ping or ChunkType.Pong)
         {
-            throw new EndToEndEncryptionException(AbortReason.EncryptionModeMismatch, PeerInClear);
+            throw PeerInClear();
         }
 
         throw admitted is { } length
@@ -169,6 +188,59 @@ internal sealed class SessionEncryption : IDisposable
     }
 
     /// <summary>
+    /// Seals a batch body, its 4-byte count then its payload, into a body of the same layout whose
+    /// payload is the ciphertext and the tag, sealed under the header it is written with. Once: a resend
+    /// writes the sealed body again, so no nonce covers two plaintexts.
+    /// </summary>
+    /// <returns>The sealed body, the caller's to dispose.</returns>
+    public PooledPayload Seal(ChunkType sealedType, int batchId, ReadOnlySequence<byte> body)
+    {
+        var cipher = Keyed();
+        var plaintext = body.Slice(sizeof(int));
+        var plaintextLength = checked((int)plaintext.Length);
+        var sealedLength = checked(plaintextLength + EndToEndCipher.TagSize);
+
+        var sealedBody = new PooledPayload(sizeof(int) + sealedLength);
+        try
+        {
+            var span = sealedBody.Memory.Span;
+            body.Slice(0, sizeof(int)).CopyTo(span);
+            plaintext.CopyTo(span[sizeof(int)..]);
+
+            // The header ChunkIO writes for this body, byte for byte: the tag covers it.
+            var header = ChunkHeader.CreateBatch(_transferId, batchId, BinaryPrimitives.ReadInt32LittleEndian(span), sealedLength)
+                with { Type = sealedType };
+            cipher.Seal(header, span.Slice(sizeof(int), plaintextLength), span.Slice(sizeof(int), sealedLength));
+            return sealedBody;
+        }
+        catch
+        {
+            sealedBody.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Opens a sealed batch in place, under the header it was read with.
+    /// </summary>
+    /// <returns>The plaintext, at the start of <paramref name="sealedPayload"/>.</returns>
+    public Memory<byte> Open(in ChunkHeader header, Memory<byte> sealedPayload)
+    {
+        var cipher = Keyed();
+        var span = sealedPayload.Span;
+        var plaintextLength = Math.Max(0, span.Length - EndToEndCipher.TagSize);
+        if (!cipher.TryOpen(header, span, span[..plaintextLength])) throw Unverified();
+        return sealedPayload[..plaintextLength];
+    }
+
+    /// <summary>What an encrypted end raises on a batch in clear, or a Ping or Pong without a share.</summary>
+    public EndToEndEncryptionException PeerInClear()
+    {
+        _hasRefused = true;
+        return new EndToEndEncryptionException(AbortReason.EncryptionModeMismatch, PeerInClearMessage);
+    }
+
+    /// <summary>
     /// Completes once a Pong whose confirmation holds has given the sender its keys. Cancelled when the
     /// session fails or is released.
     /// </summary>
@@ -183,8 +255,16 @@ internal sealed class SessionEncryption : IDisposable
         _cipher?.Dispose();
     }
 
-    private EndToEndCipher Keyed() =>
-        _cipher ?? throw new EndToEndEncryptionException(AbortReason.VerificationFailed, NoKey);
+    private EndToEndCipher Keyed()
+    {
+        if (_cipher is { } cipher) return cipher;
+        _hasRefused = true;
+        throw new EndToEndEncryptionException(AbortReason.VerificationFailed, NoKey);
+    }
 
-    private static EndToEndEncryptionException Unverified() => new(AbortReason.VerificationFailed, NotVerified);
+    private EndToEndEncryptionException Unverified()
+    {
+        _hasRefused = true;
+        return new EndToEndEncryptionException(AbortReason.VerificationFailed, NotVerified);
+    }
 }

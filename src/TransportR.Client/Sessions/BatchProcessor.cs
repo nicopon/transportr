@@ -112,7 +112,7 @@ internal class BatchProcessor : IAsyncDisposable
         source.Open(_inFlightSlots, ReleaseInFlightSlot);
 
         // Kept apart from the source: a resend after the sender has completed still writes batches.
-        _batchType = source.BatchType;
+        _batchType = _encryption is null ? source.BatchType : SessionEncryption.SealedTypeOf(source.BatchType);
         _source = source;
         source.StartFlushInterval();
 
@@ -190,7 +190,7 @@ internal class BatchProcessor : IAsyncDisposable
     {
         Interlocked.Add(ref _payloadBytes, header.PayloadLength);
 
-        if (header.Type is ChunkType.Batch or ChunkType.StreamBatch)
+        if (ChunkIO.IsBatch(header.Type))
         {
             await HandleBatchChunkAsync(header, payload, ct);
             return;
@@ -278,11 +278,20 @@ internal class BatchProcessor : IAsyncDisposable
                 throw new InvalidOperationException(
                     $"A batch of {payloadLength} bytes is over WithMaxBatchBytes ({_context.Options.MaxBatchBytes} bytes).");
 
-            // The worker starts before the first Pong: nothing goes out before the keys are known to be
-            // the receiver's too.
-            if (_encryption is { } encryption) await encryption.WaitForKeysAsync(ct);
-
-            entry = new BatchEntry(batch.Body, batch.Body.GetReadOnlySequence());
+            if (_encryption is { } encryption)
+            {
+                // The worker starts before the first Pong: nothing is sealed before the keys are known to
+                // be the receiver's too. Sealed once, here: every write of the batch, a resend included,
+                // writes these bytes.
+                await encryption.WaitForKeysAsync(ct);
+                var sealedBody = encryption.Seal(_batchType, batch.BatchId, batch.Body.GetReadOnlySequence());
+                entry = new BatchEntry(sealedBody, new ReadOnlySequence<byte>(sealedBody.Memory));
+                batch.Body.Dispose();
+            }
+            else
+            {
+                entry = new BatchEntry(batch.Body, batch.Body.GetReadOnlySequence());
+            }
             await RegisterBatchAsync(entry, batch.BatchId, batch.Count, () => registered = true, ct);
         }
         catch
@@ -364,18 +373,37 @@ internal class BatchProcessor : IAsyncDisposable
 
         // Checked before anything is decoded. An UndecodableBatchException, because it is the one
         // that makes the session tell the sender; a plain protocol violation would only end this side.
-        if (header.Type != _sink.BatchType)
+        // An encrypted end takes the sealed type of its kind, and tells a peer in clear apart.
+        var carried = _encryption is null ? _sink.BatchType : SessionEncryption.SealedTypeOf(_sink.BatchType);
+        if (header.Type != carried)
         {
             payload?.Dispose();
+            if (_encryption is { } refusing && header.Type is ChunkType.Batch or ChunkType.StreamBatch) throw refusing.PeerInClear();
             throw new UndecodableBatchException("A batch of a kind this transfer does not carry was received.");
         }
 
         // A batch without a payload is handed on all the same, over memory with nothing to return.
         var owner = payload ?? new PooledPayload(0);
-        var rxResult = await _receiverState.ProcessBatchAsync(header.BatchId, owner, owner.Memory, ct);
+        var body = owner.Memory;
+        if (_encryption is { } encryption)
+        {
+            // Opened before its place in the order is judged: a batch that does not open is refused
+            // whole, and never acknowledged.
+            try
+            {
+                body = encryption.Open(header, body);
+            }
+            catch
+            {
+                owner.Dispose();
+                throw;
+            }
+        }
+
+        var rxResult = await _receiverState.ProcessBatchAsync(header.BatchId, owner, body, ct);
 
         // The count of a batch of bytes is its length, not items.
-        if (header.Type == ChunkType.Batch) Interlocked.Add(ref _itemsReceived, header.Count);
+        if (header.Type is ChunkType.Batch or ChunkType.SealedBatch) Interlocked.Add(ref _itemsReceived, header.Count);
 
         if (rxResult.BatchIdToAck.HasValue)
         {
@@ -547,6 +575,9 @@ internal class BatchProcessor : IAsyncDisposable
     /// </summary>
     public async Task ResendUnackedBatchesAsync(Stream outputStream, Guid transferGuid, bool didPingPong, int nextExpectedFromPong, CancellationToken token)
     {
+        // A refusal has queued an Abort, which a resend would only hold back.
+        if (_encryption is { HasRefused: true }) return;
+
         // A snapshot: ordering the dictionary itself sizes an array and then copies into it, and a
         // batch registered in between throws, which ends the stream the resend is part of.
         foreach (var kvp in _unackedBatches.ToArray().OrderBy(x => x.Key))
