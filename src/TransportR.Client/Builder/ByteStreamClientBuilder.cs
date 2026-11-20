@@ -144,6 +144,20 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithEndToEndEncryption()"/>
+    public ByteStreamClientBuilder WithEndToEndEncryption()
+    {
+        _state.SetEndToEndEncryption();
+        return this;
+    }
+
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithEndToEndEncryption(Func{Guid, byte[]})"/>
+    public ByteStreamClientBuilder WithEndToEndEncryption(Func<Guid, byte[]?> preSharedKey)
+    {
+        _state.SetEndToEndEncryption(preSharedKey);
+        return this;
+    }
+
     /// <summary>
     /// Builds the <see cref="ByteStreamClient"/>.
     /// </summary>

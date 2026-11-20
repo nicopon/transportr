@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client.Configuration;
@@ -38,6 +39,7 @@ internal sealed class ClientBuilderState
     private TimeSpan? _acknowledgementTimeout;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
     private bool _probeWriteTransport;
+    private EndToEndEncryption? _endToEndEncryption;
 
     public BufferCapacity? ReceiveCapacity { get; private set; }
 
@@ -108,6 +110,14 @@ internal sealed class ClientBuilderState
         _configureHttpHandler = configure;
     }
 
+    public void SetEndToEndEncryption() => _endToEndEncryption = new EndToEndEncryption();
+
+    public void SetEndToEndEncryption(Func<Guid, byte[]?> preSharedKey)
+    {
+        ArgumentNullException.ThrowIfNull(preSharedKey);
+        _endToEndEncryption = new EndToEndEncryption(preSharedKey);
+    }
+
     public void SetTokenRefreshThreshold(TimeSpan threshold)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(threshold, TimeSpan.Zero, nameof(threshold));
@@ -140,6 +150,12 @@ internal sealed class ClientBuilderState
     public ClientWiring Assemble(ILogger logger)
     {
         RequireUrl();
+
+        if (_endToEndEncryption is not null && !AesGcm.IsSupported)
+        {
+            throw new PlatformNotSupportedException("End-to-end encryption needs AES-GCM, which this platform does not provide.");
+        }
+
         var httpHandler = CreateHttpHandler();
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
 
@@ -148,7 +164,8 @@ internal sealed class ClientBuilderState
             BatchFlushIntervalMs = _batchFlushIntervalMs,
             MaxInFlightBatches = _maxInFlightBatches,
             WriteTransportPolicy = _writeTransportPolicy,
-            ProbeWriteTransport = _probeWriteTransport
+            ProbeWriteTransport = _probeWriteTransport,
+            EndToEndEncryption = _endToEndEncryption
         };
 
         options.ReceiveBufferCapacity = ReceiveCapacity;

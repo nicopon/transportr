@@ -375,7 +375,10 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                     s.AcksReceived,
                     s.AcksSent,
                     s.WriteTransport,
-                    s.WriteTransportFallback
+                    s.WriteTransportFallback,
+                    !s.IsEncrypted ? TransferProtection.None
+                        : s.UsesPreSharedKey ? TransferProtection.EncryptedWithPreSharedKey
+                        : TransferProtection.Encrypted
                 ))
         ];
     }

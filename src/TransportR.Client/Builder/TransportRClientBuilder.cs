@@ -317,6 +317,44 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Seals every batch of this client's transfers end to end, so that the hub, and whoever terminates TLS on the way,
+    /// forward bytes they cannot read.
+    /// </summary>
+    /// <remarks>
+    /// Both ends of a transfer enable it alike: between an end that seals and one that does not, the transfer fails
+    /// before its first batch, with <see cref="TransferFailureCategory.EndToEndEncryptionFailed"/> on the end that finds
+    /// it. Without a pre-shared key it protects against whoever reads the path, not against a hub that rewrites it; the
+    /// overload that takes a key adds that. <see cref="Build"/> throws <see cref="PlatformNotSupportedException"/> where
+    /// the platform has no AES-GCM. A later call replaces an earlier one.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithEndToEndEncryption()
+    {
+        _state.SetEndToEndEncryption();
+        return this;
+    }
+
+    /// <summary>
+    /// Seals every batch of this client's transfers end to end, with a pre-shared key mixed into each transfer's keys,
+    /// so that a hub that rewrites, truncates or reroutes a transfer makes it fail instead.
+    /// </summary>
+    /// <param name="preSharedKey">
+    /// Called once per transfer, synchronously, with the peer's client id; returns the 32 bytes both ends hold. Ignoring
+    /// the id gives one key per trust domain; a key per pair also keeps a node of the domain from standing between two
+    /// others. Read it from this node's own configuration, never from a service reached through the hub's front end.
+    /// </param>
+    /// <remarks>
+    /// A provider that returns <c>null</c> or another length than 32 bytes, or throws, fails that transfer with
+    /// <see cref="TransferFailureCategory.EndToEndEncryptionFailed"/>: it never falls back to encryption without the key.
+    /// The array it returns stays its own, neither kept nor erased. The rest is as for
+    /// <see cref="WithEndToEndEncryption()"/>.
+    /// </remarks>
+    public TransportRClientBuilder<T> WithEndToEndEncryption(Func<Guid, byte[]?> preSharedKey)
+    {
+        _state.SetEndToEndEncryption(preSharedKey);
+        return this;
+    }
+
+    /// <summary>
     /// Builds the <see cref="TransportRClient{T}"/>.
     /// </summary>
     public TransportRClient<T> Build()

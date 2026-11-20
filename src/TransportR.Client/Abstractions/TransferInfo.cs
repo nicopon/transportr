@@ -43,6 +43,7 @@ public enum TransferStatus
 /// <param name="Duration">How long the transfer has been running (or ran).</param>
 /// <param name="WriteTransport">What carries this client's write stream of the transfer; null before it first opens.</param>
 /// <param name="WriteTransportFallback">Why this transfer does not use a WebSocket, once it has given up on one; null otherwise.</param>
+/// <param name="Protection">How this transfer's batches cross the hub; the same at both ends of a transfer that succeeded.</param>
 public record TransferInfo(
     string TransferId,
     string DataUrl,
@@ -55,5 +56,6 @@ public record TransferInfo(
     long AcksReceived = 0,
     long AcksSent = 0,
     WriteTransport? WriteTransport = null,
-    string? WriteTransportFallback = null
+    string? WriteTransportFallback = null,
+    TransferProtection Protection = TransferProtection.None
 );
