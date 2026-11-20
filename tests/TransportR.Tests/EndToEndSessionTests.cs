@@ -441,6 +441,54 @@ public class EndToEndSessionTests
         Assert.Equal(1, pair.Received);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ASerializerThatThrowsACancellationOfItsOwn_FailsTheTransfer_RatherThanCompletingItShort(bool encrypted)
+    {
+        var hub = new RelayHub();
+        var parties = new TransferParties(Guid.NewGuid(), Guid.NewGuid());
+        var transferId = Guid.NewGuid().ToString();
+        StubSessionContext Context()
+        {
+            var context = new StubSessionContext(new HttpClient(hub)) { ProbeAnswers = true };
+            context.Options.EndToEndEncryption = encrypted ? Encrypted(KeyA) : null;
+            context.Options.CompleteStallTimeout = TimeSpan.FromSeconds(5);
+            return context;
+        }
+
+        var senderContext = Context();
+        var (send, receive) = SessionPorts.Create(senderContext.Options, new CancellingSerializer(failingCall: 2), senderContext.StreamManager, 1);
+        var senderSession = new DataSession(senderContext, transferId, 1, "http://test/data", null, parties, send.Source, receive.OpenSink);
+        await using var sender = new HttpSend<string>(senderSession, send);
+        await using var receiver = new TestSession(Context(), transferId, batchSize: 1, "http://test/data", affinity: null, parties);
+
+        await receiver.StartReceiverAsync();
+        await senderSession.StartSenderAsync();
+        var received = 0;
+        var receiving = Task.Run(async () =>
+        {
+            await foreach (var _ in receiver.ReceiveAsync(CancellationToken.None)) Interlocked.Increment(ref received);
+        });
+
+        // Whichever call meets the failure first reports it: a send while the producer still adds, Complete otherwise.
+        var failed = await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        {
+            for (var i = 0; i < 4; i++)
+            {
+                await sender.SendAsync($"item-{i}", CancellationToken.None);
+                await Task.Delay(100);
+            }
+            await sender.CompleteAsync();
+        }).WaitAsync(Bound);
+        var abandoned = await Assert.ThrowsAsync<TransferFailedException>(() => receiving.WaitAsync(Bound));
+
+        Assert.Equal(TransferFailureCategory.UndecodableOrUnserializableBatch, failed.Category);
+        Assert.Equal(TransferFailureCategory.AbandonedByPeer, abandoned.Category);
+        Assert.Equal(AbortReason.SerializationFailed.Describe(), abandoned.Message);
+        Assert.Equal(1, Volatile.Read(ref received));
+    }
+
     [Fact]
     public async Task AnEmptyEncryptedTransfer_Succeeds_WithAReceiptInEachDirection()
     {
@@ -480,6 +528,23 @@ public class EndToEndSessionTests
 
     private static bool IsBatch(WireChunk chunk) =>
         chunk.Header.Type is ChunkType.Batch or ChunkType.StreamBatch or ChunkType.SealedBatch or ChunkType.SealedStreamBatch;
+
+    /// <summary>
+    /// Writes what <see cref="StubBatchSerializer"/> reads, and throws a cancellation of its own, which no
+    /// token of the session carries, on its <paramref name="failingCall"/>-th call.
+    /// </summary>
+    private sealed class CancellingSerializer(int failingCall) : IBatchSerializer<string>
+    {
+        private readonly StubBatchSerializer _inner = new();
+        private int _calls;
+
+        public Task SerializeBatchAsync(Stream destination, List<string> batch) =>
+            Interlocked.Increment(ref _calls) == failingCall
+                ? throw new OperationCanceledException("The serializer gave up on its own.")
+                : _inner.SerializeBatchAsync(destination, batch);
+
+        public Task<List<string>?> DeserializeBatchAsync(Stream source) => _inner.DeserializeBatchAsync(source);
+    }
 
     /// <summary>
     /// Drops the batches of the sender's first stream from <paramref name="batchId"/> on, as a cut would;

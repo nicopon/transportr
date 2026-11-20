@@ -33,6 +33,9 @@ internal class BatchProcessor : IAsyncDisposable
 
     private Task? _sendWorker;
 
+    // Set when the sender is let go, failed or released: the cancellations that follow are the session's.
+    private volatile bool _abandoned;
+
     // In-flight window (ClientOptions.MaxInFlightBatches). Slots are taken by the source, before the
     // body of the batch exists, and released here when the batch leaves _unackedBatches. Null =
     // unbounded.
@@ -172,6 +175,7 @@ internal class BatchProcessor : IAsyncDisposable
     /// </summary>
     public void AbandonSender()
     {
+        _abandoned = true;
         _source?.Abandon();
         _encryption?.Abandon();
     }
@@ -236,7 +240,7 @@ internal class BatchProcessor : IAsyncDisposable
     private async Task SendWorkerAsync(IBatchSource source, CancellationToken ct)
     {
         // Read as ChannelReader.ReadAllAsync reads: a cancellation while waiting for a batch ends
-        // the worker cancelled, one while a batch is read or registered ends it quietly.
+        // the worker cancelled, one of the session's while a batch is read or registered ends it quietly.
         while (await source.WaitToReadAsync(ct))
         {
             while (true)
@@ -249,7 +253,10 @@ internal class BatchProcessor : IAsyncDisposable
 
                     await SendBatchAsync(batch, ct);
                 }
-                catch (OperationCanceledException) { return; }
+                // The session's: its token, or a sender let go. One the serializer raises of its own is a
+                // batch that could not be serialized, as below: a worker that stopped quietly on it would
+                // leave CompleteAsync to sign a Complete short of that batch.
+                catch (OperationCanceledException) when (ct.IsCancellationRequested || _abandoned) { return; }
                 catch (Exception ex)
                 {
                     // A batch that is never sent is a gap the receiver's Complete check cannot see when
@@ -680,6 +687,7 @@ internal class BatchProcessor : IAsyncDisposable
     {
         _sendChannel.Writer.TryComplete();
         _sendWorker = null;
+        _abandoned = true;
         _encryption?.Abandon();
 
         // Dispose the source first: its accumulator cancels its own token, which releases a
