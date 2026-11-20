@@ -31,22 +31,17 @@ dotnet test --filter "FullyQualifiedName~ChunkIOTests"   # single test class
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
-`./scripts/build_release.sh` builds each project individually in Release (libs → samples → tests) —
-prefer it when you need the sample/test binaries under `bin/Release/net10.0/` for a benchmark run,
-since `run-benchmark.sh --no-build` execs those directly.
+`./scripts/build_release.sh` builds each project in Release (libs → samples → tests); use it before
+`run-benchmark.sh --no-build`, which runs the binaries under `bin/Release/net10.0/`.
 
-Redis-backed tests (`RedisStateStoreTests`, `[RedisAvailableFact]`) run on a Testcontainers `redis:7.0` when Docker
-answers, and otherwise on a `redis-server` already on the machine; they auto-skip (not fail) only when neither exists
-(`tests/TransportR.Tests/README.md`). Nothing installs Redis for you.
+Redis-backed tests (`RedisStateStoreTests`, `[RedisAvailableFact]`) skip, not fail, when the machine has neither Docker
+nor a `redis-server`; `tests/TransportR.Tests/README.md` says where they look.
 
 ### End-to-end / benchmark scenarios
 
-`TransferIntegrationTests` carries a transfer to completion in process, over `TestServer`; `AddDataHub()`
-registers a no-op `IHubProgressMonitor` when the host registers none of its own, so no test host needs
-one just to avoid a 500 on the first stream request. Anything beyond one small transfer — faults,
-volume, HA, auth modes — is covered by running real processes
-via the scripts, which double as both benchmark and non-regression check (they assert exact line
-counts in the output CSVs):
+`TransferIntegrationTests` carries one transfer in process, over `TestServer` (no test host needs its own
+`IHubProgressMonitor`: `AddDataHub()` registers a no-op one). Faults, volume, HA and auth modes run as real processes
+through the scripts, which are both benchmark and non-regression check (exact line counts in the output CSVs):
 
 ```bash
 ./scripts/init.sh                    # one-time: downloads Toxiproxy (and Redis on linux-amd64), generates data/orders.bin (2M orders)
@@ -64,10 +59,9 @@ config — env vars exported before invoking the script are overwritten by the s
 design (see `scripts/README.md`). Add a new scenario as a new `.env` file rather than parameterizing
 an existing one.
 
-`ENABLE_HA=true` (see the `ha` path in `run-benchmark.sh`) starts `TransportR.TestProxy` (YARP,
-cookie-based sticky sessions) fronting two `DataHub` instances on ports 5001/5002, and points
-clients at the proxy — this is the local reference setup for exercising the affinity redirect (a 421 answered
-to an `InitTransfer`) and per-transfer affinity; `ha-transfer-affinity` is its acceptance scenario.
+`ENABLE_HA=true` starts `TransportR.TestProxy` (YARP, cookie-based sticky sessions) in front of two `DataHub` instances
+on ports 5001/5002. It is the local setup for the affinity redirect (a `421` to an `InitTransfer`) and for per-transfer
+affinity; `ha-transfer-affinity` is its acceptance scenario.
 
 ## Decisions not to reverse
 
@@ -117,9 +111,9 @@ Each is described where its pointer leads. A change that undoes one is the owner
 - **Backpressure is opt-in at both ends, `null` by default**: the right figure depends on item size, which only the
   caller knows, and `Build()` warns when neither is set. The sender's window counts batches, taken before serialization;
   the receiver's bound counts items and wire bytes and throttles, never stalls; a `BufferCapacity` that bounds nothing is
-  refused (§5 in `ResilienceArchitecture.md`).
+  refused (§5 in `ResilienceArchitecture.md`; the refusal in the XML docs of `BufferCapacity`).
 - **The item type sits on `IBatchSerializer<T>`**, so a serializer that cannot carry it is a compile error, not a throw
-  on the first batch ("Contracts" in `src/TransportR.Client/README.md`).
+  on the first batch ("Serialization" in `src/TransportR.Client/README.md`).
 - **Groups come from JWT scopes, never from client-supplied data**, so authorization is only as strong as the IdP. Dev
   mode (`UseDevMode()`; `EnableAuth=false` in `samples/DataHub`) trusts whatever group a client claims: never conflate it
   with production, nor `TransportR.Auth.SimpleIdp` and `samples/TestIdp` with identity providers ("Scope Convention" and
@@ -164,6 +158,9 @@ Each is described where its pointer leads. A change that undoes one is the owner
   Before describing a mechanism in a fourth place, delete one of the three — two sources for one
   subject are two sources that will diverge. A new document needs the same justification as a new
   interface.
+- **Rule first, one claim per sentence.** Open with what the reader must know or do, then conditions and reasons;
+  three cases or more make a list or a table, whose cells hold a value or a clause. A user document states a
+  decision's effect; its defence lives once, in the maintainer's document.
 - **Say what you did not check.** A `Verified:` line names what was run; when a change or a review
   touched only part of a surface, it also names what it did not cover ("7 of 94 source files",
   "unit tests only, no scenario"). Verification that does not state its perimeter reads as if it
