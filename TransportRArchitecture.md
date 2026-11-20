@@ -297,6 +297,10 @@ Integers are little-endian. A GUID is the 16 bytes `Guid.ToByteArray()` gives: t
 | SealedBatch | 0x09 | `Batch` sealed end to end (*End-to-End Encryption*, below) |
 | SealedStreamBatch | 0x0A | `StreamBatch` sealed end to end; `Count` is the plaintext's size in bytes |
 
+The sender's data stream carries `Ping`, the batches, `Complete` and `Abort`; the receiver's control stream `BatchAck`,
+`Pong`, `CompleteAck` and `Abort`. Any other type on the stream an end reads, an unknown one included, is a protocol
+violation, refused at its header, in clear as encrypted.
+
 > **Architectural Note:** The transport layer is **serializer-agnostic**. The `IBatchSerializer<T>` interface allows pluggable implementations (MessagePack, JSON, Arrow). It is typed so that a client built on a serializer that cannot carry its item type does not compile. A batch body the receiver cannot decode fails its session instead of being resent: it arrived whole, and a resend would decode no better.
 
 ### End-to-End Encryption
@@ -340,14 +344,15 @@ function and the BCL has no portable X25519.
   the `Complete` it accepted, and its header keeps `BatchId` 0. The sender signs only its final `BatchId`, once every
   batch is registered, so no `Complete` for fewer batches exists; the receiver checks the receipt before it judges a
   `Complete` premature, and writes the same `CompleteAck` again on a reopened stream; a `CompleteAck` that comes before
-  the sender has signed a `Complete` is refused. `BatchAck`, a `Pong`'s `BatchId` and `Abort` carry no MAC: forged,
-  they lead only to a failure (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer
-  ended).
+  the sender has signed a `Complete` is refused. No MAC covers `BatchAck`, `Abort`, a `Pong`'s `BatchId`, the
+  `BatchId` of a `Ping` or a `CompleteAck`, nor the `TransferId` and `Count` of any control chunk: forged or altered,
+  they lead to a failure (a batch missing, a `Complete` refused until the acknowledgement timeout, a transfer ended) or
+  to nothing delivered that differs (a lower resume point resends batches the receiver holds, which it drops).
 - **Bounds.** `WithMaxBatchBytes` bounds the plaintext, and the reader admits a sealed batch 16 bytes longer. In
   encrypted mode a receiver admits a `Ping` of exactly 65 bytes and a `Complete` of exactly 32, whatever its
   `WithMaxBatchBytes`, and a sender's control stream admits a `Pong` of exactly 97 and a `CompleteAck` of exactly 32;
-  `BatchAck` and `Abort` carry nothing. Any other length is a protocol violation, and so is a chunk of a type the
-  stream does not carry, such as a `Ping` on the sender's control stream.
+  `BatchAck` and `Abort` carry nothing. Any other length is a protocol violation, judged on the header before any of
+  the payload is read.
 - **Refusals.** An encrypted end refuses a `Ping` or `Pong` without a payload and a batch in clear, and aborts with
   `AbortReason.EncryptionModeMismatch` (5). A clear end is unchanged: it ignores a `Ping`'s payload and refuses a
   sealed batch by its type, as a batch of a kind it does not carry (`UndecodableBatch`), so the encrypted peer finds
