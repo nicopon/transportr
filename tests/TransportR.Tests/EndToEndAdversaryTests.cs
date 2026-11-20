@@ -475,6 +475,24 @@ public class EndToEndAdversaryTests
         AssertCarriesNoKey([outcome.Sender!.ToString(), outcome.Receiver!.ToString()], DomainKey);
     }
 
+    [Fact]
+    public async Task AProviderThatThrowsWithItsKeyInTheMessage_HasOnlyTheTypeOfItsExceptionLogged()
+    {
+        var provider = new EndToEndEncryption(_ => throw new InvalidOperationException(
+            $"The vault refused key {Convert.ToHexString(DomainKey)} for this peer.",
+            new KeyNotFoundException($"Key {Convert.ToBase64String(DomainKey)} is sealed.")));
+        await using var duo = new Duo(provider, Keyed());
+        var outcome = await duo.RunAsync(items: 1);
+
+        Assert.Equal(TransferFailureCategory.EndToEndEncryptionFailed, outcome.Sender?.Category);
+        AssertCarriesNoKey(duo.Logged, DomainKey);
+        Assert.Contains(duo.Logged, line => line.Contains(typeof(InvalidOperationException).FullName!));
+        // Neither message, nor inner exception, nor a stack, whose frames would name this test.
+        Assert.DoesNotContain(duo.Logged, line =>
+            line.Contains("The vault refused") || line.Contains("is sealed") || line.Contains(nameof(KeyNotFoundException))
+            || line.Contains(nameof(AProviderThatThrowsWithItsKeyInTheMessage_HasOnlyTheTypeOfItsExceptionLogged)));
+    }
+
     // ---- The cipher, released under a seal ----
 
     [Fact]

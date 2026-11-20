@@ -74,7 +74,11 @@ internal sealed class SessionEncryption : IDisposable
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "The pre-shared key provider failed for peer {PeerId}: Transfer={TransferId} is refused", peer, transferId);
+                // By its type alone: its message, its stack or an exception it wraps is the host's, and may
+                // name the very key it failed to give.
+                logger.LogError(
+                    "The pre-shared key provider threw {ExceptionType} for peer {PeerId}: Transfer={TransferId} is refused",
+                    ex.GetType().FullName, peer, transferId);
                 return new SessionEncryption(isSender, id, cipher: null);
             }
 
