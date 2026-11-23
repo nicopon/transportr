@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
@@ -42,6 +43,7 @@ internal class TransferInitiator : ITransferInitiator
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<TransferInitiator> _logger;
     private readonly TimeProvider _time;
+    private readonly HubDrainState? _drainState;
 
     public TransferInitiator(
         ClientStreams streams,
@@ -51,11 +53,13 @@ internal class TransferInitiator : ITransferInitiator
         IOptions<AffinityOptions> affinityOptions,
         IOptions<AccessOptions> accessOptions,
         ILogger<TransferInitiator> logger,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        HubDrainState? drainState = null)
     {
         _maxHandshakes = accessOptions.Value.MaxHandshakesPerClient;
         _maxOpenTransfers = accessOptions.Value.MaxOpenTransfersPerClient;
         _time = timeProvider;
+        _drainState = drainState;
         _streams = streams;
         _stateStore = stateStore;
         _transferManager = transferManager;
@@ -81,6 +85,12 @@ internal class TransferInitiator : ITransferInitiator
                 nameof(handshakeTimeout),
                 handshakeTimeout,
                 $"The handshake timeout must be from zero to {TransferManager.SessionTtl}.");
+        }
+
+        if (_drainState?.IsDraining == true)
+        {
+            _logger.LogWarning("InitTransfer by host refused: the hub is shutting down");
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, "The hub is shutting down.");
         }
 
         var sender = await _stateStore.GetClientAsync(senderClientId);
@@ -232,78 +242,92 @@ internal class TransferInitiator : ITransferInitiator
     {
         var transferId = Guid.NewGuid().ToString();
 
-        _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (opened by {Opener})",
-            transferId, sender.ClientId, receiver.ClientId, requestSender ? "the host" : "the sender");
+        using var activity = TransportRHubDiagnostics.ActivitySource.StartActivity("transportr.hub.init_transfer");
+        activity?.SetTag("transportr.transfer.id", transferId);
+        activity?.SetTag("transportr.sender.id", sender.ClientId.ToString("D"));
+        activity?.SetTag("transportr.receiver.id", receiver.ClientId.ToString("D"));
+        activity?.SetTag("transportr.opener", requestSender ? "host" : "sender");
 
-        await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId, openedBySender: !requestSender);
-
-        using var timeout = new CancellationTokenSource(handshakeTimeout, _time);
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
-            CallbackOutcome receiverReady;
+            _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (opened by {Opener})",
+                transferId, sender.ClientId, receiver.ClientId, requestSender ? "the host" : "the sender");
+
+            await _transferManager.RegisterParticipantsAsync(transferId, sender.ClientId, receiver.ClientId, openedBySender: !requestSender);
+
+            using var timeout = new CancellationTokenSource(handshakeTimeout, _time);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             try
             {
-                receiverReady = await _streams.AskAsync(receiver.ConnectionId, ControlPlane.ReadyToReceive,
-                    requestId => new ReadyToReceiveEvent(requestId, transferId, sender.ClientId), cts.Token);
-            }
-            catch (IOException ex)
-            {
-                // The usual cause is a registration that outlived its process: the client is still in
-                // the state store, but no stream of its is open here. Detail stays in the hub log.
-                _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}, registration likely stale: {Message}",
-                    receiver.ClientId, receiver.ConnectionId, transferId, ex.Message);
-                await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubRequestFailedException(HubRequestFailureCategory.Refused, TargetUnavailable);
-            }
+                CallbackOutcome receiverReady;
+                try
+                {
+                    receiverReady = await _streams.AskAsync(receiver.ConnectionId, ControlPlane.ReadyToReceive,
+                        requestId => new ReadyToReceiveEvent(requestId, transferId, sender.ClientId), cts.Token);
+                }
+                catch (IOException ex)
+                {
+                    // The usual cause is a registration that outlived its process: the client is still in
+                    // the state store, but no stream of its is open here. Detail stays in the hub log.
+                    _logger.LogWarning("Receiver {TargetClientId} unreachable on connection {ConnectionId} for {TransferId}, registration likely stale: {Message}",
+                        receiver.ClientId, receiver.ConnectionId, transferId, ex.Message);
+                    await _transferManager.RemoveTransferAsync(transferId);
+                    throw new HubRequestFailedException(HubRequestFailureCategory.Refused, TargetUnavailable);
+                }
 
-            if (receiverReady != CallbackOutcome.Accepted)
-            {
-                _logger.LogWarning("Receiver {TargetClientId} answered {Outcome} to {TransferId}.", receiver.ClientId, receiverReady, transferId);
-                await _transferManager.RemoveTransferAsync(transferId);
-                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, receiverReady == CallbackOutcome.Refused
-                    ? $"Target client {receiver.ClientId} refused the transfer."
-                    : $"Target client {receiver.ClientId} failed to prepare for the transfer.");
-            }
+                if (receiverReady != CallbackOutcome.Accepted)
+                {
+                    _logger.LogWarning("Receiver {TargetClientId} answered {Outcome} to {TransferId}.", receiver.ClientId, receiverReady, transferId);
+                    await _transferManager.RemoveTransferAsync(transferId);
+                    throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, receiverReady == CallbackOutcome.Refused
+                        ? $"Target client {receiver.ClientId} refused the transfer."
+                        : $"Target client {receiver.ClientId} failed to prepare for the transfer.");
+                }
 
-            if (!requestSender)
-            {
-                return StillOpen(transferId);
-            }
+                if (!requestSender)
+                {
+                    return StillOpen(transferId);
+                }
 
-            CallbackOutcome senderReady;
-            try
-            {
-                senderReady = await _streams.AskAsync(sender.ConnectionId, ControlPlane.RequestSend,
-                    requestId => new RequestSendEvent(requestId, transferId, receiver.ClientId), cts.Token);
+                CallbackOutcome senderReady;
+                try
+                {
+                    senderReady = await _streams.AskAsync(sender.ConnectionId, ControlPlane.RequestSend,
+                        requestId => new RequestSendEvent(requestId, transferId, receiver.ClientId), cts.Token);
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning("Sender unreachable for {TransferId}, cancelling Receiver: {Message}", transferId, ex.Message);
+                    await AbandonAsync(transferId, receiver);
+                    throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, "Source client failed to prepare for the transfer.");
+                }
+
+                if (senderReady != CallbackOutcome.Accepted)
+                {
+                    _logger.LogWarning("Sender {SourceClientId} answered {Outcome} to {TransferId}. Cancelling Receiver.",
+                        sender.ClientId, senderReady, transferId);
+                    await AbandonAsync(transferId, receiver);
+                    throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, senderReady == CallbackOutcome.Refused
+                        ? "Source client refused the transfer."
+                        : "Source client failed to prepare for the transfer.");
+                }
             }
-            catch (IOException ex)
+            catch (OperationCanceledException)
             {
-                _logger.LogWarning("Sender unreachable for {TransferId}, cancelling Receiver: {Message}", transferId, ex.Message);
                 await AbandonAsync(transferId, receiver);
-                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, "Source client failed to prepare for the transfer.");
+                if (cancellationToken.IsCancellationRequested) throw;
+
+                _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
+                throw new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, $"Handshake timed out after {handshakeTimeout.TotalMilliseconds}ms");
             }
 
-            if (senderReady != CallbackOutcome.Accepted)
-            {
-                _logger.LogWarning("Sender {SourceClientId} answered {Outcome} to {TransferId}. Cancelling Receiver.",
-                    sender.ClientId, senderReady, transferId);
-                await AbandonAsync(transferId, receiver);
-                throw new HubRequestFailedException(HubRequestFailureCategory.TargetRefusedOrFailedToPrepare, senderReady == CallbackOutcome.Refused
-                    ? "Source client refused the transfer."
-                    : "Source client failed to prepare for the transfer.");
-            }
+            return StillOpen(transferId);
         }
-        catch (OperationCanceledException)
+        catch (Exception ex)
         {
-            await AbandonAsync(transferId, receiver);
-            if (cancellationToken.IsCancellationRequested) throw;
-
-            _logger.LogWarning("Handshake timed out for Transfer: {TransferId}", transferId);
-            throw new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, $"Handshake timed out after {handshakeTimeout.TotalMilliseconds}ms");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
-
-        return StillOpen(transferId);
     }
 
     /// <summary>

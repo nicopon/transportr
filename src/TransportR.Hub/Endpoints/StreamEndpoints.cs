@@ -1,23 +1,21 @@
 using System.Globalization;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
+using TransportR.Hub.Diagnostics;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
 using TransportR.Protocol;
 
+namespace TransportR.Hub.Endpoints;
 
-namespace TransportR.Hub.Controllers;
-
-[ApiController]
-[Route(WireRoutes.StreamBase)]
-internal class StreamController : ControllerBase
+internal sealed class StreamEndpoints
 {
     private readonly ITransportRServer _brokerServer;
     private readonly ITransferManager _transferManager;
@@ -30,9 +28,10 @@ internal class StreamController : ControllerBase
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly TimeSpan _inactivityTimeout;
     private readonly TimeProvider _time;
-    private readonly ILogger<StreamController> _logger;
+    private readonly ILogger<StreamEndpoints> _logger;
+    private readonly HubMetrics? _metrics;
 
-    public StreamController(
+    public StreamEndpoints(
         ITransportRServer brokerServer,
         ITransferManager transferManager,
         IStateStore stateStore,
@@ -44,7 +43,8 @@ internal class StreamController : ControllerBase
         IHubProgressMonitor progressMonitor,
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider time,
-        ILogger<StreamController> logger)
+        ILogger<StreamEndpoints> logger,
+        HubMetrics? metrics = null)
     {
         _brokerServer = brokerServer;
         _transferManager = transferManager;
@@ -58,27 +58,22 @@ internal class StreamController : ControllerBase
         _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
         _time = time;
         _logger = logger;
+        _metrics = metrics;
     }
 
-    /// <summary>
-    /// Validates that the transfer exists and that the caller is the participant this stream
-    /// belongs to, and returns the transfer's participants; null is a refusal. Every rejection is a 404:
-    /// the client already treats NotFound as a terminal "transfer gone", and a 403 would turn the route
-    /// into an existence oracle for transfer ids.
-    /// </summary>
-    private Task<TransferParticipants?> ValidateTransfer(string transferId, ConnectionType type, bool isWrite)
+    private Task<TransferParticipants?> ValidateTransferAsync(ClaimsPrincipal user, string transferId, ConnectionType type, bool isWrite)
     {
         // A participant holds two streams in opposite directions: the sender writes Data and reads
         // Control, the receiver reads Data and writes Control. So the role is the method crossed
         // with the connection type, not the method alone. The header is not trusted here - it only
         // selects which participant the caller is then required to prove it is.
         var isSenderStream = isWrite ^ (type == ConnectionType.Control);
-        return Admit(transferId, isSenderStream ? Role.Sender : Role.Receiver);
+        return AdmitAsync(user, transferId, isSenderStream ? Role.Sender : Role.Receiver);
     }
 
     private enum Role { Sender, Receiver, Either }
 
-    private async Task<TransferParticipants?> Admit(string transferId, Role role)
+    private async Task<TransferParticipants?> AdmitAsync(ClaimsPrincipal user, string transferId, Role role)
     {
         var participants = await _transferManager.GetParticipantsAsync(transferId);
         if (participants == null)
@@ -91,12 +86,12 @@ internal class StreamController : ControllerBase
 
         // Dev mode arms no authorization on this route, so there is no attested identity to compare
         // and the data plane stays open. SecurityArchitecture.md states that of dev mode.
-        if (User?.Identity?.IsAuthenticated != true)
+        if (user?.Identity?.IsAuthenticated != true)
         {
             return participants;
         }
 
-        var caller = _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null);
+        var caller = _identityProvider.ResolveIdentity(user, providedClientId: null, providedGroups: null);
         var callerSubject = caller?.Subject;
         var roleName = role == Role.Either ? "sender or receiver" : role.ToString().ToLowerInvariant();
 
@@ -152,40 +147,39 @@ internal class StreamController : ControllerBase
     /// the peer, 202 when it was held at the bound with part of it relayed, both with
     /// <see cref="DataPlane.RelayedHeader"/>; 409 when the hub holds no epoch it follows on from.
     /// </summary>
-    [HttpPost("{transferId}/" + WireRoutes.SendSegment)]
-    [DisableRequestSizeLimit]
-    public async Task Send(
+    public async Task SendAsync(
+        HttpContext context,
         string transferId,
-        [FromQuery(Name = DataPlane.EpochParameter)] Guid? epoch,
-        [FromQuery(Name = DataPlane.OffsetParameter)] long? offset,
-        [FromQuery(Name = DataPlane.FinalParameter)] bool final,
-        [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs)
+        Guid? epoch,
+        long? offset,
+        bool final = false,
+        int? heartbeatMs = null)
     {
-        if (!TryParseConnectionType(Request, transferId, out var type))
+        if (!TryParseConnectionType(context.Request, transferId, out var type))
         {
-            Response.StatusCode = 400;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
         var bridgeKey = BridgeManager.KeyFor(transferId, type);
         if (epoch is not { } epochId || offset is not >= 0 || !_epochs.TryGet(bridgeKey, epochId, out var upload))
         {
-            upload = await OpenEpochAsync(transferId, type, bridgeKey, epoch, offset, heartbeatMs);
+            upload = await OpenEpochAsync(context, transferId, type, bridgeKey, epoch, offset, heartbeatMs);
             if (upload == null) return;
         }
-        else if (AccessPolicy.SameIdentity(upload.Subject, AttestedSubject()) != AccessVerdict.Allowed)
+        else if (AccessPolicy.SameIdentity(upload.Subject, AttestedSubject(context.User)) != AccessVerdict.Allowed)
         {
             // The opening was admitted; a segment only has to come from the identity that opened it.
             _logger.LogWarning("Security: Stream access denied - a segment of {BridgeKey} does not come from the identity that opened its stream", bridgeKey);
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
-        DisableKestrelLimits();
+        DisableKestrelLimits(context);
         SegmentOutcome outcome;
         try
         {
-            outcome = await upload.AcceptAsync(offset!.Value, Request.Body, final, HttpContext.RequestAborted);
+            outcome = await upload.AcceptAsync(offset!.Value, context.Request.Body, final, context.RequestAborted);
         }
         catch (OperationCanceledException)
         {
@@ -198,13 +192,13 @@ internal class StreamController : ControllerBase
             return;
         }
 
-        Response.Headers[DataPlane.RelayedHeader] = outcome.Relayed.ToString(CultureInfo.InvariantCulture);
+        context.Response.Headers[DataPlane.RelayedHeader] = outcome.Relayed.ToString(CultureInfo.InvariantCulture);
         if (outcome.Status == SegmentStatus.Conflict)
         {
             _logger.LogInformation("BRIDGE: Segment of {BridgeKey} at offset {Offset} refused: its stream is over or the segment does not follow on from it", bridgeKey, offset);
         }
 
-        Response.StatusCode = outcome.Status switch
+        context.Response.StatusCode = outcome.Status switch
         {
             SegmentStatus.Relayed => StatusCodes.Status200OK,
             SegmentStatus.Held => StatusCodes.Status202Accepted,
@@ -218,29 +212,25 @@ internal class StreamController : ControllerBase
     /// a read stream. A request that is not an upgrade is a front end that did not relay one: answered
     /// 426, it never opens anything, and the client goes on with segments.
     /// </summary>
-    [HttpGet("{transferId}/" + WireRoutes.SendSegment)]
-    [MiddlewareFilter(typeof(WebSocketPipeline))]
-    public async Task SendOverWebSocket(
-        string transferId,
-        [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs)
+    public async Task SendOverWebSocketAsync(HttpContext context, string transferId, int? heartbeatMs)
     {
-        if (!HttpContext.WebSockets.IsWebSocketRequest)
+        if (!context.WebSockets.IsWebSocketRequest)
         {
             _logger.LogWarning("Write stream of transfer {TransferId} not opened over a WebSocket: the request reached the hub without an upgrade", transferId);
-            Response.Headers.Upgrade = "websocket";
-            Response.StatusCode = StatusCodes.Status426UpgradeRequired;
+            context.Response.Headers.Upgrade = "websocket";
+            context.Response.StatusCode = StatusCodes.Status426UpgradeRequired;
             return;
         }
 
-        if (!TryParseConnectionType(Request, transferId, out var type))
+        if (!TryParseConnectionType(context.Request, transferId, out var type))
         {
-            Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        if (await ValidateTransfer(transferId, type, isWrite: true) is not { } participants)
+        if (await ValidateTransferAsync(context.User, transferId, type, isWrite: true) is not { } participants)
         {
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
@@ -249,21 +239,21 @@ internal class StreamController : ControllerBase
         {
             _logger.LogWarning("WebSocket of {BridgeKey} refused: its opening announces no heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
                 bridgeKey, heartbeatMs);
-            Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext { KeepAliveInterval = heartbeat });
+        using var socket = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext { KeepAliveInterval = heartbeat });
 
         // Only the sender's silence is judged, for the reason given when an epoch opens.
         using var input = new WebSocketInput(socket, bridgeKey, type == ConnectionType.Data ? heartbeat : null, _time, _logger);
-        if (!await input.AnswerProbeAsync(HttpContext.RequestAborted))
+        if (!await input.AnswerProbeAsync(context.RequestAborted))
         {
             return;
         }
 
         input.JudgeSilence();
-        if (!await input.WaitForFirstByteAsync(HttpContext.RequestAborted))
+        if (!await input.WaitForFirstByteAsync(context.RequestAborted))
         {
             return;
         }
@@ -273,7 +263,7 @@ internal class StreamController : ControllerBase
 
         try
         {
-            await _brokerServer.HandleSendAsync(transferId, type, input, HttpContext.RequestAborted);
+            await _brokerServer.HandleSendAsync(transferId, type, input, context.RequestAborted);
         }
         catch (OperationCanceledException)
         {
@@ -288,7 +278,7 @@ internal class StreamController : ControllerBase
             }
         }
 
-        await input.EndAsync(HttpContext.RequestAborted);
+        await input.EndAsync(context.RequestAborted);
     }
 
     /// <summary>
@@ -297,27 +287,25 @@ internal class StreamController : ControllerBase
     /// heartbeat is, on the client's stream of events; the hub answers the probe, announces the WebSocket,
     /// and closes once the client does. Answered 426, and nothing announced, when it is not an upgrade.
     /// </summary>
-    [HttpGet(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment)]
-    [MiddlewareFilter(typeof(WebSocketPipeline))]
-    public async Task ProbeOverWebSocket([FromQuery(Name = DataPlane.ConnectionParameter)] string? connection)
+    public async Task ProbeOverWebSocketAsync(HttpContext context, string? connection)
     {
-        if (!HttpContext.WebSockets.IsWebSocketRequest)
+        if (!context.WebSockets.IsWebSocketRequest)
         {
             _logger.LogWarning("Write-transport probe on stream {ConnectionId} not made over a WebSocket: the request reached the hub without an upgrade", connection);
-            Response.Headers.Upgrade = "websocket";
-            Response.StatusCode = StatusCodes.Status426UpgradeRequired;
+            context.Response.Headers.Upgrade = "websocket";
+            context.Response.StatusCode = StatusCodes.Status426UpgradeRequired;
             return;
         }
 
-        if (await AdmitProbeAsync(connection) is not { } clientId)
+        if (await AdmitProbeAsync(context.User, connection) is not { } clientId)
         {
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
-        using var socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
+        using var socket = await context.WebSockets.AcceptWebSocketAsync();
         using var input = new WebSocketInput(socket, $"the write-transport probe of client {clientId}", heartbeatInterval: null, _time, _logger);
-        if (!await input.AnswerProbeAsync(HttpContext.RequestAborted))
+        if (!await input.AnswerProbeAsync(context.RequestAborted))
         {
             return;
         }
@@ -328,25 +316,24 @@ internal class StreamController : ControllerBase
 
     /// <summary>
     /// The write-transport probe over segments: an empty <c>POST</c>, admitted as
-    /// <see cref="ProbeOverWebSocket"/> is, announced and answered 204.
+    /// <see cref="ProbeOverWebSocketAsync"/> is, announced and answered 204.
     /// </summary>
-    [HttpPost(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment)]
-    public async Task<IActionResult> ProbeOverSegments([FromQuery(Name = DataPlane.ConnectionParameter)] string? connection)
+    public async Task<IResult> ProbeOverSegmentsAsync(HttpContext context, string? connection)
     {
-        if (await AdmitProbeAsync(connection) is not { } clientId)
+        if (await AdmitProbeAsync(context.User, connection) is not { } clientId)
         {
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         AnnounceProbe(clientId, WriteTransport.Segments);
-        return NoContent();
+        return Results.NoContent();
     }
 
     // No transfer stands behind a probe, so the client's registration is all there is to admit it on.
-    private async Task<Guid?> AdmitProbeAsync(string? connection)
+    private async Task<Guid?> AdmitProbeAsync(ClaimsPrincipal user, string? connection)
     {
         if (connection is { Length: > 0 }
-            && await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, User, connection) is { } client)
+            && await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, user, connection) is { } client)
         {
             return client.ClientId;
         }
@@ -359,18 +346,25 @@ internal class StreamController : ControllerBase
     /// Opens the epoch a segment names when this hub holds none by that id: the transfer is checked
     /// and the caller admitted here, once per epoch. Returns null once the response is written.
     /// </summary>
-    private async Task<UploadEpoch?> OpenEpochAsync(string transferId, ConnectionType type, string bridgeKey, Guid? epoch, long? offset, int? heartbeatMs)
+    private async Task<UploadEpoch?> OpenEpochAsync(
+        HttpContext context,
+        string transferId,
+        ConnectionType type,
+        string bridgeKey,
+        Guid? epoch,
+        long? offset,
+        int? heartbeatMs)
     {
-        if (await ValidateTransfer(transferId, type, isWrite: true) is not { } participants)
+        if (await ValidateTransferAsync(context.User, transferId, type, isWrite: true) is not { } participants)
         {
-            this.Refuse();
+            Refusal.Write(context.Response);
             return null;
         }
 
         if (epoch is not { } epochId || offset is not >= 0)
         {
             _logger.LogWarning("Segment of {BridgeKey} refused: it names no epoch or no offset", bridgeKey);
-            Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return null;
         }
 
@@ -378,7 +372,7 @@ internal class StreamController : ControllerBase
         if (offset != 0)
         {
             _logger.LogInformation("BRIDGE: Segment of {BridgeKey} at offset {Offset} refused: this hub holds no stream {Epoch}", bridgeKey, offset, epochId);
-            Response.StatusCode = StatusCodes.Status409Conflict;
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
             return null;
         }
 
@@ -393,7 +387,7 @@ internal class StreamController : ControllerBase
             {
                 _logger.LogWarning("Segment of {BridgeKey} refused: the opening of its stream announces no heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
                     bridgeKey, heartbeatMs);
-                Response.StatusCode = StatusCodes.Status400BadRequest;
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return null;
             }
 
@@ -404,7 +398,7 @@ internal class StreamController : ControllerBase
         return _epochs.Open(
             bridgeKey,
             epochId,
-            AttestedSubject(),
+            AttestedSubject(context.User),
             heartbeat,
             (input, token) => _brokerServer.HandleSendAsync(transferId, type, input, token));
     }
@@ -420,6 +414,7 @@ internal class StreamController : ControllerBase
         var clientId = type == ConnectionType.Data ? participants.SenderId : participants.ReceiverId;
         var bridgeKey = BridgeManager.KeyFor(transferId, type);
         _logger.LogInformation("BRIDGE: The write stream of {BridgeKey} (client {ClientId}) is carried by {Transport}", bridgeKey, clientId, transport);
+        _metrics?.RecordWriteStreamOpened(type, transport);
 
         try
         {
@@ -450,9 +445,9 @@ internal class StreamController : ControllerBase
     }
 
     // Dev mode attests nothing, and two absent subjects are the same identity.
-    private string? AttestedSubject() =>
-        User?.Identity?.IsAuthenticated == true
-            ? _identityProvider.ResolveIdentity(User, providedClientId: null, providedGroups: null)?.Subject
+    private string? AttestedSubject(ClaimsPrincipal user) =>
+        user?.Identity?.IsAuthenticated == true
+            ? _identityProvider.ResolveIdentity(user, providedClientId: null, providedGroups: null)?.Subject
             : null;
 
     /// <summary>
@@ -461,12 +456,11 @@ internal class StreamController : ControllerBase
     /// reach the wire because the data stream in front of it is full: the in-stream signal is the one
     /// the design relies on, and this request is only what is left when the stream cannot carry it.
     /// </summary>
-    [HttpPost("{transferId}/" + WireRoutes.AbortSegment)]
-    public async Task<IActionResult> Abort(string transferId)
+    public async Task<IResult> AbortAsync(HttpContext context, string transferId)
     {
-        if (await Admit(transferId, Role.Either) is null)
+        if (await AdmitAsync(context.User, transferId, Role.Either) is null)
         {
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         // Only the replica that carried the transfer's streams can end it: it holds the bridges, and the
@@ -477,26 +471,25 @@ internal class StreamController : ControllerBase
             && !_bridgeManager.Bridges.ContainsKey(BridgeManager.KeyFor(transferId, ConnectionType.Control)))
         {
             _logger.LogWarning("Abort request for transfer {TransferId} refused: this hub holds none of its bridges, so the request did not follow its streams", transferId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         _logger.LogInformation("Transfer {TransferId} ended at the request of one of its participants", transferId);
-        await _terminator.TerminateAsync(transferId);
-        return NoContent();
+        await _terminator.TerminateWithReasonAsync(transferId, TransferEndReasons.Abort, context.RequestAborted);
+        return Results.NoContent();
     }
 
-    [HttpGet("{transferId}/" + WireRoutes.ReceiveSegment)]
-    public async Task Receive(string transferId)
+    public async Task ReceiveAsync(HttpContext context, string transferId)
     {
-        if (!TryParseConnectionType(Request, transferId, out var type))
+        if (!TryParseConnectionType(context.Request, transferId, out var type))
         {
-            Response.StatusCode = 400;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        if (await ValidateTransfer(transferId, type, isWrite: false) is null)
+        if (await ValidateTransferAsync(context.User, transferId, type, isWrite: false) is null)
         {
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
@@ -505,30 +498,30 @@ internal class StreamController : ControllerBase
         // takes it for a stream that broke and reopens it, without end.
         if (type == ConnectionType.Data && DataStreamFinished(transferId))
         {
-            Response.StatusCode = 410;
+            context.Response.StatusCode = StatusCodes.Status410Gone;
             return;
         }
 
-        DisableKestrelLimits();
-        Response.StatusCode = 200;
-        Response.ContentType = "application/octet-stream";
+        DisableKestrelLimits(context);
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/octet-stream";
         // A proxy that buffers responses holds back the few bytes a stream can end on, an
         // acknowledgement or a Pong, until its buffer fills, which this stream may never do.
-        Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
-        HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
-        await Response.StartAsync();
+        context.Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
+        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        await context.Response.StartAsync();
         // Kestrel holds the headers until the first write, and a stream may have nothing to write
         // for a heartbeat interval; the client's request waits on them until then.
-        await Response.Body.FlushAsync();
+        await context.Response.Body.FlushAsync();
 
         try
         {
-            await _brokerServer.HandleReceiveAsync(transferId, type, Response.Body, HttpContext.RequestAborted);
+            await _brokerServer.HandleReceiveAsync(transferId, type, context.Response.Body, context.RequestAborted);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in StreamController.Receive (Transfer: {TransferId})", transferId);
+            _logger.LogError(ex, "Error in StreamEndpoints.ReceiveAsync (Transfer: {TransferId})", transferId);
         }
     }
 
@@ -556,28 +549,34 @@ internal class StreamController : ControllerBase
     }
 
     /// <summary>
-    /// Disables Kestrel's minimum data rate limits for this request.
-    /// Streaming connections can be paused or slow, which would otherwise trigger Kestrel's Slowloris protection
-    /// and disconnect the client. We explicitly disable this protection for data streams.
+    /// Disables Kestrel's minimum data rate and request body size limits for this request.
+    /// Streaming connections can be paused or slow, which would otherwise trigger Kestrel's Slowloris
+    /// protection and disconnect the client.
     /// </summary>
-    private void DisableKestrelLimits()
+    private void DisableKestrelLimits(HttpContext context)
     {
-        var minRequestBodyDataRateFeature = HttpContext.Features.Get<IHttpMinRequestBodyDataRateFeature>();
+        var maxRequestBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (maxRequestBodySizeFeature is { IsReadOnly: false })
+        {
+            maxRequestBodySizeFeature.MaxRequestBodySize = null;
+        }
+
+        var minRequestBodyDataRateFeature = context.Features.Get<IHttpMinRequestBodyDataRateFeature>();
         if (minRequestBodyDataRateFeature != null)
         {
             minRequestBodyDataRateFeature.MinDataRate = null;
         }
 
-        var minResponseDataRateFeature = HttpContext.Features.Get<IHttpMinResponseDataRateFeature>();
+        var minResponseDataRateFeature = context.Features.Get<IHttpMinResponseDataRateFeature>();
         if (minResponseDataRateFeature != null)
         {
             minResponseDataRateFeature.MinDataRate = null;
-            _logger.LogDebug("[StreamController] MinResponseDataRate Disabled for Request {TraceIdentifier}", HttpContext.TraceIdentifier);
+            _logger.LogDebug("[StreamEndpoints] MinResponseDataRate Disabled for Request {TraceIdentifier}", context.TraceIdentifier);
         }
         else
         {
             // If the feature is not found, Kestrel limits might not be active (e.g. running behind IIS or different server)
-            _logger.LogDebug("[StreamController] IHttpMinResponseDataRateFeature NOT FOUND for Request {TraceIdentifier}", HttpContext.TraceIdentifier);
+            _logger.LogDebug("[StreamEndpoints] IHttpMinResponseDataRateFeature NOT FOUND for Request {TraceIdentifier}", context.TraceIdentifier);
         }
     }
 }

@@ -1,16 +1,20 @@
-using Microsoft.AspNetCore.Authorization;
+using System.Globalization;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using TransportR.Hub.Access;
-using TransportR.Hub.Controllers;
+using TransportR.Hub.Diagnostics;
+using TransportR.Hub.Endpoints;
 using TransportR.Hub.Identity;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Services;
 using TransportR.Hub.Streams;
+using TransportR.Protocol;
 
 namespace TransportR.Hub;
 
@@ -186,6 +190,7 @@ public static class TransportRHubExtensions
             .Validate(
                 o => o.StalledProgressTimeoutSeconds is not { } stalled || stalled > o.BridgeTimeoutSeconds,
                 "DataPlaneConfiguration.StalledProgressTimeoutSeconds must be greater than BridgeTimeoutSeconds, or left unset.")
+            .Validate(o => o.DrainTimeoutSeconds >= 0, "DataPlaneConfiguration.DrainTimeoutSeconds cannot be negative.")
             .ValidateOnStart();
         services.AddOptions<ClientRegistryConfiguration>()
             .Validate(o => o.DisconnectedGraceSeconds > 0, "ClientRegistryConfiguration.DisconnectedGraceSeconds must be positive.")
@@ -242,17 +247,21 @@ public static class TransportRHubExtensions
         // provider the host registered before this call is kept.
         services.TryAddSingleton<IClientIdentityProvider, JwtIdentityProvider>();
 
-        // The data plane (StreamController) and the control plane (ClientController).
-        services.AddControllers()
-                .AddApplicationPart(typeof(TransportRHubExtensions).Assembly)
-                .ConfigureApplicationPartManager(manager => manager.FeatureProviders.Add(new DataHubControllerFeatureProvider()));
+        // Built-in diagnostics, graceful shutdown drain, routing, and Minimal API endpoint handlers.
+        services.AddRouting();
+        services.AddSingleton<HubMetrics>();
+        services.AddSingleton<HubDrainState>();
+        services.AddHostedService<HubDrainService>();
+        services.AddSingleton<ClientEndpoints>();
+        services.AddSingleton<StreamEndpoints>();
 
         return new DataHubBuilder(services);
     }
 
     /// <summary>
-    /// Maps the StreamController and ClientController endpoints: the data plane and the control plane.
+    /// Maps the TransportR data plane and control plane endpoints at the root path.
     /// </summary>
+    /// <param name="endpoints">The route builder to map onto.</param>
     /// <param name="requireAuth">
     /// Whether authorization is armed on both planes. Left null, it follows the identity provider
     /// registered: armed for a hub that validates tokens or has a provider of the host's own, not for
@@ -261,8 +270,30 @@ public static class TransportRHubExtensions
     /// which is the documented meaning of dev mode; a hub that validates tokens and is mapped that way
     /// logs a warning when it starts, as a hub in dev mode does.
     /// </param>
-    public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool? requireAuth = null)
+    public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, bool? requireAuth = null) =>
+        endpoints.MapDataHub(string.Empty, requireAuth);
+
+    /// <summary>
+    /// Maps the TransportR data plane and control plane endpoints under <paramref name="routePrefix"/>.
+    /// </summary>
+    /// <param name="endpoints">The route builder to map onto.</param>
+    /// <param name="routePrefix">
+    /// Path prefix placed ahead of <see cref="WireRoutes.ClientBase"/> and <see cref="WireRoutes.StreamBase"/>
+    /// (for example <c>"/transportr"</c>), or empty for root mapping. Must not contain whitespace.
+    /// </param>
+    /// <param name="requireAuth">See <see cref="MapDataHub(IEndpointRouteBuilder, bool?)"/>.</param>
+    public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, string routePrefix, bool? requireAuth = null)
     {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(routePrefix);
+        if (routePrefix.Any(char.IsWhiteSpace))
+        {
+            throw new ArgumentException("Route prefix cannot contain whitespace.", nameof(routePrefix));
+        }
+
+        var trimmed = routePrefix.Trim('/');
+        var prefix = trimmed.Length == 0 ? string.Empty : "/" + trimmed;
+
         // Read from the provider registered rather than from the requests: a request without a
         // token looks the same on a hub in dev mode and on one that validates tokens.
         var devMode = endpoints.ServiceProvider.GetRequiredService<IClientIdentityProvider>() is DevIdentityProvider;
@@ -280,24 +311,106 @@ public static class TransportRHubExtensions
                 "TransportR hub validates tokens but is mapped with requireAuth: false: its data plane serves anyone who knows a transfer id, without a token.");
         }
 
-        var controllers = endpoints.MapControllers();
+        var clientEndpoints = endpoints.ServiceProvider.GetRequiredService<ClientEndpoints>();
+        var streamEndpoints = endpoints.ServiceProvider.GetRequiredService<StreamEndpoints>();
+
+        var clientGroup = endpoints.MapGroup(prefix + WireRoutes.ClientBase);
+        clientGroup.MapGet("{clientId:guid}/" + WireRoutes.EventsSegment,
+            (HttpContext ctx, Guid clientId, [FromQuery(Name = ControlPlane.HeartbeatParameter)] int? heartbeatMs) =>
+                clientEndpoints.EventsAsync(ctx, clientId, heartbeatMs));
+        clientGroup.MapPost("{clientId:guid}/" + WireRoutes.PresenceSegment + "/{connectionId}",
+            (HttpContext ctx, Guid clientId, string connectionId) =>
+                clientEndpoints.PresenceAsync(ctx, clientId, connectionId));
+        clientGroup.MapGet("{clientId:guid}/" + WireRoutes.ReceiversSegment,
+            (HttpContext ctx, Guid clientId) =>
+                clientEndpoints.ReceiversAsync(ctx, clientId));
+        clientGroup.MapPost("{clientId:guid}/" + WireRoutes.TransfersSegment,
+            (HttpContext ctx, Guid clientId) =>
+                clientEndpoints.InitTransferAsync(ctx, clientId));
+        clientGroup.MapPost("{clientId:guid}/" + WireRoutes.RepliesSegment + "/{requestId:guid}",
+            (HttpContext ctx, Guid clientId, Guid requestId) =>
+                clientEndpoints.ReplyAsync(ctx, clientId, requestId));
+        clientGroup.MapPost("{clientId:guid}/" + WireRoutes.TransfersSegment + "/{transferId}/" + WireRoutes.HeartbeatSegment,
+            (HttpContext ctx, Guid clientId, string transferId) =>
+                clientEndpoints.TransferHeartbeatAsync(ctx, clientId, transferId));
+        clientGroup.MapPost("{clientId:guid}/" + WireRoutes.TransfersSegment + "/{transferId}/" + WireRoutes.PingSegment,
+            (HttpContext ctx, Guid clientId, string transferId) =>
+                clientEndpoints.PingAsync(ctx, clientId, transferId));
+        clientGroup.MapPut("{clientId:guid}/" + WireRoutes.TokenSegment,
+            (HttpContext ctx, Guid clientId) =>
+                clientEndpoints.RenewAsync(ctx, clientId));
+
+        var streamGroup = endpoints.MapGroup(prefix + WireRoutes.StreamBase);
+        streamGroup.MapPost("{transferId}/" + WireRoutes.SendSegment,
+            (HttpContext ctx,
+             string transferId,
+             [FromQuery(Name = DataPlane.EpochParameter)] Guid? epoch,
+             [FromQuery(Name = DataPlane.OffsetParameter)] long? offset,
+             [FromQuery(Name = DataPlane.FinalParameter)] bool? final,
+             [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs) =>
+                streamEndpoints.SendAsync(ctx, transferId, epoch, offset, final ?? false, heartbeatMs))
+            .WithMetadata(new DisableRequestSizeLimitAttribute());
+
+        // UseWebSockets wraps only the two upgrade routes so the host adds nothing to its pipeline
+        // and group-level authorization runs before any WebSocket upgrade.
+        streamGroup.MapGet("{transferId}/" + WireRoutes.SendSegment, BuildWebSocketDelegate(endpoints, ctx =>
+        {
+            if (!TryParseOptionalInt(ctx.Request.Query[DataPlane.HeartbeatParameter], out var heartbeatMs))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return Task.CompletedTask;
+            }
+
+            var transferId = ctx.GetRouteValue("transferId")?.ToString() ?? string.Empty;
+            return streamEndpoints.SendOverWebSocketAsync(ctx, transferId, heartbeatMs);
+        }));
+
+        streamGroup.MapGet(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment, BuildWebSocketDelegate(endpoints, ctx =>
+        {
+            var connection = ctx.Request.Query[DataPlane.ConnectionParameter].FirstOrDefault();
+            return streamEndpoints.ProbeOverWebSocketAsync(ctx, connection);
+        }));
+
+        streamGroup.MapPost(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment,
+            (HttpContext ctx, [FromQuery(Name = DataPlane.ConnectionParameter)] string? connection) =>
+                streamEndpoints.ProbeOverSegmentsAsync(ctx, connection));
+        streamGroup.MapPost("{transferId}/" + WireRoutes.AbortSegment,
+            (HttpContext ctx, string transferId) =>
+                streamEndpoints.AbortAsync(ctx, transferId));
+        streamGroup.MapGet("{transferId}/" + WireRoutes.ReceiveSegment,
+            (HttpContext ctx, string transferId) =>
+                streamEndpoints.ReceiveAsync(ctx, transferId));
 
         if (armed)
         {
-            // MapControllers hands back one convention builder for every controller the host has
-            // registered — including the embedded IdP's token endpoint, which must stay anonymous
-            // or no client could ever obtain the token this asks for. Hence the filter.
-            controllers.Add(builder =>
-            {
-                var action = builder.Metadata.OfType<ControllerActionDescriptor>().FirstOrDefault();
-                var controller = action?.ControllerTypeInfo.AsType();
-                if (controller == typeof(StreamController) || controller == typeof(ClientController))
-                {
-                    builder.Metadata.Add(new AuthorizeAttribute());
-                }
-            });
+            clientGroup.RequireAuthorization();
+            streamGroup.RequireAuthorization();
         }
 
         return endpoints;
+    }
+
+    private static RequestDelegate BuildWebSocketDelegate(IEndpointRouteBuilder endpoints, RequestDelegate handler)
+    {
+        var wsApp = endpoints.CreateApplicationBuilder();
+        wsApp.UseWebSockets();
+        wsApp.Run(handler);
+        return wsApp.Build();
+    }
+
+    private static bool TryParseOptionalInt(StringValues values, out int? value)
+    {
+        value = null;
+        if (values.Count == 0) return true;
+
+        var raw = values[0];
+        if (string.IsNullOrEmpty(raw)) return true;
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return false;
+        }
+
+        value = parsed;
+        return true;
     }
 }

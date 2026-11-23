@@ -15,6 +15,7 @@
 NGINX_PORT=${NGINX_PORT:-8088}
 NGINX_CONTAINER=""
 NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.31.7-alpine}
+NGINX_TEMPLATE=${NGINX_TEMPLATE:-default.conf.template}
 
 # Start nginx and send the clients through it
 start_nginx() {
@@ -29,7 +30,7 @@ start_nginx() {
     ensure_port_free "$NGINX_PORT" || return 1
 
     local conf="$OUTPUT_DIR/nginx.conf"
-    sed "s/\${HUB_PORT}/$HUB_PORT/" "$SCRIPT_DIR/nginx/default.conf.template" > "$conf"
+    sed "s/\${HUB_PORT}/$HUB_PORT/" "$SCRIPT_DIR/nginx/$NGINX_TEMPLATE" > "$conf"
     local conf_dir
     conf_dir="$(cd "$(dirname "$conf")" && pwd)"
 

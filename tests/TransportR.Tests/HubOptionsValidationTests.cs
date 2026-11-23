@@ -119,4 +119,14 @@ public class HubOptionsValidationTests
         var refused = Assert.IsType<OptionsValidationException>(failure);
         Assert.Contains("BridgeTimeoutSeconds", refused.Message);
     }
+
+    [Fact]
+    public void NegativeDrainTimeoutSeconds_IsRefusedWhenTheHostStarts()
+    {
+        var failure = Record.Exception(() => TestHubServerFactory.CreateHost(services => services
+            .Configure<DataPlaneConfiguration>(o => o.DrainTimeoutSeconds = -1)));
+
+        var refused = Assert.IsType<OptionsValidationException>(failure);
+        Assert.Contains("DrainTimeoutSeconds", refused.Message);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
@@ -114,6 +115,15 @@ internal static class ProvenWebSocket
         if (!string.IsNullOrEmpty(accessToken))
         {
             options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
+        }
+
+        if (Activity.Current is { Id: { Length: > 0 } traceParent } currentActivity)
+        {
+            options.SetRequestHeader("traceparent", traceParent);
+            if (!string.IsNullOrEmpty(currentActivity.TraceStateString))
+            {
+                options.SetRequestHeader("tracestate", currentActivity.TraceStateString);
+            }
         }
 
         return socket;

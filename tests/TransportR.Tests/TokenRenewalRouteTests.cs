@@ -4,7 +4,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,7 +12,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using TransportR.Hub;
 using TransportR.Hub.Access;
-using TransportR.Hub.Controllers;
+using TransportR.Hub.Endpoints;
 using TransportR.Hub.Services;
 using TransportR.Protocol;
 using TransportR.Tests.Infrastructure;
@@ -187,7 +186,7 @@ public class TokenRenewalRouteTests
         var streams = new ClientStreams(clock);
         var transfers = new TransferManager(store, clock);
         var affinity = Options.Create(new AffinityOptions());
-        var controller = new ClientController(
+        var endpoints = new ClientEndpoints(
             store,
             new JwtIdentityProvider(),
             policy,
@@ -198,27 +197,24 @@ public class TokenRenewalRouteTests
             affinity,
             Options.Create(new DataPlaneConfiguration()),
             clock,
-            NullLogger<ClientController>.Instance)
+            NullLogger<ClientEndpoints>.Instance);
+        var httpContext = new DefaultHttpContext
         {
-            ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim("sub", Owner),
-                        new Claim("scope", "transportr:group:" + Group),
-                        new Claim("exp", new DateTimeOffset(expiry, TimeSpan.Zero).ToUnixTimeSeconds().ToString())
-                    ], "test"))
-                }
-            }
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("sub", Owner),
+                new Claim("scope", "transportr:group:" + Group),
+                new Claim("exp", new DateTimeOffset(expiry, TimeSpan.Zero).ToUnixTimeSeconds().ToString())
+            ], "test"))
         };
 
-        Assert.IsType<OkObjectResult>(await controller.Renew(clientId));
+        var okResult = await endpoints.RenewAsync(httpContext, clientId);
+        Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(okResult).StatusCode);
         Assert.Equal([clientId], reconciler.Reconciled);
 
         clock.Advance(TimeSpan.FromMinutes(11));
-        Assert.IsType<NotFoundResult>(await controller.Renew(clientId));
+        var expiredResult = await endpoints.RenewAsync(httpContext, clientId);
+        Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(expiredResult).StatusCode);
         Assert.Single(reconciler.Reconciled);
     }
 

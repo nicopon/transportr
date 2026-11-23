@@ -9,16 +9,28 @@ Provides `RedisStateStore`, an `IStateStore` implementation that stores client r
 ## Usage
 
 ```csharp
+// Connection string
 builder.Services.AddDataHub()
     .UseRedisStore("localhost:6379")
     .UseAffinityHandoff();
+
+// Existing StackExchange.Redis IConnectionMultiplexer in DI (e.g. .NET Aspire or shared cache),
+// with an isolated key prefix:
+builder.Services.AddDataHub()
+    .UseRedisStore(options => options.KeyPrefix = "myapp:")
+    .UseAffinityHandoff();
 ```
+
+`UseRedisStore` accepts a connection string, `ConfigurationOptions`, an `IConnectionMultiplexer` instance, or an
+existing `IConnectionMultiplexer` in DI, each with an optional `Action<RedisStateStoreOptions>` to customize `KeyPrefix`
+(default `"transportr:"`).
 
 ## Features
 
 - **Client registrations**: kept for `ConnectedTtlSeconds` (3600 s by default) while the client is connected, and for `DisconnectedGraceSeconds` (300 s by default) once its events stream ends. Each presence heartbeat pushes the expiry back.
 - **Transfer sessions**: expire at the session's `ExpiresAtUtc`; heartbeats extend them.
 - **Secondary index**: connection id → client id, with the same expiry as the registration.
+- **Redis Cluster compatible**: uses only single-key commands and pipelined reads (no multi-key `MGET` / `CROSSSLOT`).
 
 ## Key Structure
 

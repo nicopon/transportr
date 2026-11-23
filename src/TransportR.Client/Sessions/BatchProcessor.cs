@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
+using TransportR.Client.Diagnostics;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 
@@ -200,6 +201,7 @@ internal class BatchProcessor : IAsyncDisposable
 
         if (ChunkIO.IsBatch(header.Type))
         {
+            ClientMetrics.RecordBytesTransferred(isSender: false, header.PayloadLength);
             await HandleBatchChunkAsync(header, payload, ct);
             return;
         }
@@ -668,6 +670,7 @@ internal class BatchProcessor : IAsyncDisposable
         {
             await ChunkIO.WriteBatchAsync(outputStream, transferGuid, _batchType, batchId, ReadCount(body), body.Slice(sizeof(int)), token);
             Interlocked.Add(ref _payloadBytes, body.Length);
+            ClientMetrics.RecordBytesTransferred(isSender: true, body.Length);
             return true;
         }
         finally

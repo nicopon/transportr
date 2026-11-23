@@ -29,7 +29,7 @@ TransportR.Storage.Redis/                # Redis State Store implementation
 | **Dumb Pipe Architecture** | Hub forwards variable-length opaque bytes without deserialization |
 | **Reliable Delivery** | Packet-level ACK with automatic retry |
 | **Group-based Access** | Groups taken from token scopes decide which client may send to which |
-| **Observability** | Hub-side byte counting and write transports via `IHubProgressMonitor` |
+| **Observability** | Built-in BCL `Meter` metrics and `ActivitySource` tracing on hub and client, plus `IHubProgressMonitor` and `GetTransfers()` |
 
 ---
 
@@ -270,10 +270,22 @@ write per heartbeat, for a case the deployment already excludes.
 
 ## Observability
 
-**The packages emit no metrics of their own.** They provide two hooks, and the host decides what to do with them:
-`IHubProgressMonitor` on the hub side, and the `TransferInfo` records `GetTransfers()` returns on the client side.
-`samples/DataHub` builds its own OpenTelemetry meter on the first: copy it rather than expect one from the package. The
-hub announces the transport of each write stream it takes on, to its log and to
+Both `TransportR.Hub` and `TransportR.Client` emit built-in BCL `System.Diagnostics.Metrics.Meter` metrics and
+`System.Diagnostics.ActivitySource` spans with zero external dependencies, alongside the programmatic hooks
+`IHubProgressMonitor` (hub) and `GetTransfers()` (`TransferInfo`, client):
+
+- **Hub (`TransportRHubDiagnostics.MeterName` / `ActivitySourceName` = `"TransportR.Hub"`)**: gauges
+  `transportr.hub.clients.connected` and `transportr.hub.transfers.active`; counters
+  `transportr.hub.bytes.relayed`, `transportr.hub.write_streams.opened` (`transportr.transport`,
+  `transportr.connection_type`), and `transportr.hub.transfers.ended` (`transportr.end_reason`); activity
+  `"transportr.hub.init_transfer"`.
+- **Client (`TransportRClientDiagnostics.MeterName` / `ActivitySourceName` = `"TransportR.Client"`)**: up/down counter
+  `transportr.client.transfers.active`; counters `transportr.client.transfers.completed` (`transportr.direction`,
+  `transportr.outcome`, `transportr.failure_category`), `transportr.client.bytes.transferred`,
+  `transportr.client.reconnections`, and `transportr.client.write_transport.fallbacks`; activity
+  `"transportr.client.init_transfer"`, with W3C `traceparent`/`tracestate` propagated on WebSocket upgrades.
+
+The hub announces the transport of each write stream it takes on, to its log and to
 `IHubProgressMonitor.OnWriteStreamOpened`, and of each write-transport probe to `OnWriteTransportProbed`.
 
 ---

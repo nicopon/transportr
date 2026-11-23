@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TransportR.Hub;
@@ -393,5 +394,60 @@ public class RedisStateStoreTests : IAsyncLifetime
         Assert.NotNull(found);
         var ttl = await db.KeyTimeToLiveAsync($"transportr:clients:{clientId}");
         Assert.True(ttl > TimeSpan.FromMinutes(30), $"Expected the expiry to be pushed back, got {ttl}");
+    }
+
+    [RedisAvailableFact]
+    public async Task KeyPrefix_IsolatesClientsAndSessionsBetweenTenants()
+    {
+        var storeA = new RedisStateStore(_multiplexer, storeOptions: Options.Create(new RedisStateStoreOptions { KeyPrefix = "appA:" }));
+        var storeB = new RedisStateStore(_multiplexer, storeOptions: Options.Create(new RedisStateStoreOptions { KeyPrefix = "appB:" }));
+
+        var clientId = Guid.NewGuid();
+        await storeA.SaveClientAsync(CreateClient(clientId, "conn-a"));
+
+        Assert.NotNull(await storeA.GetClientAsync(clientId));
+        Assert.Null(await storeB.GetClientAsync(clientId));
+        Assert.True(await _multiplexer.GetDatabase().KeyExistsAsync($"appA:clients:{clientId}"));
+    }
+
+    [RedisAvailableFact]
+    public void UseRedisStore_SupportsExistingDiMultiplexer_Instance_AndConfigurationOptions()
+    {
+        // Existing multiplexer in DI
+        var servicesFromDi = new ServiceCollection();
+        servicesFromDi.AddSingleton(_multiplexer);
+        servicesFromDi.AddDataHub().UseRedisStore(o => o.KeyPrefix = "di:");
+        using (var sp = servicesFromDi.BuildServiceProvider())
+        {
+            Assert.Same(_multiplexer, sp.GetRequiredService<IConnectionMultiplexer>());
+            Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            Assert.Equal("di:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
+        }
+
+        // Provided multiplexer instance
+        var servicesInstance = new ServiceCollection();
+        servicesInstance.AddDataHub().UseRedisStore(_multiplexer, o => o.KeyPrefix = "inst:");
+        using (var sp = servicesInstance.BuildServiceProvider())
+        {
+            Assert.Same(_multiplexer, sp.GetRequiredService<IConnectionMultiplexer>());
+            Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            Assert.Equal("inst:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
+        }
+
+        // ConfigurationOptions overload
+        var configOptions = ConfigurationOptions.Parse(_redis.ConnectionString);
+        var servicesConfig = new ServiceCollection();
+        servicesConfig.AddDataHub().UseRedisStore(configOptions, o => o.KeyPrefix = "cfg:");
+        using (var sp = servicesConfig.BuildServiceProvider())
+        {
+            Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            Assert.Equal("cfg:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
+        }
+
+        // Null KeyPrefix fails options validation
+        var servicesInvalid = new ServiceCollection();
+        servicesInvalid.AddDataHub().UseRedisStore(_multiplexer, o => o.KeyPrefix = null!);
+        using var invalidSp = servicesInvalid.BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => invalidSp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value);
     }
 }

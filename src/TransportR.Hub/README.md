@@ -40,6 +40,12 @@ var app = builder.Build();
 // With the JWT default the host also configures JwtBearer authentication and calls UseAuthentication()
 // and UseAuthorization(); MapDataHub() then arms authorization on both planes (see SecurityArchitecture.md).
 app.MapDataHub();
+// Optional route prefix (for reverse proxies or multi-service hosts; clients use WithUrl("https://host/transportr")):
+// app.MapDataHub("/transportr");
+
+// Readiness health check (probes IStateStore and reports Unhealthy while draining):
+// builder.Services.AddHealthChecks().AddDataHub();
+// app.MapHealthChecks("/health/ready");
 
 app.Run();
 ```
@@ -64,6 +70,18 @@ app.Run();
   other says so in its notes.
 - **Two hubs or more** need the Redis state store and effective session affinity at the load balancer ("High
   Availability" in `TransportRArchitecture.md`).
+- **Health checks and graceful drain.** Register `builder.Services.AddHealthChecks().AddDataHub()` and map a readiness
+  endpoint: it probes `IStateStore` and reports `Unhealthy` as soon as the host enters shutdown. Set
+  `DataPlaneConfiguration.DrainTimeoutSeconds` (0 by default) so shutdown refuses new transfers (`503`) and waits up to
+  that bound for active bridges to finish; raise ASP.NET Core's `HostOptions.ShutdownTimeout` (30 s by default) whenever
+  `DrainTimeoutSeconds` exceeds it.
+- **Built-in metrics and tracing.** Subscribe an OpenTelemetry or `dotnet-counters` listener to
+  `TransportRHubDiagnostics.MeterName` (`"TransportR.Hub"`) and `TransportRHubDiagnostics.ActivitySourceName`
+  (`"TransportR.Hub"`): clients connected, active/ended transfers (by `transportr.end_reason`), bytes relayed, write
+  streams opened, and `transportr.hub.init_transfer` spans.
+- **Reference deployment templates.** `samples/DataHub/Dockerfile` provides a multi-stage `.NET 10` container image, and
+  `scripts/nginx/ws.conf.template` configures nginx for WebSocket upgrades, SSE (`proxy_buffering off`), and streaming
+  timeouts.
 
 ### In front of the hub
 
@@ -101,7 +119,7 @@ behind a given front end.
 | `tests/TransportR.TestProxy` (YARP) | WebSocket | relays the upgrade and the affinity cookie. Note: YARP does not flush outgoing request bodies per write by default, so carrying segments through YARP requires a flushing `IForwarderHttpClientFactory` (see `tests/TransportR.TestProxy/Program.cs`) |
 | Toxiproxy | WebSocket | the cut scenarios |
 | stock nginx, a `proxy_pass` that sets neither upgrade header (`nginx-default`) | segments | |
-| stock nginx relaying the upgrade | not run | |
+| stock nginx relaying the upgrade (`nginx-ws`, `scripts/nginx/ws.conf.template`) | WebSocket | 2 million items, both write streams over WebSocket |
 
 Not measured or not recorded: whether a front end counts a WebSocket's keepalive frames as traffic, and which HTTP
 version App Service's front end spoke to the hub. The 460 s transfer on App Service had each end's streams cut and

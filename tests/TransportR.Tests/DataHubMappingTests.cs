@@ -1,15 +1,22 @@
 using System.Net;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using TransportR.Client;
 using TransportR.Hub;
 using TransportR.Hub.Interfaces;
+using TransportR.Serialization.MessagePack;
 using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
 /// <summary>
-/// What <c>MapDataHub()</c> arms when the host says nothing: what its identity provider implies, so a
-/// hub that validates tokens does not serve its data plane to callers that present none.
+/// What <c>MapDataHub()</c> arms when the host says nothing, and how <c>MapDataHub(routePrefix)</c>
+/// exposes both planes under a path prefix with WebSockets self-contained.
 /// </summary>
 public class DataHubMappingTests
 {
@@ -32,5 +39,165 @@ public class DataHubMappingTests
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task MapDataHub_WithRoutePrefix_ServesControlAndDataPlanesOverSegments()
+    {
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.AddDataHub().UseDevMode(o =>
+                    {
+                        o.AllowAnonymous = true;
+                        o.DefaultGroups = ["test"];
+                    });
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDataHub("/transportr/", requireAuth: false));
+                }))
+            .Start();
+
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost/transportr")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+        await using var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost/transportr")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+
+        var received = new List<string>();
+        var receiverDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted(async receive =>
+        {
+            await using (receive)
+            {
+                await foreach (var item in receive.ReceiveAsync())
+                {
+                    received.Add(item);
+                }
+            }
+            receiverDone.TrySetResult();
+        });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 2);
+        await send.SendAsync("a");
+        await send.SendAsync("b");
+        await send.SendAsync("c");
+        await send.CompleteAsync();
+        await receiverDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(["a", "b", "c"], received);
+    }
+
+    [Fact]
+    public async Task MapDataHub_WithRoutePrefix_SupportsWebSocketsWithoutHostUseWebSockets()
+    {
+        var host = new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder
+                .UseKestrel()
+                .UseUrls("http://127.0.0.1:0")
+                .ConfigureServices(services =>
+                {
+                    services.AddDataHub().UseDevMode(o =>
+                    {
+                        o.AllowAnonymous = true;
+                        o.DefaultGroups = ["test"];
+                    });
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDataHub("/edge/hub", requireAuth: false));
+                }))
+            .Build();
+
+        await host.StartAsync();
+        try
+        {
+            var baseUrl = host.Services.GetRequiredService<IServer>()
+                .Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            var hubUrl = $"{baseUrl.TrimEnd('/')}/edge/hub";
+
+            await using var sender = new TransportRClientBuilder<string>()
+                .WithUrl(hubUrl)
+                .WithWriteTransport(WriteTransportPolicy.RequireWebSocket)
+                .WithMessagePackSerialization()
+                .Build();
+            await using var receiver = new TransportRClientBuilder<string>()
+                .WithUrl(hubUrl)
+                .WithWriteTransport(WriteTransportPolicy.RequireWebSocket)
+                .WithMessagePackSerialization()
+                .Build();
+
+            var received = new List<string>();
+            var receiverDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            receiver.OnTransferStarted(async receive =>
+            {
+                await using (receive)
+                {
+                    await foreach (var item in receive.ReceiveAsync())
+                    {
+                        received.Add(item);
+                    }
+                }
+                receiverDone.TrySetResult();
+            });
+
+            await sender.ConnectAsync();
+            await receiver.ConnectAsync();
+
+            await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 2);
+            await send.SendAsync("ws-1");
+            await send.SendAsync("ws-2");
+            await send.CompleteAsync();
+            await receiverDone.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(["ws-1", "ws-2"], received);
+            Assert.Equal(WriteTransport.WebSocket, sender.GetTransfers()[0].WriteTransport);
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task MapDataHub_WithRoutePrefixAndAuthArmed_ChallengesAnonymousRequests()
+    {
+        using var host = AuthenticatedHubServerFactory.CreateHost(mapHub: endpoints => endpoints.MapDataHub("/prefix"));
+        using var client = host.GetTestClient();
+
+        using var streamResp = await client.GetAsync($"http://localhost/prefix{WireRoutes.StreamBase}/t1/receive");
+        using var clientResp = await client.GetAsync($"http://localhost/prefix{WireRoutes.ClientBase}/{Guid.NewGuid()}/receivers");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, streamResp.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, clientResp.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("/bad prefix")]
+    public void MapDataHub_WithWhitespaceInPrefix_ThrowsArgumentException(string prefix)
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var builder = new Microsoft.AspNetCore.Builder.ApplicationBuilder(host.Services);
+        builder.UseRouting();
+        Assert.Throws<ArgumentException>(() =>
+            builder.UseEndpoints(endpoints => endpoints.MapDataHub(prefix, requireAuth: false)));
     }
 }

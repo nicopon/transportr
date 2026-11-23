@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using TransportR.Hub.Diagnostics;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
 using TransportR.Hub.Streams;
@@ -12,6 +13,7 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     private readonly IStateStore _stateStore;
     private readonly ITransferNotifier _notifier;
     private readonly UploadEpochs _epochs;
+    private readonly HubMetrics? _metrics;
     private readonly ILogger<TransferTerminator> _logger;
 
     public TransferTerminator(
@@ -20,7 +22,8 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
         IStateStore stateStore,
         ITransferNotifier notifier,
         UploadEpochs epochs,
-        ILogger<TransferTerminator> logger)
+        ILogger<TransferTerminator> logger,
+        HubMetrics? metrics = null)
     {
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
@@ -28,9 +31,13 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
         _notifier = notifier;
         _epochs = epochs;
         _logger = logger;
+        _metrics = metrics;
     }
 
-    public async Task TerminateAsync(string transferId, CancellationToken cancellationToken = default)
+    public Task TerminateAsync(string transferId, CancellationToken cancellationToken = default) =>
+        TerminateAsync(transferId, TransferEndReasons.Host, cancellationToken);
+
+    internal async Task TerminateAsync(string transferId, string reason, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -38,6 +45,10 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
             var bridges = await RemoveAsync(transferId);
+            if (participants != null || bridges.Count > 0)
+            {
+                _metrics?.RecordTransferEnded(reason);
+            }
 
             if (participants != null)
             {
@@ -65,7 +76,12 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     {
         try
         {
-            await RemoveAsync(transferId);
+            var existed = _transferManager.GetTransfer(transferId) != null;
+            var bridges = await RemoveAsync(transferId);
+            if (existed || bridges.Count > 0)
+            {
+                _metrics?.RecordTransferEnded(TransferEndReasons.Completed);
+            }
         }
         catch (Exception ex)
         {

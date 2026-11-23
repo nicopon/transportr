@@ -313,6 +313,17 @@ detail is in the hub's log.
 A 409 from the hub whose category the client cannot read fails as an `HttpRequestException`
 (`HttpRequestError.InvalidResponse`), not as a refusal.
 
+### Observability
+
+Both clients emit built-in BCL metrics and tracing under `TransportRClientDiagnostics.MeterName` and
+`TransportRClientDiagnostics.ActivitySourceName` (`"TransportR.Client"`):
+
+- **Metrics**: `transportr.client.transfers.active`, `transportr.client.transfers.completed` (`transportr.direction`,
+  `transportr.outcome`, `transportr.failure_category`), `transportr.client.bytes.transferred`,
+  `transportr.client.reconnections`, and `transportr.client.write_transport.fallbacks`.
+- **Tracing**: `transportr.client.init_transfer` span around `InitTransferAsync`, with W3C `traceparent`/`tracestate`
+  headers propagated on WebSocket upgrades as well as HTTP requests.
+
 ## License
 
 MIT

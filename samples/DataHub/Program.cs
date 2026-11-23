@@ -68,7 +68,6 @@ else
 }
 
 // CORS Configuration
-builder.Services.AddControllers();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -165,7 +164,11 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter(DataProxyMetrics.MeterName);
+        metrics.AddMeter(TransportRHubDiagnostics.MeterName);
     });
+
+builder.Services.AddHealthChecks()
+    .AddDataHub();
 
 // Response compression (Gzip)
 builder.Services.AddResponseCompression(opts =>
@@ -203,15 +206,14 @@ if (enableAuth)
     app.UseAuthorization();
 }
 
-app.MapControllers(); // Maps local controllers (if any)
-
 // Map Embedded IDP endpoints if enabled
 if (enableEmbeddedIdp)
 {
     app.MapSimpleIdp();
 }
 
-app.MapDataHub(requireAuth: enableAuth); // Maps DataHub endpoints (Hub + Controllers)
+app.MapDataHub(requireAuth: enableAuth);
+app.MapHealthChecks("/health/ready");
 
 // Health endpoint to check service is online
 app.MapGet("/health", () => new

@@ -147,6 +147,8 @@ internal class TransferManager : ITransferManager
         }
     }
 
+    public int ActiveCount => _transfers.Count;
+
     public IEnumerable<TransferState> GetAllTransfers()
     {
         return _transfers.Values;

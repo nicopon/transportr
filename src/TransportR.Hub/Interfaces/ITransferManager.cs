@@ -65,6 +65,11 @@ internal interface ITransferManager
     Task RemoveTransferAsync(string transferId);
 
     /// <summary>
+    /// Number of active transfers held on this hub instance.
+    /// </summary>
+    int ActiveCount => GetAllTransfers().Count();
+
+    /// <summary>
     /// Gets all active transfers.
     /// </summary>
     IEnumerable<TransferState> GetAllTransfers();

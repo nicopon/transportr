@@ -1,4 +1,4 @@
-namespace TransportR.Hub.Controllers;
+namespace TransportR.Hub.Endpoints;
 
 /// <summary>
 /// The heartbeat interval a client announces when it opens a stream. The hub judges the stream's

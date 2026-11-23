@@ -85,6 +85,7 @@ Unified benchmark runner with scenario support.
 | `parked-receiver` | A consumer at 12 items a second against a one-batch receive buffer, 6000 items: the write streams stay idle for tens of seconds, over a WebSocket. About eight minutes |
 | `parked-receiver-segments` | The same run with segments only |
 | `nginx-default` | The `default` transfer through an nginx container configured with nothing but a `proxy_pass` (needs a container runtime) |
+| `nginx-ws` | The `default` transfer through an nginx container configured with `scripts/nginx/ws.conf.template`, asserting WebSocket write streams (needs a container runtime) |
 | `slow-receiver` | Throttled consumer against a byte-bounded receive buffer, with a memory ceiling |
 | `slow-receiver-unbounded-bytes` | The control for the one above: same run, no byte bound. Expected to grow, and deliberately kept out of `test-all.sh` |
 | `byte-stream` | `data/orders.bin` carried as bytes, with no serializer; the receiver's file must have the size and the SHA-256 of the source |

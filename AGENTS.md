@@ -81,9 +81,9 @@ Each is described where its pointer leads. A change that undoes one is the owner
   data-plane route with no transfer's bytes, decides nothing ("Data Plane Transport" in `TransportRArchitecture.md`).
 - **The data plane is HTTP/1.1 on purpose** (`HttpStreamManager`, a WebSocket's upgrade included), and a fallback from
   WebSocket to segments is observable, never silent: read "Data Plane Transport" before changing either.
-- **The control plane's wire form is internal** (`ControlPlane` and its records, `ClientController`, `ControlChannel`);
+- **The control plane's wire form is internal** (`ControlPlane` and its records, `ClientEndpoints`, `ControlChannel`);
   what is public is the path segments of `WireRoutes`. A change that hands a host one of those types undoes that.
-- **The handshake lives in `TransferInitiator`**, for a sender that asks (`ClientController.InitTransfer`) and for the
+- **The handshake lives in `TransferInitiator`**, for a sender that asks (`ClientEndpoints.InitTransferAsync`) and for the
   host (`ITransferInitiator`), so authorization and the cleanup of a half-done handshake cannot drift between the two
   ("Transfers the host opens" in `src/TransportR.Hub/README.md`).
 

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TransportR.Hub;
-using TransportR.Hub.Controllers;
+using TransportR.Hub.Endpoints;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
 using TransportR.Hub.Services;
@@ -589,7 +589,7 @@ public class TransportRServerTests
 
         // The identity provider, the state store and the policy are only read once a caller is
         // authenticated, and this one is not: dev mode, where the data plane is open.
-        var controller = new StreamController(
+        var endpoints = new StreamEndpoints(
             server,
             new KnownTransfer(),
             stateStore: null!,
@@ -601,12 +601,9 @@ public class TransportRServerTests
             new IgnoredProgress(),
             Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
-            NullLogger<StreamController>.Instance)
-        {
-            ControllerContext = new ControllerContext { HttpContext = http }
-        };
+            NullLogger<StreamEndpoints>.Instance);
 
-        await controller.Receive(TransferId);
+        await endpoints.ReceiveAsync(http, TransferId);
         return http;
     }
 
@@ -618,7 +615,7 @@ public class TransportRServerTests
 
         // The identity provider, the state store and the policy are only read once a caller is
         // authenticated, and this one is not: dev mode, where the data plane is open.
-        var controller = new StreamController(
+        var endpoints = new StreamEndpoints(
             new FailingServer(new IOException("destination gone")),
             new KnownTransfer(),
             stateStore: null!,
@@ -630,12 +627,9 @@ public class TransportRServerTests
             new IgnoredProgress(),
             Options.Create(new DataPlaneConfiguration()),
             TimeProvider.System,
-            NullLogger<StreamController>.Instance)
-        {
-            ControllerContext = new ControllerContext { HttpContext = http }
-        };
+            NullLogger<StreamEndpoints>.Instance);
 
-        await controller.Send(TransferId, Guid.NewGuid(), offset: 0, final: true, heartbeatMs: 15_000).WaitAsync(Patience);
+        await endpoints.SendAsync(http, TransferId, Guid.NewGuid(), offset: 0, final: true, heartbeatMs: 15_000).WaitAsync(Patience);
 
         // A clean answer would tell the client its stream ended; it has to open a new one instead.
         Assert.Equal(StatusCodes.Status409Conflict, http.Response.StatusCode);

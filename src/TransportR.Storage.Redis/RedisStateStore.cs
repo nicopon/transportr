@@ -13,9 +13,7 @@ public class RedisStateStore : IStateStore
 {
     private readonly IConnectionMultiplexer _redis;
     private readonly IDatabase _db;
-
-    // Keys and TTLs
-    private const string KeyPrefix = "transportr:";
+    private readonly string _keyPrefix;
 
     // A conditional write that keeps losing to a concurrent one is not the store's to settle: it
     // says so, and the caller's own retry (a client's next renewal) decides.
@@ -31,11 +29,17 @@ public class RedisStateStore : IStateStore
     public RedisStateStore(
         IConnectionMultiplexer redis,
         IOptions<ClientRegistryConfiguration>? config = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IOptions<RedisStateStoreOptions>? storeOptions = null)
     {
         _time = timeProvider ?? TimeProvider.System;
-        _redis = redis;
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
         _db = _redis.GetDatabase();
+        _keyPrefix = storeOptions?.Value.KeyPrefix ?? "transportr:";
+        if (storeOptions?.Value != null && storeOptions.Value.KeyPrefix is null)
+        {
+            throw new ArgumentNullException(nameof(storeOptions), "RedisStateStoreOptions.KeyPrefix cannot be null.");
+        }
 
         var settings = config?.Value ?? new ClientRegistryConfiguration();
         _connectedTtl = TimeSpan.FromSeconds(settings.ConnectedTtlSeconds);
@@ -49,7 +53,7 @@ public class RedisStateStore : IStateStore
 
     public async Task SaveSessionAsync(TransferSession session)
     {
-        var key = $"{KeyPrefix}sessions:{session.TransferId}";
+        var key = SessionKey(session.TransferId);
         var json = JsonSerializer.Serialize(session);
         var ttl = session.ExpiresAtUtc - _time.GetUtcNow().UtcDateTime;
 
@@ -67,14 +71,22 @@ public class RedisStateStore : IStateStore
         }
     }
 
+    private string SessionKey(string transferId) => $"{_keyPrefix}sessions:{transferId}";
+
+    private string ClientKey(Guid clientId) => $"{_keyPrefix}clients:{clientId}";
+
+    private string ConnKey(string connectionId) => $"{_keyPrefix}conn:{connectionId}";
+
+    private string ClientIdsKey() => $"{_keyPrefix}client_ids";
+
     // The ids of the sessions a sender opened itself. An entry outlives a session whose TTL runs out,
     // so the set is only a way to the sessions, never a count: the sessions decide what counts, and the
     // count drops the entries they no longer back.
-    private static string OpenedByKey(Guid senderId) => $"{KeyPrefix}opened_by:{senderId}";
+    private string OpenedByKey(Guid senderId) => $"{_keyPrefix}opened_by:{senderId}";
 
     public async Task<TransferSession?> GetSessionAsync(string transferId)
     {
-        var key = $"{KeyPrefix}sessions:{transferId}";
+        var key = SessionKey(transferId);
         var json = await _db.StringGetAsync(key);
 
         if (json.IsNullOrEmpty) return null;
@@ -88,7 +100,14 @@ public class RedisStateStore : IStateStore
         var ids = await _db.SetMembersAsync(indexKey);
         if (ids.Length == 0) return 0;
 
-        var sessions = await _db.StringGetAsync(ids.Select(id => (RedisKey)$"{KeyPrefix}sessions:{id}").ToArray());
+        // Pipelined single-key GETs avoid Redis Cluster CROSSSLOT errors from multi-key MGET.
+        var reads = new Task<RedisValue>[ids.Length];
+        for (int i = 0; i < ids.Length; i++)
+        {
+            reads[i] = _db.StringGetAsync(SessionKey(ids[i].ToString()));
+        }
+
+        var sessions = await Task.WhenAll(reads);
         var gone = ids.Where((_, i) => !sessions[i].HasValue).ToArray();
         if (gone.Length > 0)
         {
@@ -100,7 +119,7 @@ public class RedisStateStore : IStateStore
 
     public async Task ExtendSessionExpiryAsync(string transferId, DateTime newExpiry)
     {
-        var key = $"{KeyPrefix}sessions:{transferId}";
+        var key = SessionKey(transferId);
         var ttl = newExpiry - _time.GetUtcNow().UtcDateTime;
 
         if (ttl <= TimeSpan.Zero)
@@ -120,7 +139,7 @@ public class RedisStateStore : IStateStore
 
     public async Task DeleteSessionAsync(string transferId)
     {
-        var json = await _db.StringGetDeleteAsync($"{KeyPrefix}sessions:{transferId}");
+        var json = await _db.StringGetDeleteAsync(SessionKey(transferId));
         if (json.IsNullOrEmpty) return;
 
         // The count would drop the entry too; this keeps an ended transfer out of the index of a sender
@@ -136,8 +155,8 @@ public class RedisStateStore : IStateStore
 
     public async Task SaveClientAsync(ClientRegistration client)
     {
-        var key = $"{KeyPrefix}clients:{client.ClientId}";
-        var connKey = $"{KeyPrefix}conn:{client.ConnectionId}";
+        var key = ClientKey(client.ClientId);
+        var connKey = ConnKey(client.ConnectionId);
         var json = JsonSerializer.Serialize(client);
         var ttl = TtlFor(client);
 
@@ -147,12 +166,12 @@ public class RedisStateStore : IStateStore
         await _db.StringSetAsync(connKey, client.ClientId.ToString(), ttl);
 
         // Also add to a set for GetAllClients enumeration
-        await _db.SetAddAsync($"{KeyPrefix}client_ids", client.ClientId.ToString());
+        await _db.SetAddAsync(ClientIdsKey(), client.ClientId.ToString());
     }
 
     public async Task<ClientRegistration?> GetClientAsync(Guid clientId)
     {
-        var key = $"{KeyPrefix}clients:{clientId}";
+        var key = ClientKey(clientId);
         var json = await _db.StringGetAsync(key);
 
         if (json.IsNullOrEmpty) return null;
@@ -162,13 +181,13 @@ public class RedisStateStore : IStateStore
 
     public async Task MarkDisconnectedAsync(string connectionId, DateTime whenUtc)
     {
-        var connKey = $"{KeyPrefix}conn:{connectionId}";
+        var connKey = ConnKey(connectionId);
         var clientIdStr = await _db.StringGetAsync(connKey);
 
         if (clientIdStr.IsNullOrEmpty) return;
         if (!Guid.TryParse(clientIdStr.ToString(), out var clientId)) return;
 
-        var key = $"{KeyPrefix}clients:{clientId}";
+        var key = ClientKey(clientId);
 
         for (var attempt = 0; attempt < MaxWriteAttempts; attempt++)
         {
@@ -196,7 +215,7 @@ public class RedisStateStore : IStateStore
     public async Task<ClientRegistration?> GetClientByConnectionIdAsync(string connectionId)
     {
         // 1. Lookup clientId from connectionId index
-        var connKey = $"{KeyPrefix}conn:{connectionId}";
+        var connKey = ConnKey(connectionId);
         var clientIdStr = await _db.StringGetAsync(connKey);
 
         if (clientIdStr.IsNullOrEmpty) return null;
@@ -212,7 +231,7 @@ public class RedisStateStore : IStateStore
         //    A dropped registration is deliberately left to run out its grace period.
         if (!client.DisconnectedAtUtc.HasValue)
         {
-            await _db.KeyExpireAsync($"{KeyPrefix}clients:{clientId}", _connectedTtl);
+            await _db.KeyExpireAsync(ClientKey(clientId), _connectedTtl);
             await _db.KeyExpireAsync(connKey, _connectedTtl);
         }
 
@@ -222,18 +241,18 @@ public class RedisStateStore : IStateStore
     public async Task<IReadOnlyList<ClientRegistration>> GetAllClientsAsync()
     {
         // 1. Get all IDs
-        var ids = await _db.SetMembersAsync($"{KeyPrefix}client_ids");
+        var clientIdsKey = ClientIdsKey();
+        var ids = await _db.SetMembersAsync(clientIdsKey);
         if (ids.Length == 0) return Array.Empty<ClientRegistration>();
 
-        var keys = new RedisKey[ids.Length];
-
+        // 2. Pipelined single-key GETs avoid Redis Cluster CROSSSLOT errors from multi-key MGET.
+        var reads = new Task<RedisValue>[ids.Length];
         for (int i = 0; i < ids.Length; i++)
         {
-            keys[i] = $"{KeyPrefix}clients:{ids[i]}";
+            reads[i] = _db.StringGetAsync($"{_keyPrefix}clients:{ids[i]}");
         }
 
-        // 2. MGET all clients efficiently
-        var values = await _db.StringGetAsync(keys);
+        var values = await Task.WhenAll(reads);
 
         var clients = new List<ClientRegistration>();
         var missingIds = new List<RedisValue>();
@@ -255,7 +274,7 @@ public class RedisStateStore : IStateStore
         // 3. Lazy cleanup of expired IDs from the set
         if (missingIds.Count > 0)
         {
-            await _db.SetRemoveAsync($"{KeyPrefix}client_ids", missingIds.ToArray());
+            await _db.SetRemoveAsync(clientIdsKey, missingIds.ToArray());
         }
 
         return clients;
@@ -266,22 +285,21 @@ public class RedisStateStore : IStateStore
         // Get client first to cleanup connection index
         var client = await GetClientAsync(clientId);
 
-        var key = $"{KeyPrefix}clients:{clientId}";
+        var key = ClientKey(clientId);
         await _db.KeyDeleteAsync(key);
-        await _db.SetRemoveAsync($"{KeyPrefix}client_ids", clientId.ToString());
+        await _db.SetRemoveAsync(ClientIdsKey(), clientId.ToString());
 
         // Cleanup connection index
         if (client != null)
         {
-            var connKey = $"{KeyPrefix}conn:{client.ConnectionId}";
-            await _db.KeyDeleteAsync(connKey);
+            await _db.KeyDeleteAsync(ConnKey(client.ConnectionId));
         }
     }
 
     public async Task<ClientRegistration?> RenewClientAsync(
         Guid clientId, string? expectedSubject, IReadOnlySet<string> groups, DateTime? tokenExpiry)
     {
-        var key = $"{KeyPrefix}clients:{clientId}";
+        var key = ClientKey(clientId);
 
         for (var attempt = 0; attempt < MaxWriteAttempts; attempt++)
         {
@@ -305,5 +323,4 @@ public class RedisStateStore : IStateStore
 
         throw new InvalidOperationException($"Registration {clientId} kept changing while its token was renewed.");
     }
-
 }

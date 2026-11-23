@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TransportR.Hub.Diagnostics;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
 
@@ -84,7 +85,7 @@ internal class BridgeCleanupService : BackgroundService
             _logger.LogWarning("Bridge {BridgeKey} timed out after {IdleSeconds}s of inactivity. Ending its transfer.",
                 bridge.BridgeKey, idleTime.TotalSeconds);
 
-            await _terminator.TerminateAsync(bridge.TransferId, ct).ConfigureAwait(false);
+            await _terminator.TerminateWithReasonAsync(bridge.TransferId, TransferEndReasons.BridgeTimeout, ct).ConfigureAwait(false);
         }
     }
 }

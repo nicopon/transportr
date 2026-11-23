@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
@@ -307,6 +308,10 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     /// </summary>
     public async Task<(string TransferId, string? Affinity)> OpenTransferAsync(Guid targetClientId, CancellationToken cancellationToken = default)
     {
+        using var activity = TransportRClientDiagnostics.ActivitySource.StartActivity("transportr.client.init_transfer", ActivityKind.Client);
+        activity?.SetTag("transportr.sender.id", ClientId.ToString("D"));
+        activity?.SetTag("transportr.receiver.id", targetClientId.ToString("D"));
+
         // The affinity this request carries is the transfer's from then on: the handshake runs on the
         // instance it reaches, and the bridge is there.
         var request = new InitTransferRequest(targetClientId, (int)_options.HandshakeTimeout.TotalMilliseconds);
@@ -343,13 +348,22 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
             await ControlChannel.EnsureAcceptedAsync(response, linked.Token);
             opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, linked.Token)
                 ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub opened the transfer without naming it.");
+
+            activity?.SetTag("transportr.transfer.id", opened.TransferId);
         }
-        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "The hub did not answer the transfer request to ReceiverId={TargetId} within {Seconds}s (handshake timeout {HandshakeSeconds}s plus {MarginSeconds}s).",
                 targetClientId, (_options.HandshakeTimeout + HandshakeMargin).TotalSeconds, _options.HandshakeTimeout.TotalSeconds, HandshakeMargin.TotalSeconds);
-            throw new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, "The hub did not answer the transfer request in time.");
+            var timeoutEx = new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, "The hub did not answer the transfer request in time.");
+            activity?.SetStatus(ActivityStatusCode.Error, timeoutEx.Message ?? ex.Message);
+            throw timeoutEx;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
         finally
         {

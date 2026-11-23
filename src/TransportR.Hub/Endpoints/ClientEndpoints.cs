@@ -1,7 +1,7 @@
 using System.Net.ServerSentEvents;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TransportR.Hub.Access;
@@ -9,7 +9,7 @@ using TransportR.Hub.Interfaces;
 using TransportR.Hub.Services;
 using TransportR.Protocol;
 
-namespace TransportR.Hub.Controllers;
+namespace TransportR.Hub.Endpoints;
 
 /// <summary>
 /// The control plane: what a client asks of the hub, and the stream of events the hub reaches it by.
@@ -26,9 +26,7 @@ namespace TransportR.Hub.Controllers;
 /// depends on the other, so a client's transfers on two instances do not pull each other along.
 /// </para>
 /// </remarks>
-[ApiController]
-[Route(WireRoutes.ClientBase)]
-internal class ClientController : ControllerBase
+internal sealed class ClientEndpoints
 {
     private readonly IStateStore _stateStore;
     private readonly IClientIdentityProvider _identityProvider;
@@ -40,9 +38,10 @@ internal class ClientController : ControllerBase
     private readonly AffinityOptions _affinityOptions;
     private readonly TimeSpan _inactivityTimeout;
     private readonly TimeProvider _time;
-    private readonly ILogger<ClientController> _logger;
+    private readonly ILogger<ClientEndpoints> _logger;
+    private readonly HubDrainState? _drainState;
 
-    public ClientController(
+    public ClientEndpoints(
         IStateStore stateStore,
         IClientIdentityProvider identityProvider,
         AccessPolicy policy,
@@ -53,7 +52,8 @@ internal class ClientController : ControllerBase
         IOptions<AffinityOptions> affinityOptions,
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider timeProvider,
-        ILogger<ClientController> logger)
+        ILogger<ClientEndpoints> logger,
+        HubDrainState? drainState = null)
     {
         _stateStore = stateStore;
         _identityProvider = identityProvider;
@@ -66,6 +66,7 @@ internal class ClientController : ControllerBase
         _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
         _time = timeProvider;
         _logger = logger;
+        _drainState = drainState;
     }
 
     /// <summary>
@@ -78,26 +79,24 @@ internal class ClientController : ControllerBase
     /// its grace period. Registering again under the same subject replaces the registration. Each stream
     /// registers from the principal of its own request; a renewal speaks for it afterwards.
     /// </remarks>
-    [HttpGet("{clientId:guid}/" + WireRoutes.EventsSegment)]
-    public async Task Events(
-        Guid clientId,
-        [FromQuery(Name = ControlPlane.GroupsParameter)] string[]? groups,
-        [FromQuery(Name = ControlPlane.HeartbeatParameter)] int? heartbeatMs)
+    public async Task EventsAsync(HttpContext context, Guid clientId, int? heartbeatMs)
     {
         if (!AnnouncedHeartbeat.TryAccept(heartbeatMs, _inactivityTimeout, out var presenceInterval))
         {
             _logger.LogWarning("Registration of {ClientId} refused: the stream announces no presence heartbeat interval the hub accepts (announced {HeartbeatMs} ms)",
                 clientId, heartbeatMs);
-            Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        var identity = _identityProvider.ResolveIdentity(User, clientId, groups is { Length: > 0 } ? groups : null);
+        var rawGroups = context.Request.Query[ControlPlane.GroupsParameter];
+        var groups = rawGroups.Count > 0 ? rawGroups.OfType<string>().ToArray() : null;
+        var identity = _identityProvider.ResolveIdentity(context.User, clientId, groups is { Length: > 0 } ? groups : null);
         if (identity == null || identity.ClientId != clientId)
         {
             _logger.LogWarning("Registration of {ClientId} refused: unable to resolve a client identity for it (resolved {Resolved})",
                 clientId, identity?.ClientId.ToString() ?? "none");
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
@@ -106,7 +105,7 @@ internal class ClientController : ControllerBase
         if (_policy.Evaluate(identity) == AccessVerdict.NoGroups)
         {
             _logger.LogWarning("Registration of {ClientId} refused: the identity holds no group", clientId);
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
@@ -120,7 +119,7 @@ internal class ClientController : ControllerBase
         {
             _logger.LogWarning("Registration refused: ClientId {ClientId} is registered under subject {ExistingSubject}, caller attests {Subject}",
                 clientId, existing.Subject, identity.Subject);
-            this.Refuse();
+            Refusal.Write(context.Response);
             return;
         }
 
@@ -134,7 +133,7 @@ internal class ClientController : ControllerBase
                 clientId,
                 stream.ConnectionId,
                 identity.Groups.ToHashSet(),
-                _affinityOptions.Enabled ? AffinityToken() : null,
+                _affinityOptions.Enabled ? AffinityToken(context.Request) : null,
                 identity.TokenExpiry,
                 _time.GetUtcNow().UtcDateTime,
                 Subject: identity.Subject));
@@ -144,14 +143,14 @@ internal class ClientController : ControllerBase
 
             // An event goes out at once, the registration: a proxy forwards a response with its first
             // byte of body, and one that never sees it answers the client with an error of its own.
-            Response.ContentType = "text/event-stream";
-            Response.Headers.CacheControl = "no-cache";
-            Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
-            HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+            context.Response.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers[StreamedResponse.ProxyBufferingHeader] = "no";
+            context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
-            await SseFormatter.WriteAsync(stream.ReadAllAsync(HttpContext.RequestAborted), Response.Body, HttpContext.RequestAborted);
+            await SseFormatter.WriteAsync(stream.ReadAllAsync(context.RequestAborted), context.Response.Body, context.RequestAborted);
         }
-        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
         }
         catch (IOException)
@@ -182,21 +181,20 @@ internal class ClientController : ControllerBase
     /// same identity having taken the registration over all leave the client unknown: discovery
     /// returns nothing for it and nobody can open a transfer against it.
     /// </remarks>
-    [HttpPost("{clientId:guid}/" + WireRoutes.PresenceSegment + "/{connectionId}")]
-    public async Task<IActionResult> Presence(Guid clientId, string connectionId)
+    public async Task<IResult> PresenceAsync(HttpContext context, Guid clientId, string connectionId)
     {
         // Resolving the client by its stream is itself the keep-alive: a store with server-side
         // expiry pushes the registration's TTL back on this lookup.
-        var client = await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, User, connectionId, named: clientId);
+        var client = await RegisteredCaller.OfStreamAsync(_stateStore, _identityProvider, context.User, connectionId, named: clientId);
         if (client == null)
         {
             _logger.LogInformation("Heartbeat from {ClientId} on stream {ConnectionId}, which holds no registration. Asking the client to register again.",
                 clientId, connectionId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         _streams.Touch(clientId);
-        return NoContent();
+        return Results.NoContent();
     }
 
     /// <summary>
@@ -204,19 +202,18 @@ internal class ClientController : ControllerBase
     /// disconnection marker: a caller that finds nobody fails outright, whereas one that tries a dead
     /// client retries.
     /// </summary>
-    [HttpGet("{clientId:guid}/" + WireRoutes.ReceiversSegment)]
-    public async Task<IActionResult> Receivers(Guid clientId)
+    public async Task<IResult> ReceiversAsync(HttpContext context, Guid clientId)
     {
-        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(Receivers))) return this.Refuse();
+        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(ReceiversAsync))) return Refusal.Result();
 
-        var source = await AdmitAsync(clientId);
-        if (source == null) return this.Refuse();
+        var source = await AdmitAsync(context, clientId);
+        if (source == null) return Refusal.Result();
 
         var verdict = _policy.Evaluate(source);
         if (verdict != AccessVerdict.Allowed)
         {
             _logger.LogWarning("Receivers refused for client {ClientId}: {Verdict}", clientId, verdict);
-            return Ok(new List<ClientInfo>());
+            return Results.Json(new List<ClientInfo>(), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
         }
 
         var all = await _stateStore.GetAllClientsAsync();
@@ -230,7 +227,7 @@ internal class ClientController : ControllerBase
         _logger.LogDebug("Receivers: [{SourceGroups}] -> {Count} authorized receivers",
             string.Join(", ", source.Groups), receivers.Count);
 
-        return Ok(receivers);
+        return Results.Json(receivers, ControlPlane.Json, statusCode: StatusCodes.Status200OK);
     }
 
     /// <summary>
@@ -240,13 +237,27 @@ internal class ClientController : ControllerBase
     /// instance, for the client to send this request again with it. A client past a ceiling of
     /// <see cref="AccessOptions"/> is answered with a 429, before anything is written.
     /// </summary>
-    [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment)]
-    public async Task<IActionResult> InitTransfer(Guid clientId, [FromBody] InitTransferRequest request)
+    public async Task<IResult> InitTransferAsync(HttpContext context, Guid clientId)
     {
-        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransfer))) return this.Refuse();
+        if (_drainState?.IsDraining == true)
+        {
+            _logger.LogWarning("InitTransfer refused for {ClientId}: the hub is shutting down", clientId);
+            return Results.Json(
+                new HubError("The hub is shutting down."),
+                ControlPlane.Json,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
 
-        var source = await AdmitAsync(clientId);
-        if (source == null) return this.Refuse();
+        var (ok, request) = await TryReadJsonAsync<InitTransferRequest>(context);
+        if (!ok || request is null)
+        {
+            return Results.BadRequest();
+        }
+
+        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransferAsync))) return Refusal.Result();
+
+        var source = await AdmitAsync(context, clientId);
+        if (source == null) return Refusal.Result();
 
         var handshakeTimeout = TimeSpan.FromMilliseconds(request.TimeoutMs);
         if (!TransferInitiator.AcceptsHandshakeTimeout(handshakeTimeout))
@@ -254,7 +265,10 @@ internal class ClientController : ControllerBase
             var longestTimeoutMs = TransferManager.SessionTtl.TotalMilliseconds;
             _logger.LogWarning("InitTransfer refused for {ClientId}: handshake timeout {TimeoutMs} ms is outside 0..{LongestTimeoutMs} ms",
                 clientId, request.TimeoutMs, longestTimeoutMs);
-            return BadRequest(new HubError("The transfer request is not acceptable."));
+            return Results.Json(
+                new HubError("The transfer request is not acceptable."),
+                ControlPlane.Json,
+                statusCode: StatusCodes.Status400BadRequest);
         }
 
         if (!_initiator.TryEnterHandshake(clientId)) return TooManyTransfers();
@@ -270,24 +284,33 @@ internal class ClientController : ControllerBase
             if (target == null)
             {
                 _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
-                return Conflict(new HubError(TransferInitiator.TargetUnavailable, HubErrorCode.Refused));
+                return Results.Json(
+                    new HubError(TransferInitiator.TargetUnavailable, HubErrorCode.Refused),
+                    ControlPlane.Json,
+                    statusCode: StatusCodes.Status409Conflict);
             }
 
             _initiator.ValidateTransferRequest(source, target);
 
-            if (Redirect(target) is { } redirect) return StatusCode(StatusCodes.Status421MisdirectedRequest, redirect);
+            if (Redirect(context.Request, target) is { } redirect)
+            {
+                return Results.Json(redirect, ControlPlane.Json, statusCode: StatusCodes.Status421MisdirectedRequest);
+            }
 
             var transferId = await _initiator.HandshakeAsync(source, target, handshakeTimeout,
-                requestSender: false, HttpContext.RequestAborted);
-            return Ok(new InitTransferResponse(transferId));
+                requestSender: false, context.RequestAborted);
+            return Results.Json(new InitTransferResponse(transferId), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
         }
         catch (HubRequestFailedException ex)
         {
-            return Conflict(new HubError(ex.Message, HubErrorCodes.Of(ex.Category)));
+            return Results.Json(
+                new HubError(ex.Message, HubErrorCodes.Of(ex.Category)),
+                ControlPlane.Json,
+                statusCode: StatusCodes.Status409Conflict);
         }
-        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            return new EmptyResult();
+            return Results.Empty;
         }
         finally
         {
@@ -295,33 +318,46 @@ internal class ClientController : ControllerBase
         }
     }
 
-    private ObjectResult TooManyTransfers() =>
-        StatusCode(StatusCodes.Status429TooManyRequests, new HubError(TransferInitiator.TooManyTransfers));
+    private static IResult TooManyTransfers() =>
+        Results.Json(
+            new HubError(TransferInitiator.TooManyTransfers),
+            ControlPlane.Json,
+            statusCode: StatusCodes.Status429TooManyRequests);
 
     /// <summary>The client's answer to an event that asked for one.</summary>
-    [HttpPost("{clientId:guid}/" + WireRoutes.RepliesSegment + "/{requestId:guid}")]
-    public async Task<IActionResult> Reply(Guid clientId, Guid requestId, [FromBody] CallbackReply reply)
+    public async Task<IResult> ReplyAsync(HttpContext context, Guid clientId, Guid requestId)
     {
-        if (await AdmitAsync(clientId) == null) return this.Refuse();
+        var (ok, reply) = await TryReadJsonAsync<CallbackReply>(context);
+        if (!ok || reply is null)
+        {
+            return Results.BadRequest();
+        }
+
+        if (await AdmitAsync(context, clientId) == null) return Refusal.Result();
 
         if (!_streams.TryReply(clientId, requestId, reply.Outcome))
         {
             _logger.LogInformation("Reply of {ClientId} to {RequestId} came after the handshake had ended, or to another instance", clientId, requestId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
-        return NoContent();
+        return Results.NoContent();
     }
 
     /// <summary>
     /// A participant's statistics, which also show the transfer active. The role is the participant's,
     /// not the caller's to say.
     /// </summary>
-    [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment + "/{transferId}/" + WireRoutes.HeartbeatSegment)]
-    public async Task<IActionResult> TransferHeartbeat(Guid clientId, string transferId, [FromBody] TransferProgress progress)
+    public async Task<IResult> TransferHeartbeatAsync(HttpContext context, Guid clientId, string transferId)
     {
-        var participants = await AdmitParticipantAsync(clientId, transferId);
-        if (participants == null) return this.Refuse();
+        var (ok, progress) = await TryReadJsonAsync<TransferProgress>(context);
+        if (!ok || progress is null)
+        {
+            return Results.BadRequest();
+        }
+
+        var participants = await AdmitParticipantAsync(context, clientId, transferId);
+        if (participants == null) return Refusal.Result();
 
         if (participants.SenderId == clientId)
         {
@@ -332,20 +368,19 @@ internal class ClientController : ControllerBase
             await _transferManager.UpdateReceiverStatsAsync(transferId, progress.Items, progress.Acks);
         }
 
-        return NoContent();
+        return Results.NoContent();
     }
 
     /// <summary>
     /// What a session asks before it reopens its streams: that the hub answers is what it wants to
     /// know, and it keeps the transfer alive while the session reconnects.
     /// </summary>
-    [HttpPost("{clientId:guid}/" + WireRoutes.TransfersSegment + "/{transferId}/" + WireRoutes.PingSegment)]
-    public async Task<IActionResult> Ping(Guid clientId, string transferId)
+    public async Task<IResult> PingAsync(HttpContext context, Guid clientId, string transferId)
     {
-        if (await AdmitParticipantAsync(clientId, transferId) == null) return this.Refuse();
+        if (await AdmitParticipantAsync(context, clientId, transferId) == null) return Refusal.Result();
 
         await _transferManager.KeepAliveAsync(transferId);
-        return NoContent();
+        return Results.NoContent();
     }
 
     /// <summary>
@@ -353,34 +388,33 @@ internal class ClientController : ControllerBase
     /// stream cannot carry one. A valid token of the registered subject that grants no group is not a
     /// refusal: it is the identity provider withdrawing every right, and it is applied.
     /// </summary>
-    [HttpPut("{clientId:guid}/" + WireRoutes.TokenSegment)]
-    public async Task<IActionResult> Renew(Guid clientId)
+    public async Task<IResult> RenewAsync(HttpContext context, Guid clientId)
     {
         // Dev mode arms no authorization on this route and attests nothing to renew.
-        if (User?.Identity?.IsAuthenticated != true)
+        if (context.User?.Identity?.IsAuthenticated != true)
         {
-            return this.Refuse();
+            return Refusal.Result();
         }
 
-        var identity = _identityProvider.ResolveIdentity(User, providedClientId: clientId, providedGroups: null);
+        var identity = _identityProvider.ResolveIdentity(context.User, providedClientId: clientId, providedGroups: null);
         if (identity == null || identity.Subject == null || identity.ClientId != clientId)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: the caller attests no identity for it", clientId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         // The host's middleware accepted the token within its own clock skew; the hub holds it to its own.
         if (_policy.Evaluate(identity) == AccessVerdict.TokenExpired)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: the token has already expired", clientId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         var renewed = await _stateStore.RenewClientAsync(clientId, identity.Subject, identity.Groups, identity.TokenExpiry);
         if (renewed == null)
         {
             _logger.LogWarning("Token renewal refused for {ClientId}: no registration, or it belongs to another subject", clientId);
-            return this.Refuse();
+            return Refusal.Result();
         }
 
         _logger.LogInformation("Token renewed for client {ClientId}, groups [{Groups}], new expiry: {Expiry}",
@@ -388,19 +422,32 @@ internal class ClientController : ControllerBase
         _streams.Touch(clientId);
 
         // What the new token no longer grants applies now, to what this client has running.
-        await _reconciler.ReconcileAsync(clientId, HttpContext.RequestAborted);
+        await _reconciler.ReconcileAsync(clientId, context.RequestAborted);
 
-        return Ok(new TokenRenewalResponse(renewed.TokenExpiry));
+        return Results.Json(new TokenRenewalResponse(renewed.TokenExpiry), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
+    }
+
+    private static async Task<(bool Ok, T? Value)> TryReadJsonAsync<T>(HttpContext context)
+    {
+        try
+        {
+            var value = await JsonSerializer.DeserializeAsync<T>(context.Request.Body, ControlPlane.Json, context.RequestAborted);
+            return (value is not null, value);
+        }
+        catch (Exception ex) when (ex is JsonException or BadHttpRequestException)
+        {
+            return (false, default);
+        }
     }
 
     /// <summary>
     /// The registration of <paramref name="clientId"/>, when the caller is that client: the subject its
     /// token attests is the registration's. Hearing from it keeps its stream open.
     /// </summary>
-    private async Task<ClientRegistration?> AdmitAsync(Guid clientId)
+    private async Task<ClientRegistration?> AdmitAsync(HttpContext context, Guid clientId)
     {
         var client = await _stateStore.GetClientAsync(clientId);
-        if (client == null || !RegisteredCaller.Attests(_identityProvider, User, client))
+        if (client == null || !RegisteredCaller.Attests(_identityProvider, context.User, client))
         {
             _logger.LogWarning("Request of {ClientId} refused: {Reason}", clientId,
                 client == null ? "no registration" : "the caller does not attest its subject");
@@ -411,9 +458,9 @@ internal class ClientController : ControllerBase
         return client;
     }
 
-    private async Task<TransferParticipants?> AdmitParticipantAsync(Guid clientId, string transferId)
+    private async Task<TransferParticipants?> AdmitParticipantAsync(HttpContext context, Guid clientId, string transferId)
     {
-        if (await AdmitAsync(clientId) == null) return null;
+        if (await AdmitAsync(context, clientId) == null) return null;
 
         var participants = await _transferManager.GetParticipantsAsync(transferId);
         if (participants == null || (participants.SenderId != clientId && participants.ReceiverId != clientId))
@@ -440,10 +487,10 @@ internal class ClientController : ControllerBase
     /// request already carries it: a request that came back here with it would only come back again,
     /// and the handshake says the receiver is not reachable instead.
     /// </summary>
-    private AffinityRedirect? Redirect(ClientRegistration target)
+    private AffinityRedirect? Redirect(HttpRequest request, ClientRegistration target)
     {
         if (!_affinityOptions.Enabled || string.IsNullOrEmpty(target.AffinityToken)) return null;
-        if (_streams.Holds(target.ConnectionId) || AffinityToken() == target.AffinityToken) return null;
+        if (_streams.Holds(target.ConnectionId) || AffinityToken(request) == target.AffinityToken) return null;
 
         var cookieName = _affinityOptions.CustomCookieName
             ?? _affinityOptions.KnownCookieNames.FirstOrDefault()
@@ -455,9 +502,9 @@ internal class ClientController : ControllerBase
         return new AffinityRedirect(cookieName, target.AffinityToken);
     }
 
-    private string? AffinityToken()
+    private string? AffinityToken(HttpRequest request)
     {
-        var cookies = Request.Cookies;
+        var cookies = request.Cookies;
 
         if (!string.IsNullOrEmpty(_affinityOptions.CustomCookieName) &&
             cookies.TryGetValue(_affinityOptions.CustomCookieName, out var customValue))

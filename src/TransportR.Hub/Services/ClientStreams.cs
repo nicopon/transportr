@@ -93,6 +93,14 @@ internal sealed class ClientStreams
         }
     }
 
+    internal int Count
+    {
+        get
+        {
+            lock (_gate) return _byClient.Count;
+        }
+    }
+
     internal bool Holds(string connectionId) => _streams.ContainsKey(connectionId);
 
     /// <returns>True when this instance holds the stream and has closed it.</returns>

@@ -1,5 +1,6 @@
 using System.Buffers;
 using Microsoft.Extensions.Logging;
+using TransportR.Hub.Diagnostics;
 using TransportR.Hub.Interfaces;
 using TransportR.Hub.Models;
 using TransportR.Hub.Streams;
@@ -15,19 +16,22 @@ internal class TransportRServer : ITransportRServer
     private readonly IHubProgressMonitor _progressMonitor;
     private readonly BridgeManager _bridgeManager;
     private readonly ITransferRetirer _retirer;
+    private readonly HubMetrics? _metrics;
 
     public TransportRServer(
         ILogger<TransportRServer> logger,
         IHubProgressMonitor progressMonitor,
         ITransferManager transferManager,
         BridgeManager bridgeManager,
-        ITransferRetirer retirer)
+        ITransferRetirer retirer,
+        HubMetrics? metrics = null)
     {
         _logger = logger;
         _progressMonitor = progressMonitor;
         _transferManager = transferManager;
         _bridgeManager = bridgeManager;
         _retirer = retirer;
+        _metrics = metrics;
     }
 
     public async Task HandleSendAsync(string transferId, ConnectionType type, Stream input, CancellationToken cancellationToken = default)
@@ -80,6 +84,7 @@ internal class TransportRServer : ITransportRServer
                 ? new CountingStream(input, bytes =>
                 {
                     KeepAlive(transferId);
+                    _metrics?.RecordBytesRelayed(bytes);
                     _progressMonitor.OnBytesTransferred(bytes);
                 })
                 : new CountingStream(input, _ => KeepAlive(transferId));

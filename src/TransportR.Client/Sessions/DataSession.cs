@@ -2,6 +2,7 @@ using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
+using TransportR.Client.Diagnostics;
 using TransportR.Client.Internal;
 using TransportR.Client.Models;
 using TransportR.Client.Protocol;
@@ -91,6 +92,7 @@ internal class DataSession : IDataSession
     private int _heartbeating;
     private int _disposed;
     private int _writeSideEndDelivered;
+    private int _metricsActive;
 
     // Session Statistics
     public DateTime StartedAt { get; } = DateTime.UtcNow;
@@ -149,7 +151,7 @@ internal class DataSession : IDataSession
 
         _cts = new CancellationTokenSource();
         _batchProcessor = new BatchProcessor(context, transferId, batches, openSink);
-        _fsm = new DataSessionStateMachine(transferId, context.Logger);
+        _fsm = new DataSessionStateMachine(transferId, context.Logger, OnStateTransition);
 
         // Pass segregated interfaces to HttpStreamManager
         _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl, affinity); // IStreamTransport, ISessionConfig
@@ -199,6 +201,10 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Sender Session {TransferId}...", TransferId);
         _isSender = true;
+        if (Interlocked.Exchange(ref _metricsActive, 1) == 0)
+        {
+            ClientMetrics.TransferStarted(isSender: true);
+        }
         Encrypt();
 
         _batchProcessor.StartSenderAsync(_cts.Token);
@@ -213,12 +219,29 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Receiver Session {TransferId}...", TransferId);
         _isSender = false;
+        if (Interlocked.Exchange(ref _metricsActive, 1) == 0)
+        {
+            ClientMetrics.TransferStarted(isSender: false);
+        }
         Encrypt();
 
         await _batchProcessor.StartReceiverAsync();
 
         _fsm.TransitionTo(SessionState.Starting);
         _ = RunSessionLoop(_cts.Token);
+    }
+
+    private void OnStateTransition(SessionState _, SessionState newState)
+    {
+        if (newState == SessionState.Reconnecting)
+        {
+            ClientMetrics.RecordReconnection(IsSender);
+        }
+        else if (newState is SessionState.Completed or SessionState.Failed or SessionState.Disposed
+                 && Interlocked.Exchange(ref _metricsActive, 0) == 1)
+        {
+            ClientMetrics.TransferEnded(IsSender, newState, _failure?.Category);
+        }
     }
 
     /// <summary>

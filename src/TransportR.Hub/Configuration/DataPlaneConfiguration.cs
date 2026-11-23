@@ -51,4 +51,17 @@ public class DataPlaneConfiguration
     /// </para>
     /// </remarks>
     public int? StalledProgressTimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// Optional timeout in seconds to wait during graceful shutdown for active bridges to finish
+    /// while refusing new transfers. Default: 0 seconds (stop immediately). Negative values are refused
+    /// at startup.
+    /// </summary>
+    /// <remarks>
+    /// When positive, shutdown marks the hub draining (returning <c>503</c> to new transfer requests
+    /// and <c>Unhealthy</c> on the hub health check) and waits up to this bound for active bridges to
+    /// clear. ASP.NET Core's <c>HostOptions.ShutdownTimeout</c> (30 s by default) also bounds host
+    /// shutdown and must be raised when this value exceeds it.
+    /// </remarks>
+    public int DrainTimeoutSeconds { get; set; } = 0;
 }

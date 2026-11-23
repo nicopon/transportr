@@ -1,4 +1,4 @@
-namespace TransportR.Hub.Controllers;
+namespace TransportR.Hub.Endpoints;
 
 internal static class StreamedResponse
 {
