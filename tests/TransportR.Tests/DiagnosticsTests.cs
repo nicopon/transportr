@@ -20,7 +20,7 @@ public class DiagnosticsTests
     [Fact]
     public async Task HubAndClientDiagnostics_RecordMetricsAndActivitiesAcrossCompletedTransfer()
     {
-        var hubMeterFactory = new TrackingMeterFactory();
+        using var hubMeterFactory = new TrackingMeterFactory();
         var hubMeasurements = new ConcurrentQueue<(string Name, long LongValue, int IntValue, KeyValuePair<string, object?>[] Tags)>();
         var activities = new ConcurrentQueue<Activity>();
 
@@ -203,7 +203,7 @@ public class DiagnosticsTests
     [Fact]
     public async Task HostTermination_RecordsHubEndReason()
     {
-        var hubMeterFactory = new TrackingMeterFactory();
+        using var hubMeterFactory = new TrackingMeterFactory();
         var hubEndReasons = new ConcurrentQueue<string?>();
 
         using var hubListener = new MeterListener
@@ -269,6 +269,103 @@ public class DiagnosticsTests
 
         Assert.Equal(TransferFailureCategory.EndedByHub, ex.Category);
         Assert.Contains("host", hubEndReasons);
+    }
+
+    [Fact]
+    public async Task ConcurrentTerminateAsync_RecordsTransferEndedOnce()
+    {
+        using var hubMeterFactory = new TrackingMeterFactory();
+        var endedCount = 0;
+
+        using var hubListener = new MeterListener
+        {
+            InstrumentPublished = (instrument, listener) =>
+            {
+                if (hubMeterFactory.Owns(instrument.Meter) && instrument.Name == "transportr.hub.transfers.ended")
+                {
+                    listener.EnableMeasurementEvents(instrument);
+                }
+            }
+        };
+        hubListener.SetMeasurementEventCallback<long>((_, val, _, _) => Interlocked.Add(ref endedCount, (int)val));
+        hubListener.Start();
+
+        using var host = TestHubServerFactory.CreateHost(services =>
+        {
+            services.AddSingleton<IMeterFactory>(hubMeterFactory);
+        });
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+        await using var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        var terminator = host.Services.GetRequiredService<ITransferTerminator>();
+
+        await Task.WhenAll(
+            terminator.TerminateAsync(send.TransferId),
+            terminator.TerminateAsync(send.TransferId));
+
+        Assert.Equal(1, Volatile.Read(ref endedCount));
+    }
+
+    [Fact]
+    public async Task RefusedInitTransfer_RecordsErrorStatusOnClientAndHubActivities()
+    {
+        var activities = new ConcurrentQueue<Activity>();
+        using var activityListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name is TransportRHubDiagnostics.ActivitySourceName or TransportRClientDiagnostics.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => activities.Enqueue(activity),
+        };
+        ActivitySource.AddActivityListener(activityListener);
+
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+        await using var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+
+        receiver.OnTransferStarted(_ => throw new InvalidOperationException("refused"));
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await Assert.ThrowsAsync<HubRequestFailedException>(() => sender.InitTransferAsync(receiver.ClientId, batchSize: 10));
+
+        Assert.Contains(activities, a =>
+            a.Source.Name == TransportRClientDiagnostics.ActivitySourceName &&
+            a.OperationName == "transportr.client.init_transfer" &&
+            a.Status == ActivityStatusCode.Error);
+        Assert.Contains(activities, a =>
+            a.Source.Name == TransportRHubDiagnostics.ActivitySourceName &&
+            a.OperationName == "transportr.hub.init_transfer" &&
+            a.Status == ActivityStatusCode.Error);
     }
 
     private sealed class TrackingMeterFactory : IMeterFactory

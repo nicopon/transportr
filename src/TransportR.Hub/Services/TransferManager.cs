@@ -129,17 +129,18 @@ internal class TransferManager : ITransferManager
     // Completion is cleanup, and that is the design rather than a shortcut: the hub keeps no
     // transfer history to move a finished transfer into, so a success, a timeout and a handshake
     // that failed leave by the same door.
-    public async Task RemoveTransferAsync(string transferId)
+    public async Task<bool> RemoveTransferAsync(string transferId)
     {
         // Until the store has deleted the shared session, a stream reopening here would find it there
         // and bring the transfer back on this instance.
         _removing[transferId] = 0;
         try
         {
-            _transfers.TryRemove(transferId, out _);
+            var removed = _transfers.TryRemove(transferId, out _);
             _participants.TryRemove(transferId, out _);
             _lastHeartbeat.TryRemove(transferId, out _);
             await _stateStore.DeleteSessionAsync(transferId).ConfigureAwait(false);
+            return removed;
         }
         finally
         {

@@ -62,7 +62,8 @@ internal interface ITransferManager
     /// transfer history to move a finished one into, so there is no outcome for the caller to name here.
     /// </summary>
     /// <param name="transferId">The transfer identifier.</param>
-    Task RemoveTransferAsync(string transferId);
+    /// <returns><c>true</c> if this hub instance held and removed an active transfer entry; otherwise <c>false</c>.</returns>
+    Task<bool> RemoveTransferAsync(string transferId);
 
     /// <summary>
     /// Number of active transfers held on this hub instance.

@@ -1,7 +1,6 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -279,16 +278,17 @@ public static class TransportRHubExtensions
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <param name="routePrefix">
     /// Path prefix placed ahead of <see cref="WireRoutes.ClientBase"/> and <see cref="WireRoutes.StreamBase"/>
-    /// (for example <c>"/transportr"</c>), or empty for root mapping. Must not contain whitespace.
+    /// (for example <c>"/transportr"</c>), or empty for root mapping. Must not contain whitespace or
+    /// <c>?</c>, <c>#</c>, <c>{</c>, <c>}</c>.
     /// </param>
     /// <param name="requireAuth">See <see cref="MapDataHub(IEndpointRouteBuilder, bool?)"/>.</param>
     public static IEndpointRouteBuilder MapDataHub(this IEndpointRouteBuilder endpoints, string routePrefix, bool? requireAuth = null)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(routePrefix);
-        if (routePrefix.Any(char.IsWhiteSpace))
+        if (routePrefix.Any(c => char.IsWhiteSpace(c) || c is '?' or '#' or '{' or '}'))
         {
-            throw new ArgumentException("Route prefix cannot contain whitespace.", nameof(routePrefix));
+            throw new ArgumentException("Route prefix cannot contain whitespace, query, fragment, or route parameter characters.", nameof(routePrefix));
         }
 
         var trimmed = routePrefix.Trim('/');
@@ -316,8 +316,16 @@ public static class TransportRHubExtensions
 
         var clientGroup = endpoints.MapGroup(prefix + WireRoutes.ClientBase);
         clientGroup.MapGet("{clientId:guid}/" + WireRoutes.EventsSegment,
-            (HttpContext ctx, Guid clientId, [FromQuery(Name = ControlPlane.HeartbeatParameter)] int? heartbeatMs) =>
-                clientEndpoints.EventsAsync(ctx, clientId, heartbeatMs));
+            (HttpContext ctx, Guid clientId) =>
+            {
+                if (!TryParseOptionalInt(ctx.Request.Query[ControlPlane.HeartbeatParameter], out var heartbeatMs))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return Task.CompletedTask;
+                }
+
+                return clientEndpoints.EventsAsync(ctx, clientId, heartbeatMs);
+            });
         clientGroup.MapPost("{clientId:guid}/" + WireRoutes.PresenceSegment + "/{connectionId}",
             (HttpContext ctx, Guid clientId, string connectionId) =>
                 clientEndpoints.PresenceAsync(ctx, clientId, connectionId));
@@ -342,13 +350,19 @@ public static class TransportRHubExtensions
 
         var streamGroup = endpoints.MapGroup(prefix + WireRoutes.StreamBase);
         streamGroup.MapPost("{transferId}/" + WireRoutes.SendSegment,
-            (HttpContext ctx,
-             string transferId,
-             [FromQuery(Name = DataPlane.EpochParameter)] Guid? epoch,
-             [FromQuery(Name = DataPlane.OffsetParameter)] long? offset,
-             [FromQuery(Name = DataPlane.FinalParameter)] bool? final,
-             [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs) =>
-                streamEndpoints.SendAsync(ctx, transferId, epoch, offset, final ?? false, heartbeatMs));
+            (HttpContext ctx, string transferId) =>
+            {
+                if (!TryParseOptionalGuid(ctx.Request.Query[DataPlane.EpochParameter], out var epoch)
+                    || !TryParseOptionalLong(ctx.Request.Query[DataPlane.OffsetParameter], out var offset)
+                    || !TryParseOptionalBool(ctx.Request.Query[DataPlane.FinalParameter], out var final)
+                    || !TryParseOptionalInt(ctx.Request.Query[DataPlane.HeartbeatParameter], out var heartbeatMs))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return Task.CompletedTask;
+                }
+
+                return streamEndpoints.SendAsync(ctx, transferId, epoch, offset, final ?? false, heartbeatMs);
+            });
 
         // UseWebSockets wraps only the two upgrade routes so the host adds nothing to its pipeline
         // and group-level authorization runs before any WebSocket upgrade.
@@ -370,9 +384,9 @@ public static class TransportRHubExtensions
             return streamEndpoints.ProbeOverWebSocketAsync(ctx, connection);
         }));
 
-        streamGroup.MapPost(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment,
-            (HttpContext ctx, [FromQuery(Name = DataPlane.ConnectionParameter)] string? connection) =>
-                streamEndpoints.ProbeOverSegmentsAsync(ctx, connection));
+        Delegate probeOverSegments = (HttpContext ctx) =>
+            streamEndpoints.ProbeOverSegmentsAsync(ctx, ctx.Request.Query[DataPlane.ConnectionParameter].FirstOrDefault());
+        streamGroup.MapPost(WireRoutes.ProbeSegment + "/" + WireRoutes.SendSegment, probeOverSegments);
         streamGroup.MapPost("{transferId}/" + WireRoutes.AbortSegment,
             (HttpContext ctx, string transferId) =>
                 streamEndpoints.AbortAsync(ctx, transferId));
@@ -397,19 +411,30 @@ public static class TransportRHubExtensions
         return wsApp.Build();
     }
 
-    private static bool TryParseOptionalInt(StringValues values, out int? value)
+    private delegate bool TryParseDelegate<T>(string raw, out T value);
+
+    private static bool TryParseOptional<T>(StringValues values, TryParseDelegate<T> parse, out T? value) where T : struct
     {
         value = null;
         if (values.Count == 0) return true;
 
         var raw = values[0];
         if (string.IsNullOrEmpty(raw)) return true;
-        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
-        {
-            return false;
-        }
+        if (!parse(raw, out var parsed)) return false;
 
         value = parsed;
         return true;
     }
+
+    private static bool TryParseOptionalInt(StringValues values, out int? value) =>
+        TryParseOptional(values, static (string s, out int v) => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out v), out value);
+
+    private static bool TryParseOptionalLong(StringValues values, out long? value) =>
+        TryParseOptional(values, static (string s, out long v) => long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out v), out value);
+
+    private static bool TryParseOptionalGuid(StringValues values, out Guid? value) =>
+        TryParseOptional(values, static (string s, out Guid v) => Guid.TryParse(s, out v), out value);
+
+    private static bool TryParseOptionalBool(StringValues values, out bool? value) =>
+        TryParseOptional(values, bool.TryParse, out value);
 }

@@ -16,23 +16,30 @@ internal sealed class DataHubHealthCheck : IHealthCheck
 
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
+        var failureStatus = context.Registration?.FailureStatus ?? HealthStatus.Unhealthy;
         if (_drain.IsDraining)
         {
-            return HealthCheckResult.Unhealthy("TransportR hub is draining.");
+            return new HealthCheckResult(failureStatus, "TransportR hub is draining.");
         }
 
+        var probe = _stateStore.GetClientAsync(Guid.Empty);
         try
         {
-            await _stateStore.GetClientAsync(Guid.Empty).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await probe.WaitAsync(cancellationToken).ConfigureAwait(false);
             return HealthCheckResult.Healthy();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            _ = probe.ContinueWith(
+                static t => _ = t.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
             throw;
         }
         catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy("TransportR state store probe failed.", ex);
+            return new HealthCheckResult(failureStatus, "TransportR state store probe failed.", ex);
         }
     }
 }

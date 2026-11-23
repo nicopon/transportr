@@ -40,7 +40,6 @@ internal sealed class ClientEndpoints
     private readonly bool _exposeSubjectInDiscovery;
     private readonly TimeProvider _time;
     private readonly ILogger<ClientEndpoints> _logger;
-    private readonly HubDrainState _drainState;
 
     public ClientEndpoints(
         IStateStore stateStore,
@@ -54,7 +53,6 @@ internal sealed class ClientEndpoints
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider timeProvider,
         ILogger<ClientEndpoints> logger,
-        HubDrainState drainState,
         IOptions<ClientRegistryConfiguration> clientRegistry)
     {
         _stateStore = stateStore;
@@ -69,7 +67,6 @@ internal sealed class ClientEndpoints
         _exposeSubjectInDiscovery = clientRegistry.Value.ExposeSubjectInDiscovery;
         _time = timeProvider;
         _logger = logger;
-        _drainState = drainState;
     }
 
     /// <summary>
@@ -242,10 +239,15 @@ internal sealed class ClientEndpoints
     /// </summary>
     public async Task<IResult> InitTransferAsync(HttpContext context, Guid clientId)
     {
-        if (_drainState.IsDraining)
+        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransferAsync))) return Refusal.Result();
+
+        var source = await AdmitAsync(context, clientId);
+        if (source == null) return Refusal.Result();
+
+        if (_initiator.IsDraining)
         {
             _logger.LogWarning("InitTransfer refused for {ClientId}: the hub is shutting down", clientId);
-            return Json(new HubError("The hub is shutting down."), StatusCodes.Status503ServiceUnavailable);
+            return Refusal.ServiceUnavailable(TransferInitiator.HubShuttingDown);
         }
 
         var (ok, request) = await TryReadJsonAsync<InitTransferRequest>(context);
@@ -253,11 +255,6 @@ internal sealed class ClientEndpoints
         {
             return Results.BadRequest();
         }
-
-        if (RefuseIfOnlyTheHostOpensTransfers(clientId, nameof(InitTransferAsync))) return Refusal.Result();
-
-        var source = await AdmitAsync(context, clientId);
-        if (source == null) return Refusal.Result();
 
         var handshakeTimeout = TimeSpan.FromMilliseconds(request.TimeoutMs);
         if (!TransferInitiator.AcceptsHandshakeTimeout(handshakeTimeout))
@@ -295,6 +292,10 @@ internal sealed class ClientEndpoints
                 requestSender: false, context.RequestAborted);
             return Json(new InitTransferResponse(transferId));
         }
+        catch (HubRequestFailedException ex) when (_initiator.IsDraining && ex.Message == TransferInitiator.HubShuttingDown)
+        {
+            return Refusal.ServiceUnavailable(ex.Message);
+        }
         catch (HubRequestFailedException ex)
         {
             return Json(new HubError(ex.Message, HubErrorCodes.Of(ex.Category)), StatusCodes.Status409Conflict);
@@ -315,13 +316,13 @@ internal sealed class ClientEndpoints
     /// <summary>The client's answer to an event that asked for one.</summary>
     public async Task<IResult> ReplyAsync(HttpContext context, Guid clientId, Guid requestId)
     {
+        if (await AdmitAsync(context, clientId) == null) return Refusal.Result();
+
         var (ok, reply) = await TryReadJsonAsync<CallbackReply>(context);
         if (!ok || reply is null)
         {
             return Results.BadRequest();
         }
-
-        if (await AdmitAsync(context, clientId) == null) return Refusal.Result();
 
         if (!_streams.TryReply(clientId, requestId, reply.Outcome))
         {
@@ -338,14 +339,14 @@ internal sealed class ClientEndpoints
     /// </summary>
     public async Task<IResult> TransferHeartbeatAsync(HttpContext context, Guid clientId, string transferId)
     {
+        var participants = await AdmitParticipantAsync(context, clientId, transferId);
+        if (participants == null) return Refusal.Result();
+
         var (ok, progress) = await TryReadJsonAsync<TransferProgress>(context);
         if (!ok || progress is null)
         {
             return Results.BadRequest();
         }
-
-        var participants = await AdmitParticipantAsync(context, clientId, transferId);
-        if (participants == null) return Refusal.Result();
 
         if (participants.SenderId == clientId)
         {

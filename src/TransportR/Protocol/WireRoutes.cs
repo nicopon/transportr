@@ -91,9 +91,10 @@ public static class WireRoutes
     public const string TokenSegment = "token";
 
     /// <summary>
-    /// The response header on every 404 the hub answers itself, on either plane, with the value
-    /// <c>1</c> whatever the reason. A 404 without it comes from no TransportR route: a proxy that does
-    /// not route the path, or a wrong base URL, and never a refusal.
+    /// The response header on every 404 the hub answers itself, on either plane, and on 503 answers
+    /// refused while draining, with the value <c>1</c>. A 404 or 503 without it comes from no
+    /// TransportR refusal: a proxy that does not route the path, a wrong base URL, or an upstream
+    /// gateway failure.
     /// </summary>
     public const string RefusedHeader = "TransportR-Refused";
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.TestHost;
 using TransportR.Client;
+using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
 using TransportR.Tests.Infrastructure;
 
@@ -40,6 +41,40 @@ public class DiscoverySubjectTests
         var receivers = await sender.GetReceiversAsync();
         var target = Assert.Single(receivers, r => r.ClientId == receiver.ClientId);
         Assert.Equal("receiver-subject", target.Subject);
+    }
+
+    [Fact]
+    public async Task GetReceivers_KeepsSubjectNullInDevMode_EvenWhenExposeSubjectInDiscoveryIsEnabled()
+    {
+        using var host = TestHubServerFactory.CreateHost(services =>
+            services.AddDataHub()
+                .UseDevMode(o =>
+                {
+                    o.AllowAnonymous = true;
+                    o.DefaultGroups = ["test"];
+                })
+                .ConfigureClientRegistry(o => o.ExposeSubjectInDiscovery = true));
+        var handler = host.GetTestServer().CreateHandler();
+
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+        await using var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(handler)
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .Build();
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var receivers = await sender.GetReceiversAsync();
+        var target = Assert.Single(receivers, r => r.ClientId == receiver.ClientId);
+        Assert.Null(target.Subject);
     }
 
     private static TransportRClient<string> CreateClient(HttpMessageHandler handler, string subject) =>

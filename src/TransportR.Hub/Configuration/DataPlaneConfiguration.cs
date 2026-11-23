@@ -53,15 +53,17 @@ public class DataPlaneConfiguration
     public int? StalledProgressTimeoutSeconds { get; set; }
 
     /// <summary>
-    /// Optional timeout in seconds to wait during graceful shutdown for active bridges to finish
-    /// while refusing new transfers. Default: 0 seconds (stop immediately). Negative values are refused
-    /// at startup.
+    /// Optional timeout in seconds to wait during graceful shutdown for active transfers and bridges
+    /// to finish. Default: 0 seconds (do not wait). Negative values are refused at startup.
     /// </summary>
     /// <remarks>
-    /// When positive, shutdown marks the hub draining (returning <c>503</c> to new transfer requests
-    /// and <c>Unhealthy</c> on the hub health check) and waits up to this bound for active bridges to
-    /// clear. ASP.NET Core's <c>HostOptions.ShutdownTimeout</c> (30 s by default) also bounds host
-    /// shutdown and must be raised when this value exceeds it.
+    /// Shutdown always marks the hub draining as soon as <c>ApplicationStopping</c> fires (returning
+    /// <c>503</c> to new transfer requests and reporting the configured failure status on the hub
+    /// health check); this option bounds how long <c>StopAsync</c> waits for active transfers and
+    /// bridges to clear. ASP.NET Core's <c>HostOptions.ShutdownTimeout</c> (30 s by default) also
+    /// bounds host shutdown and must be raised when this value exceeds it; keep
+    /// <c>HostOptions.ServicesStopConcurrently</c> disabled if other hosted services must stop
+    /// sequentially around Kestrel.
     /// </remarks>
     public int DrainTimeoutSeconds { get; set; } = 0;
 }

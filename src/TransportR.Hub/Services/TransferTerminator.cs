@@ -47,8 +47,8 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
             // Participants are read first: removing the transfer takes them with it.
             var participants = await _transferManager.GetParticipantsAsync(transferId);
 
-            var bridges = await RemoveAsync(transferId);
-            if (participants != null || bridges.Count > 0)
+            var (removedTransfer, bridges) = await RemoveAsync(transferId);
+            if (removedTransfer || bridges.Count > 0)
             {
                 _metrics?.RecordTransferEnded(reason);
             }
@@ -79,9 +79,8 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     {
         try
         {
-            var existed = _transferManager.GetTransfer(transferId) != null;
-            var bridges = await RemoveAsync(transferId);
-            if (existed || bridges.Count > 0)
+            var (removedTransfer, bridges) = await RemoveAsync(transferId);
+            if (removedTransfer || bridges.Count > 0)
             {
                 _metrics?.RecordTransferEnded(TransferEndReasons.Completed);
             }
@@ -96,14 +95,14 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     // is gone (404, which a client in its closing phase reads as the end) instead of a fresh bridge
     // that waits for a peer that will not come. The bridges removed are left running: after a clean
     // end, the receiver's data GET is still on its way out, and cutting it would cut the end.
-    private async Task<List<ConnectionBridge>> RemoveAsync(string transferId)
+    private async Task<(bool RemovedTransfer, List<ConnectionBridge> Bridges)> RemoveAsync(string transferId)
     {
-        await _transferManager.RemoveTransferAsync(transferId);
+        var removedTransfer = await _transferManager.RemoveTransferAsync(transferId);
 
         var removed = new List<ConnectionBridge>(2);
         if (_bridgeManager.TryRemove(BridgeManager.KeyFor(transferId, ConnectionType.Data), out var data)) removed.Add(data);
         if (_bridgeManager.TryRemove(BridgeManager.KeyFor(transferId, ConnectionType.Control), out var control)) removed.Add(control);
-        return removed;
+        return (removedTransfer, removed);
     }
 
     private async Task NotifyClientAsync(Guid clientId, string transferId, CancellationToken ct)

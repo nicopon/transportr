@@ -695,7 +695,7 @@ public class TransportRServerTests
         public Task UpdateSenderStatsAsync(string transferId, long itemsSent, long acksReceived) => throw new NotSupportedException();
         public Task UpdateReceiverStatsAsync(string transferId, long itemsReceived, long acksSent) => throw new NotSupportedException();
         public TransferState? GetTransfer(string transferId) => throw new NotSupportedException();
-        public Task RemoveTransferAsync(string transferId) => throw new NotSupportedException();
+        public Task<bool> RemoveTransferAsync(string transferId) => throw new NotSupportedException();
         public IEnumerable<TransferState> GetAllTransfers() => throw new NotSupportedException();
         public IReadOnlyDictionary<string, TransferParticipants> GetAllParticipants() => throw new NotSupportedException();
         private int _keepAlives;

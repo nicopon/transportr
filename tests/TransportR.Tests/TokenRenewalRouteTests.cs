@@ -199,7 +199,6 @@ public class TokenRenewalRouteTests
             Options.Create(new DataPlaneConfiguration()),
             clock,
             NullLogger<ClientEndpoints>.Instance,
-            drain,
             Options.Create(new ClientRegistryConfiguration()));
         var httpContext = new DefaultHttpContext
         {

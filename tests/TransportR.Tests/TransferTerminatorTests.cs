@@ -119,7 +119,7 @@ public class TransferTerminatorTests
 
     private sealed class TransferManagerSpy(TransferManager inner, Action onRemove) : ITransferManager
     {
-        public Task RemoveTransferAsync(string transferId)
+        public Task<bool> RemoveTransferAsync(string transferId)
         {
             onRemove();
             return inner.RemoveTransferAsync(transferId);

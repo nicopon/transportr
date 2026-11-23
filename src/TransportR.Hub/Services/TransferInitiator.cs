@@ -33,6 +33,10 @@ internal class TransferInitiator : ITransferInitiator
     /// </summary>
     internal const string TooManyTransfers = "The client has too many transfers open or being opened.";
 
+    internal const string HubShuttingDown = "The hub is shutting down.";
+
+    internal bool IsDraining => _drainState.IsDraining;
+
     private readonly ConcurrentDictionary<Guid, int> _handshakesInFlight = new();
     private readonly int? _maxHandshakes;
     private readonly int? _maxOpenTransfers;
@@ -90,7 +94,7 @@ internal class TransferInitiator : ITransferInitiator
         if (_drainState.IsDraining)
         {
             _logger.LogWarning("InitTransfer by host refused: the hub is shutting down");
-            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, "The hub is shutting down.");
+            throw new HubRequestFailedException(HubRequestFailureCategory.Refused, HubShuttingDown);
         }
 
         var sender = await _stateStore.GetClientAsync(senderClientId);
@@ -250,6 +254,13 @@ internal class TransferInitiator : ITransferInitiator
 
         try
         {
+            if (_drainState.IsDraining)
+            {
+                _logger.LogWarning("Handshake for {SenderId} -> {ReceiverId} refused: the hub is shutting down",
+                    sender.ClientId, receiver.ClientId);
+                throw new HubRequestFailedException(HubRequestFailureCategory.Refused, HubShuttingDown);
+            }
+
             _logger.LogInformation("Orchestrating Transfer: {TransferId}. Source: {SourceId} -> Target: {TargetId} (opened by {Opener})",
                 transferId, sender.ClientId, receiver.ClientId, requestSender ? "the host" : "the sender");
 

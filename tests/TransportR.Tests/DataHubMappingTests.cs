@@ -192,12 +192,46 @@ public class DataHubMappingTests
     [Theory]
     [InlineData(" ")]
     [InlineData("/bad prefix")]
-    public void MapDataHub_WithWhitespaceInPrefix_ThrowsArgumentException(string prefix)
+    [InlineData("/bad?prefix")]
+    [InlineData("/bad#prefix")]
+    [InlineData("/bad{id}")]
+    [InlineData("/bad}id")]
+    public void MapDataHub_WithInvalidCharactersInPrefix_ThrowsArgumentException(string prefix)
     {
         using var host = TestHubServerFactory.CreateHost();
         var builder = new Microsoft.AspNetCore.Builder.ApplicationBuilder(host.Services);
         builder.UseRouting();
         Assert.Throws<ArgumentException>(() =>
             builder.UseEndpoints(endpoints => endpoints.MapDataHub(prefix, requireAuth: false)));
+    }
+
+    [Fact]
+    public async Task MapDataHub_MalformedQueryParameters_Return400EvenWhenThrowOnBadRequestIsEnabled()
+    {
+        using var host = new HostBuilder()
+            .ConfigureWebHost(webBuilder => webBuilder
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
+                    services.AddDataHub().UseDevMode(o => o.AllowAnonymous = true);
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: false));
+                }))
+            .Start();
+
+        using var client = host.GetTestClient();
+
+        using var eventsResp = await client.GetAsync($"{WireRoutes.ClientBase}/{Guid.NewGuid()}/{WireRoutes.EventsSegment}?heartbeatMs=abc");
+        Assert.Equal(HttpStatusCode.BadRequest, eventsResp.StatusCode);
+
+        using var sendOffsetResp = await client.PostAsync($"{WireRoutes.StreamBase}/t1/{WireRoutes.SendSegment}?offset=abc", content: null);
+        Assert.Equal(HttpStatusCode.BadRequest, sendOffsetResp.StatusCode);
+
+        using var sendFinalResp = await client.PostAsync($"{WireRoutes.StreamBase}/t1/{WireRoutes.SendSegment}?final=notbool", content: null);
+        Assert.Equal(HttpStatusCode.BadRequest, sendFinalResp.StatusCode);
     }
 }

@@ -17,6 +17,12 @@ internal static class Refusal
 
     public static IResult Result() => RefusedResult.Instance;
 
+    /// <summary>
+    /// Answers 503 as the hub's own refusal while draining, marked with <see cref="WireRoutes.RefusedHeader"/>
+    /// so a client can tell it from a proxy 503.
+    /// </summary>
+    public static IResult ServiceUnavailable(string message) => new ServiceUnavailableResult(message);
+
     private sealed class RefusedResult : IResult, IStatusCodeHttpResult
     {
         public static readonly RefusedResult Instance = new();
@@ -27,6 +33,20 @@ internal static class Refusal
         {
             Write(httpContext.Response);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ServiceUnavailableResult(string message) : IResult, IStatusCodeHttpResult
+    {
+        public int? StatusCode => StatusCodes.Status503ServiceUnavailable;
+
+        public Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.Headers[WireRoutes.RefusedHeader] = "1";
+            return Results.Json(
+                new HubError(message),
+                ControlPlane.Json,
+                statusCode: StatusCodes.Status503ServiceUnavailable).ExecuteAsync(httpContext);
         }
     }
 }
