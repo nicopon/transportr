@@ -21,7 +21,7 @@ public static class DataHubRedisExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
         return RegisterRedisStore(builder, configure, sp =>
-            CreateStore(sp, ConnectionMultiplexer.Connect(connectionString), ownsConnection: true));
+            CreateOwnedStore(sp, () => ConnectionMultiplexer.Connect(connectionString)));
     }
 
     /// <summary>
@@ -37,7 +37,7 @@ public static class DataHubRedisExtensions
         ArgumentNullException.ThrowIfNull(configurationOptions);
 
         return RegisterRedisStore(builder, configure, sp =>
-            CreateStore(sp, ConnectionMultiplexer.Connect(configurationOptions), ownsConnection: true));
+            CreateOwnedStore(sp, () => ConnectionMultiplexer.Connect(configurationOptions)));
     }
 
     /// <summary>
@@ -87,6 +87,31 @@ public static class DataHubRedisExtensions
         builder.Services.Replace(ServiceDescriptor.Singleton<IStateStore>(factory));
 
         return builder;
+    }
+
+    private static RedisStateStore CreateOwnedStore(
+        IServiceProvider sp,
+        Func<IConnectionMultiplexer> connect)
+    {
+        var registryConfig = sp.GetService<IOptions<ClientRegistryConfiguration>>();
+        _ = registryConfig?.Value;
+        var timeProvider = sp.GetService<TimeProvider>();
+        var storeOptions = sp.GetService<IOptions<RedisStateStoreOptions>>();
+        if (storeOptions?.Value is { KeyPrefix: null })
+        {
+            throw new ArgumentException("RedisStateStoreOptions.KeyPrefix cannot be null.", nameof(storeOptions));
+        }
+
+        var multiplexer = connect();
+        try
+        {
+            return new RedisStateStore(multiplexer, ownsConnection: true, registryConfig, timeProvider, storeOptions);
+        }
+        catch
+        {
+            multiplexer.Dispose();
+            throw;
+        }
     }
 
     private static RedisStateStore CreateStore(

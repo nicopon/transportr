@@ -9,12 +9,13 @@ namespace TransportR.Storage.Redis;
 /// IStateStore implementation using Redis.
 /// Handles distributed state with TTL for clients and transfer sessions.
 /// </summary>
-public class RedisStateStore : IStateStore, IDisposable
+public class RedisStateStore : IStateStore, IDisposable, IAsyncDisposable
 {
     private readonly IConnectionMultiplexer _redis;
     private readonly bool _ownsConnection;
     private readonly IDatabase _db;
     private readonly string _keyPrefix;
+    private int _disposed;
 
     // A conditional write that keeps losing to a concurrent one is not the store's to settle: it
     // says so, and the caller's own retry (a client's next renewal) decides.
@@ -49,7 +50,7 @@ public class RedisStateStore : IStateStore, IDisposable
         _db = _redis.GetDatabase();
         _keyPrefix = storeOptions is null
             ? "transportr:"
-            : storeOptions.Value.KeyPrefix ?? throw new ArgumentNullException(nameof(storeOptions), "RedisStateStoreOptions.KeyPrefix cannot be null.");
+            : storeOptions.Value.KeyPrefix ?? throw new ArgumentException("RedisStateStoreOptions.KeyPrefix cannot be null.", nameof(storeOptions));
 
         var settings = config?.Value ?? new ClientRegistryConfiguration();
         _connectedTtl = TimeSpan.FromSeconds(settings.ConnectedTtlSeconds);
@@ -58,9 +59,17 @@ public class RedisStateStore : IStateStore, IDisposable
 
     public void Dispose()
     {
-        if (_ownsConnection)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0 && _ownsConnection)
         {
             _redis.Dispose();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0 && _ownsConnection)
+        {
+            await _redis.DisposeAsync().ConfigureAwait(false);
         }
     }
 

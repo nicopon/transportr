@@ -456,6 +456,85 @@ public class RedisStateStoreTests : IAsyncLifetime
         servicesInvalid.AddDataHub().UseRedisStore(_multiplexer, o => o.KeyPrefix = null!);
         using var invalidSp = servicesInvalid.BuildServiceProvider();
         Assert.Throws<OptionsValidationException>(() => invalidSp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value);
+
+        // ConnectionString overload with empty KeyPrefix stores unprefixed keys and disposes its private multiplexer on shutdown
+        var servicesConnStr = new ServiceCollection();
+        servicesConnStr.AddDataHub().UseRedisStore(_redis.ConnectionString, o => o.KeyPrefix = "");
+        var unprefixedId = Guid.NewGuid();
+        await using (var sp = servicesConnStr.BuildServiceProvider())
+        {
+            Assert.Null(sp.GetService<IConnectionMultiplexer>());
+            var store = Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            await store.SaveClientAsync(CreateClient(unprefixedId, "conn-empty-prefix"));
+            Assert.True(await _multiplexer.GetDatabase().KeyExistsAsync($"clients:{unprefixedId}"));
+        }
+
+        // Null KeyPrefix with connectionString fails before opening a multiplexer
+        var servicesBadConnStr = new ServiceCollection();
+        servicesBadConnStr.AddDataHub().UseRedisStore("127.0.0.1:1,abortConnect=true", o => o.KeyPrefix = null!);
+        await using var badSp = servicesBadConnStr.BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => badSp.GetRequiredService<IStateStore>());
+    }
+
+    [Fact]
+    public async Task RedisStateStore_DisposeAndDisposeAsync_OnlyDisposeOwnedMultiplexer()
+    {
+        var tracker = new TrackingMultiplexerState();
+        var proxy = System.Reflection.DispatchProxy.Create<IConnectionMultiplexer, TrackingMultiplexerProxy>();
+        ((TrackingMultiplexerProxy)(object)proxy).State = tracker;
+
+        Assert.Throws<ArgumentException>(() => new RedisStateStore(proxy, storeOptions: Options.Create(new RedisStateStoreOptions { KeyPrefix = null! })));
+
+        var unowned = new RedisStateStore(proxy);
+        unowned.Dispose();
+        await unowned.DisposeAsync();
+        Assert.Equal(0, tracker.DisposeCalls);
+        Assert.Equal(0, tracker.DisposeAsyncCalls);
+
+        var ownedSync = new RedisStateStore(proxy, ownsConnection: true);
+        ownedSync.Dispose();
+        ownedSync.Dispose();
+        await ownedSync.DisposeAsync();
+        Assert.Equal(1, tracker.DisposeCalls);
+        Assert.Equal(0, tracker.DisposeAsyncCalls);
+
+        var ownedAsync = new RedisStateStore(proxy, ownsConnection: true);
+        await ownedAsync.DisposeAsync();
+        await ownedAsync.DisposeAsync();
+        ownedAsync.Dispose();
+        Assert.Equal(1, tracker.DisposeCalls);
+        Assert.Equal(1, tracker.DisposeAsyncCalls);
+    }
+
+    private sealed class TrackingMultiplexerState
+    {
+        public int DisposeCalls;
+        public int DisposeAsyncCalls;
+    }
+
+    private class TrackingMultiplexerProxy : System.Reflection.DispatchProxy
+    {
+        public TrackingMultiplexerState State { get; set; } = new();
+
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args) =>
+            targetMethod?.Name switch
+            {
+                nameof(IDisposable.Dispose) => Increment(ref State.DisposeCalls),
+                nameof(IAsyncDisposable.DisposeAsync) => IncrementAsync(ref State.DisposeAsyncCalls),
+                _ => null
+            };
+
+        private static object? Increment(ref int count)
+        {
+            Interlocked.Increment(ref count);
+            return null;
+        }
+
+        private static ValueTask IncrementAsync(ref int count)
+        {
+            Interlocked.Increment(ref count);
+            return ValueTask.CompletedTask;
+        }
     }
 
     private class NoopMultiplexerProxy : System.Reflection.DispatchProxy
