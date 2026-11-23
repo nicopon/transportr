@@ -358,7 +358,8 @@ public class EndToEndAdversaryTests
     [Fact]
     public async Task APongRefusedWhileTheSenderSeals_FailsTheSender_ForTheEncryption()
     {
-        await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed());
+        // Bounded window keeps the sender sealing continuously without piling up a backlog ahead of Abort.
+        await using var pair = new SessionPair(sender: Keyed(), receiver: Keyed(), configureSender: o => o.MaxInFlightBatches = 32);
         var pongs = 0;
         pair.Hub.Rewrite = chunk => chunk.Header.Type == ChunkType.Pong && Interlocked.Increment(ref pongs) > 1
             ? [WithShare(chunk.Bytes, NewShare())]

@@ -253,14 +253,16 @@ public class ConnectionBridgeTests
 
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
-        var readers = Enumerable.Range(0, 4).Select(i => Task.Run(() =>
+        // Dedicated threads with a yield so tight polling does not starve the ThreadPool for concurrent tests.
+        var readers = Enumerable.Range(0, 4).Select(i => Task.Factory.StartNew(() =>
         {
             while (!stop.IsCancellationRequested)
             {
                 _ = bridge.SenderToken;
                 _ = bridge.ReceiverToken;
+                Thread.Yield();
             }
-        })).ToArray();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
 
         var resetter = Task.Run(async () =>
         {

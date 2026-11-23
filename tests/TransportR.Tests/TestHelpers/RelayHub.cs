@@ -64,6 +64,13 @@ internal sealed class RelayHub : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(new RelayedStream(relay.Delivered)) };
         }
 
+        if (request.Method == HttpMethod.Post && path.EndsWith($"/{WireRoutes.AbortSegment}"))
+        {
+            _data.End();
+            _control.End();
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
+
         return new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 
