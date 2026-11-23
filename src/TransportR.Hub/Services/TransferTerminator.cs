@@ -37,6 +37,9 @@ internal class TransferTerminator : ITransferTerminator, ITransferRetirer
     public Task TerminateAsync(string transferId, CancellationToken cancellationToken = default) =>
         TerminateAsync(transferId, TransferEndReasons.Host, cancellationToken);
 
+    Task ITransferTerminator.TerminateAsync(string transferId, string reason, CancellationToken cancellationToken) =>
+        TerminateAsync(transferId, reason, cancellationToken);
+
     internal async Task TerminateAsync(string transferId, string reason, CancellationToken cancellationToken = default)
     {
         try

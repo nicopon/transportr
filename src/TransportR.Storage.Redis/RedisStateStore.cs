@@ -9,9 +9,10 @@ namespace TransportR.Storage.Redis;
 /// IStateStore implementation using Redis.
 /// Handles distributed state with TTL for clients and transfer sessions.
 /// </summary>
-public class RedisStateStore : IStateStore
+public class RedisStateStore : IStateStore, IDisposable
 {
     private readonly IConnectionMultiplexer _redis;
+    private readonly bool _ownsConnection;
     private readonly IDatabase _db;
     private readonly string _keyPrefix;
 
@@ -31,19 +32,36 @@ public class RedisStateStore : IStateStore
         IOptions<ClientRegistryConfiguration>? config = null,
         TimeProvider? timeProvider = null,
         IOptions<RedisStateStoreOptions>? storeOptions = null)
+        : this(redis, ownsConnection: false, config, timeProvider, storeOptions)
+    {
+    }
+
+    internal RedisStateStore(
+        IConnectionMultiplexer redis,
+        bool ownsConnection,
+        IOptions<ClientRegistryConfiguration>? config = null,
+        TimeProvider? timeProvider = null,
+        IOptions<RedisStateStoreOptions>? storeOptions = null)
     {
         _time = timeProvider ?? TimeProvider.System;
         _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        _ownsConnection = ownsConnection;
         _db = _redis.GetDatabase();
-        _keyPrefix = storeOptions?.Value.KeyPrefix ?? "transportr:";
-        if (storeOptions?.Value != null && storeOptions.Value.KeyPrefix is null)
-        {
-            throw new ArgumentNullException(nameof(storeOptions), "RedisStateStoreOptions.KeyPrefix cannot be null.");
-        }
+        _keyPrefix = storeOptions is null
+            ? "transportr:"
+            : storeOptions.Value.KeyPrefix ?? throw new ArgumentNullException(nameof(storeOptions), "RedisStateStoreOptions.KeyPrefix cannot be null.");
 
         var settings = config?.Value ?? new ClientRegistryConfiguration();
         _connectedTtl = TimeSpan.FromSeconds(settings.ConnectedTtlSeconds);
         _disconnectedGrace = TimeSpan.FromSeconds(settings.DisconnectedGraceSeconds);
+    }
+
+    public void Dispose()
+    {
+        if (_ownsConnection)
+        {
+            _redis.Dispose();
+        }
     }
 
     private TimeSpan TtlFor(ClientRegistration client) =>
@@ -73,7 +91,9 @@ public class RedisStateStore : IStateStore
 
     private string SessionKey(string transferId) => $"{_keyPrefix}sessions:{transferId}";
 
-    private string ClientKey(Guid clientId) => $"{_keyPrefix}clients:{clientId}";
+    private string ClientKey(Guid clientId) => ClientKey(clientId.ToString());
+
+    private string ClientKey(string clientId) => $"{_keyPrefix}clients:{clientId}";
 
     private string ConnKey(string connectionId) => $"{_keyPrefix}conn:{connectionId}";
 
@@ -249,7 +269,7 @@ public class RedisStateStore : IStateStore
         var reads = new Task<RedisValue>[ids.Length];
         for (int i = 0; i < ids.Length; i++)
         {
-            reads[i] = _db.StringGetAsync($"{_keyPrefix}clients:{ids[i]}");
+            reads[i] = _db.StringGetAsync(ClientKey(ids[i].ToString()));
         }
 
         var values = await Task.WhenAll(reads);

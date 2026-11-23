@@ -24,9 +24,10 @@ using TransportR.Serialization.MessagePack;
 using Microsoft.Extensions.Logging;
 
 // 1. Configure the Client
+using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
 var client = new TransportRClientBuilder<Order>()
     .WithUrl("http://localhost:5000")
-    .WithLoggerFactory(LoggerFactory.Create(b => b.AddConsole()))
+    .WithLoggerFactory(loggerFactory)
     .WithClientCredentials(
         tokenEndpoint: "http://localhost:5100/connect/token",
         clientId: "my-client",
@@ -44,7 +45,7 @@ await client.ConnectAsync();
 // 3. Send Data
 var receivers = await client.GetReceiversAsync("receivers");
 await using var transfer = await client.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
-await send.SendAsync(items); // accepts T, IEnumerable<T>, or IAsyncEnumerable<T>
+await transfer.SendAsync(items); // accepts T, IEnumerable<T>, or IAsyncEnumerable<T>
 await transfer.CompleteAsync();
 
 // 4. Dispose
@@ -332,14 +333,10 @@ A 409 from the hub whose category the client cannot read fails as an `HttpReques
 
 ### Observability
 
-Both clients emit built-in BCL metrics and tracing under `TransportRClientDiagnostics.MeterName` and
-`TransportRClientDiagnostics.ActivitySourceName` (`"TransportR.Client"`):
-
-- **Metrics**: `transportr.client.transfers.active`, `transportr.client.transfers.completed` (`transportr.direction`,
-  `transportr.outcome`, `transportr.failure_category`), `transportr.client.bytes.transferred`,
-  `transportr.client.reconnections`, and `transportr.client.write_transport.fallbacks`.
-- **Tracing**: `transportr.client.init_transfer` span around `InitTransferAsync`, with W3C `traceparent`/`tracestate`
-  headers propagated on WebSocket upgrades as well as HTTP requests.
+Both clients emit distributed tracing spans under `TransportRClientDiagnostics.ActivitySourceName` (`"TransportR.Client"`):
+`transportr.client.init_transfer` around `InitTransferAsync`, with W3C `traceparent`/`tracestate` headers propagated on
+WebSocket upgrades as well as HTTP requests. Use `GetTransfers()` (`TransferInfo`) for per-transfer counters, duration,
+transport, and protection status.
 
 ## License
 

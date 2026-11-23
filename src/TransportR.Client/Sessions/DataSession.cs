@@ -2,7 +2,6 @@ using System.Net;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
-using TransportR.Client.Diagnostics;
 using TransportR.Client.Internal;
 using TransportR.Client.Models;
 using TransportR.Client.Protocol;
@@ -93,7 +92,6 @@ internal class DataSession : IDataSession
     private int _heartbeating;
     private int _disposed;
     private int _writeSideEndDelivered;
-    private int _metricsActive;
 
     // Session Statistics
     public DateTime StartedAt { get; }
@@ -154,7 +152,7 @@ internal class DataSession : IDataSession
 
         _cts = new CancellationTokenSource();
         _batchProcessor = new BatchProcessor(context, transferId, batches, openSink);
-        _fsm = new DataSessionStateMachine(transferId, context.Logger, OnStateTransition);
+        _fsm = new DataSessionStateMachine(transferId, context.Logger);
 
         // Pass segregated interfaces to HttpStreamManager
         _httpStreamManager = new HttpStreamManager(context, context, transferId, dataUrl, affinity); // IStreamTransport, ISessionConfig
@@ -208,10 +206,6 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Sender Session {TransferId}...", TransferId);
         _isSender = true;
-        if (Interlocked.Exchange(ref _metricsActive, 1) == 0)
-        {
-            ClientMetrics.TransferStarted(isSender: true);
-        }
         Encrypt();
 
         _batchProcessor.StartSenderAsync(_cts.Token);
@@ -226,29 +220,12 @@ internal class DataSession : IDataSession
     {
         _config.Logger.LogInformation("Starting Receiver Session {TransferId}...", TransferId);
         _isSender = false;
-        if (Interlocked.Exchange(ref _metricsActive, 1) == 0)
-        {
-            ClientMetrics.TransferStarted(isSender: false);
-        }
         Encrypt();
 
         await _batchProcessor.StartReceiverAsync();
 
         _fsm.TransitionTo(SessionState.Starting);
         _ = RunSessionLoop(_cts.Token);
-    }
-
-    private void OnStateTransition(SessionState _, SessionState newState)
-    {
-        if (newState == SessionState.Reconnecting)
-        {
-            ClientMetrics.RecordReconnection(IsSender);
-        }
-        else if (newState is SessionState.Completed or SessionState.Failed or SessionState.Disposed
-                 && Interlocked.Exchange(ref _metricsActive, 0) == 1)
-        {
-            ClientMetrics.TransferEnded(IsSender, newState, _failure?.Category);
-        }
     }
 
     /// <summary>
@@ -990,8 +967,7 @@ internal class DataSession : IDataSession
 
         while (true)
         {
-            using var idleTimeout = new CancellationTokenSource(_config.Options.PresenceHeartbeatInterval, _time);
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(token, idleTimeout.Token);
+            using var idle = new LinkedTimeout(_config.Options.PresenceHeartbeatInterval, _time, token);
             try
             {
                 return await _batchProcessor.OutgoingMessages.WaitToReadAsync(idle.Token);
@@ -1151,8 +1127,7 @@ internal class DataSession : IDataSession
         if (Interlocked.Exchange(ref _heartbeating, 1) == 1) return;
         try
         {
-            using var boundTimeout = new CancellationTokenSource(HeartbeatTimeout, _time);
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, boundTimeout.Token);
+            using var timeout = new LinkedTimeout(HeartbeatTimeout, _time, _cts.Token);
 
             var (items, acks) = IsSender
                 ? (_batchProcessor.ItemsSent, _batchProcessor.AcksReceived)

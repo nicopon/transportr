@@ -2,29 +2,19 @@ using System.Buffers;
 
 namespace TransportR.Client.Internal;
 
-/// <summary>
-/// Write-only <see cref="Stream"/> adapter over a <see cref="ByteSend"/> handle.
-/// Disposing this stream does not complete or dispose the underlying handle.
-/// </summary>
-internal sealed class ByteSendStream : Stream
+internal abstract class NonSeekableTransferStream : Stream
 {
-    private readonly ByteSend _send;
     private bool _disposed;
 
-    public ByteSendStream(ByteSend send)
-    {
-        _send = send ?? throw new ArgumentNullException(nameof(send));
-    }
-
-    public override bool CanRead => false;
     public override bool CanSeek => false;
-    public override bool CanWrite => !_disposed;
     public override long Length => throw new NotSupportedException();
     public override long Position
     {
         get => throw new NotSupportedException();
         set => throw new NotSupportedException();
     }
+
+    protected bool IsDisposed => _disposed;
 
     public override void Flush() => EnsureNotDisposed();
 
@@ -36,10 +26,43 @@ internal sealed class ByteSendStream : Stream
             : Task.CompletedTask;
     }
 
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing) => _disposed = true;
+
+    public override ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        return ValueTask.CompletedTask;
+    }
+
+    protected void EnsureNotDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+}
+
+/// <summary>
+/// Write-only <see cref="Stream"/> adapter over a <see cref="ByteSend"/> handle.
+/// Disposing this stream does not complete or dispose the underlying handle.
+/// </summary>
+internal sealed class ByteSendStream : NonSeekableTransferStream
+{
+    private readonly ByteSend _send;
+
+    public ByteSendStream(ByteSend send)
+    {
+        _send = send ?? throw new ArgumentNullException(nameof(send));
+    }
+
+    public override bool CanRead => false;
+    public override bool CanWrite => !IsDisposed;
+
     public override void Write(byte[] buffer, int offset, int count)
     {
         ValidateBufferArguments(buffer, offset, count);
-        Write(buffer.AsSpan(offset, count));
+        EnsureNotDisposed();
+        if (count == 0) return;
+
+        _send.WriteAsync(buffer.AsMemory(offset, count)).GetAwaiter().GetResult();
     }
 
     public override void Write(ReadOnlySpan<byte> buffer)
@@ -73,58 +96,31 @@ internal sealed class ByteSendStream : Stream
     }
 
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException();
-
-    protected override void Dispose(bool disposing) => _disposed = true;
-
-    public override ValueTask DisposeAsync()
-    {
-        _disposed = true;
-        return ValueTask.CompletedTask;
-    }
-
-    private void EnsureNotDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 }
 
 /// <summary>
 /// Read-only <see cref="Stream"/> adapter over a <see cref="ByteReceive"/> handle.
 /// Disposing this stream does not dispose the underlying handle.
 /// </summary>
-internal sealed class ByteReceiveStream : Stream
+internal sealed class ByteReceiveStream : NonSeekableTransferStream
 {
     private readonly ByteReceive _receive;
-    private bool _disposed;
 
     public ByteReceiveStream(ByteReceive receive)
     {
         _receive = receive ?? throw new ArgumentNullException(nameof(receive));
     }
 
-    public override bool CanRead => !_disposed;
-    public override bool CanSeek => false;
+    public override bool CanRead => !IsDisposed;
     public override bool CanWrite => false;
-    public override long Length => throw new NotSupportedException();
-    public override long Position
-    {
-        get => throw new NotSupportedException();
-        set => throw new NotSupportedException();
-    }
-
-    public override void Flush() => EnsureNotDisposed();
-
-    public override Task FlushAsync(CancellationToken cancellationToken)
-    {
-        EnsureNotDisposed();
-        return cancellationToken.IsCancellationRequested
-            ? Task.FromCanceled(cancellationToken)
-            : Task.CompletedTask;
-    }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
         ValidateBufferArguments(buffer, offset, count);
-        return Read(buffer.AsSpan(offset, count));
+        EnsureNotDisposed();
+        return count == 0
+            ? 0
+            : _receive.ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
     }
 
     public override int Read(Span<byte> buffer)
@@ -170,16 +166,4 @@ internal sealed class ByteReceiveStream : Stream
     }
 
     public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-    public override void SetLength(long value) => throw new NotSupportedException();
-
-    protected override void Dispose(bool disposing) => _disposed = true;
-
-    public override ValueTask DisposeAsync()
-    {
-        _disposed = true;
-        return ValueTask.CompletedTask;
-    }
-
-    private void EnsureNotDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 }

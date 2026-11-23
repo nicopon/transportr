@@ -9,15 +9,7 @@ namespace TransportR.Client;
 /// </summary>
 public static class TransportRClientServiceCollectionExtensions
 {
-    /// <summary>
-    /// Registers a singleton <see cref="TransportRClient{T}"/> along with <see cref="IDataSender{T}"/>
-    /// and <see cref="IDataReceiver{T}"/>.
-    /// </summary>
-    /// <remarks>
-    /// Automatically wires <see cref="ILoggerFactory"/> and <see cref="TimeProvider"/> from the container
-    /// when present before invoking <paramref name="configure"/>. The container disposes the client
-    /// when it shuts down; the host connects and disconnects it (for instance from a hosted service).
-    /// </remarks>
+    /// <inheritdoc cref="AddTransportRClient{T}(IServiceCollection, Action{IServiceProvider, TransportRClientBuilder{T}})"/>
     public static IServiceCollection AddTransportRClient<T>(
         this IServiceCollection services,
         Action<TransportRClientBuilder<T>> configure)
@@ -31,12 +23,14 @@ public static class TransportRClientServiceCollectionExtensions
     /// <summary>
     /// Registers a singleton <see cref="TransportRClient{T}"/> along with <see cref="IDataSender{T}"/>
     /// and <see cref="IDataReceiver{T}"/>, giving <paramref name="configure"/> access to the
-    /// <see cref="IServiceProvider"/> (for <c>IOptions&lt;T&gt;</c> or handler dependencies).
+    /// <see cref="IServiceProvider"/>.
     /// </summary>
     /// <remarks>
     /// Automatically wires <see cref="ILoggerFactory"/> and <see cref="TimeProvider"/> from the container
     /// when present before invoking <paramref name="configure"/>, so calls inside
-    /// <paramref name="configure"/> win.
+    /// <paramref name="configure"/> win. Uses <c>TryAddSingleton</c> (the first registration for a given
+    /// <typeparamref name="T"/> wins). The container disposes the client when it shuts down; the host
+    /// connects and disconnects it (for instance from a hosted service).
     /// </remarks>
     public static IServiceCollection AddTransportRClient<T>(
         this IServiceCollection services,
@@ -48,16 +42,7 @@ public static class TransportRClientServiceCollectionExtensions
         services.TryAddSingleton(sp =>
         {
             var builder = new TransportRClientBuilder<T>();
-            if (sp.GetService<ILoggerFactory>() is { } loggerFactory)
-            {
-                builder.WithLoggerFactory(loggerFactory);
-            }
-
-            if (sp.GetService<TimeProvider>() is { } timeProvider)
-            {
-                builder.WithTimeProvider(timeProvider);
-            }
-
+            WireContainerServices(sp, b => builder.WithLoggerFactory(b), t => builder.WithTimeProvider(t));
             configure(sp, builder);
             return builder.Build();
         });
@@ -67,14 +52,7 @@ public static class TransportRClientServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Registers a singleton <see cref="ByteStreamClient"/>.
-    /// </summary>
-    /// <remarks>
-    /// Automatically wires <see cref="ILoggerFactory"/> and <see cref="TimeProvider"/> from the container
-    /// when present before invoking <paramref name="configure"/>. The container disposes the client
-    /// when it shuts down.
-    /// </remarks>
+    /// <inheritdoc cref="AddByteStreamClient(IServiceCollection, int, Action{IServiceProvider, ByteStreamClientBuilder})"/>
     public static IServiceCollection AddByteStreamClient(
         this IServiceCollection services,
         int batchBytes,
@@ -90,6 +68,11 @@ public static class TransportRClientServiceCollectionExtensions
     /// Registers a singleton <see cref="ByteStreamClient"/>, giving <paramref name="configure"/> access
     /// to the <see cref="IServiceProvider"/>.
     /// </summary>
+    /// <remarks>
+    /// Automatically wires <see cref="ILoggerFactory"/> and <see cref="TimeProvider"/> from the container
+    /// when present before invoking <paramref name="configure"/>. Uses <c>TryAddSingleton</c> (the first
+    /// registration wins). The container disposes the client when it shuts down.
+    /// </remarks>
     public static IServiceCollection AddByteStreamClient(
         this IServiceCollection services,
         int batchBytes,
@@ -97,27 +80,32 @@ public static class TransportRClientServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
-        // Validate batchBytes eagerly so invalid bounds fail at registration time.
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchBytes, 0, nameof(batchBytes));
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(batchBytes, int.MaxValue - sizeof(int), nameof(batchBytes));
+        ByteStreamClientBuilder.ValidateBatchBytes(batchBytes);
 
         services.TryAddSingleton(sp =>
         {
             var builder = new ByteStreamClientBuilder(batchBytes);
-            if (sp.GetService<ILoggerFactory>() is { } loggerFactory)
-            {
-                builder.WithLoggerFactory(loggerFactory);
-            }
-
-            if (sp.GetService<TimeProvider>() is { } timeProvider)
-            {
-                builder.WithTimeProvider(timeProvider);
-            }
-
+            WireContainerServices(sp, b => builder.WithLoggerFactory(b), t => builder.WithTimeProvider(t));
             configure(sp, builder);
             return builder.Build();
         });
 
         return services;
+    }
+
+    private static void WireContainerServices(
+        IServiceProvider sp,
+        Action<ILoggerFactory> setLogger,
+        Action<TimeProvider> setTime)
+    {
+        if (sp.GetService<ILoggerFactory>() is { } loggerFactory)
+        {
+            setLogger(loggerFactory);
+        }
+
+        if (sp.GetService<TimeProvider>() is { } timeProvider)
+        {
+            setTime(timeProvider);
+        }
     }
 }

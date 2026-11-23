@@ -348,8 +348,7 @@ public static class TransportRHubExtensions
              [FromQuery(Name = DataPlane.OffsetParameter)] long? offset,
              [FromQuery(Name = DataPlane.FinalParameter)] bool? final,
              [FromQuery(Name = DataPlane.HeartbeatParameter)] int? heartbeatMs) =>
-                streamEndpoints.SendAsync(ctx, transferId, epoch, offset, final ?? false, heartbeatMs))
-            .WithMetadata(new DisableRequestSizeLimitAttribute());
+                streamEndpoints.SendAsync(ctx, transferId, epoch, offset, final ?? false, heartbeatMs));
 
         // UseWebSockets wraps only the two upgrade routes so the host adds nothing to its pipeline
         // and group-level authorization runs before any WebSocket upgrade.

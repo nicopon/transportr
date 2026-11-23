@@ -43,7 +43,6 @@ DataHub/
 ├── Middleware/
 │   └── TransferIdMiddleware.cs   # Reads the X-Transfer-Id header
 └── Services/
-    ├── DataProxyMetrics.cs       # Metrics of the data plane
     ├── ProgressMonitorService.cs # Progress tracking service
     ├── TestProxyStateStore.cs    # IStateStore kept in the TestProxy (HA harness)
     └── TestProxyStoreExtensions.cs

@@ -81,7 +81,6 @@ builder.Services.AddCors(options =>
 
 // Services
 builder.Services.AddSingleton<ProgressMonitorService>();
-builder.Services.AddSingleton<DataProxyMetrics>();
 builder.Services.AddSingleton<TransportR.Hub.IHubProgressMonitor, ProgressMonitorAdapter>();
 
 // Register Serializer (required before AddDataHub)
@@ -163,7 +162,6 @@ else
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
-        metrics.AddMeter(DataProxyMetrics.MeterName);
         metrics.AddMeter(TransportRHubDiagnostics.MeterName);
     });
 

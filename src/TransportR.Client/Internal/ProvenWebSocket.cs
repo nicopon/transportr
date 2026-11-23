@@ -38,8 +38,7 @@ internal static class ProvenWebSocket
         {
             var accessToken = await transport.GetAccessTokenAsync(refreshed);
             var socket = newSocket(accessToken);
-            using var boundCts = new CancellationTokenSource(bound, time);
-            using var opening = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
+            using var opening = new LinkedTimeout(bound, time, token);
 
             var proven = false;
             try
@@ -119,7 +118,7 @@ internal static class ProvenWebSocket
             options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
         }
 
-        if (Activity.Current is { Id: { Length: > 0 } traceParent } currentActivity)
+        if (Activity.Current is { IdFormat: ActivityIdFormat.W3C, Id: { Length: > 0 } traceParent } currentActivity)
         {
             options.SetRequestHeader("traceparent", traceParent);
             if (!string.IsNullOrEmpty(currentActivity.TraceStateString))

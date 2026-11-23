@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using TransportR.Hub;
 
@@ -19,10 +20,8 @@ public static class DataHubRedisExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        builder.Services.Replace(ServiceDescriptor.Singleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(connectionString)));
-
-        return RegisterRedisStore(builder, configure);
+        return RegisterRedisStore(builder, configure, sp =>
+            CreateStore(sp, ConnectionMultiplexer.Connect(connectionString), ownsConnection: true));
     }
 
     /// <summary>
@@ -37,10 +36,8 @@ public static class DataHubRedisExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(configurationOptions);
 
-        builder.Services.Replace(ServiceDescriptor.Singleton<IConnectionMultiplexer>(_ =>
-            ConnectionMultiplexer.Connect(configurationOptions)));
-
-        return RegisterRedisStore(builder, configure);
+        return RegisterRedisStore(builder, configure, sp =>
+            CreateStore(sp, ConnectionMultiplexer.Connect(configurationOptions), ownsConnection: true));
     }
 
     /// <summary>
@@ -54,9 +51,8 @@ public static class DataHubRedisExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(connectionMultiplexer);
 
-        builder.Services.Replace(ServiceDescriptor.Singleton(connectionMultiplexer));
-
-        return RegisterRedisStore(builder, configure);
+        return RegisterRedisStore(builder, configure, sp =>
+            CreateStore(sp, connectionMultiplexer, ownsConnection: false));
     }
 
     /// <summary>
@@ -69,12 +65,14 @@ public static class DataHubRedisExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return RegisterRedisStore(builder, configure);
+        return RegisterRedisStore(builder, configure, sp =>
+            CreateStore(sp, sp.GetRequiredService<IConnectionMultiplexer>(), ownsConnection: false));
     }
 
     private static DataHubBuilder RegisterRedisStore(
         DataHubBuilder builder,
-        Action<RedisStateStoreOptions>? configure)
+        Action<RedisStateStoreOptions>? configure,
+        Func<IServiceProvider, RedisStateStore> factory)
     {
         var optionsBuilder = builder.Services.AddOptions<RedisStateStoreOptions>()
             .Validate(o => o.KeyPrefix is not null, "RedisStateStoreOptions.KeyPrefix cannot be null.")
@@ -86,8 +84,19 @@ public static class DataHubRedisExtensions
         }
 
         // Replaces the in-memory store AddDataHub registered, so a hub never holds two.
-        builder.Services.Replace(ServiceDescriptor.Singleton<IStateStore, RedisStateStore>());
+        builder.Services.Replace(ServiceDescriptor.Singleton<IStateStore>(factory));
 
         return builder;
     }
+
+    private static RedisStateStore CreateStore(
+        IServiceProvider sp,
+        IConnectionMultiplexer multiplexer,
+        bool ownsConnection) =>
+        new(
+            multiplexer,
+            ownsConnection,
+            sp.GetService<IOptions<ClientRegistryConfiguration>>(),
+            sp.GetService<TimeProvider>(),
+            sp.GetService<IOptions<RedisStateStoreOptions>>());
 }

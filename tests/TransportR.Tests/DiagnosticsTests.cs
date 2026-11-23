@@ -22,7 +22,6 @@ public class DiagnosticsTests
     {
         var hubMeterFactory = new TrackingMeterFactory();
         var hubMeasurements = new ConcurrentQueue<(string Name, long LongValue, int IntValue, KeyValuePair<string, object?>[] Tags)>();
-        var clientMeasurements = new ConcurrentQueue<(string Name, long LongValue, int IntValue, KeyValuePair<string, object?>[] Tags)>();
         var activities = new ConcurrentQueue<Activity>();
 
         using var hubMeterListener = new MeterListener
@@ -40,22 +39,6 @@ public class DiagnosticsTests
         hubMeterListener.SetMeasurementEventCallback<int>((inst, val, tags, _) =>
             hubMeasurements.Enqueue((inst.Name, 0, val, tags.ToArray())));
         hubMeterListener.Start();
-
-        using var clientMeterListener = new MeterListener
-        {
-            InstrumentPublished = (instrument, listener) =>
-            {
-                if (instrument.Meter.Name == TransportRClientDiagnostics.MeterName)
-                {
-                    listener.EnableMeasurementEvents(instrument);
-                }
-            }
-        };
-        clientMeterListener.SetMeasurementEventCallback<long>((inst, val, tags, _) =>
-            clientMeasurements.Enqueue((inst.Name, val, 0, tags.ToArray())));
-        clientMeterListener.SetMeasurementEventCallback<int>((inst, val, tags, _) =>
-            clientMeasurements.Enqueue((inst.Name, 0, val, tags.ToArray())));
-        clientMeterListener.Start();
 
         using var activityListener = new ActivityListener
         {
@@ -127,19 +110,6 @@ public class DiagnosticsTests
             m.Name == "transportr.hub.transfers.ended" &&
             m.Tags.Any(t => t.Key == "transportr.end_reason" && (string?)t.Value == "completed"));
         Assert.Contains(hubMeasurements, m => m.Name == "transportr.hub.transfers.active" && m.IntValue == 0);
-
-        // Client metrics (bytes & completion)
-        Assert.Contains(clientMeasurements, m =>
-            m.Name == "transportr.client.bytes.transferred" &&
-            m.LongValue > 0 &&
-            m.Tags.Any(t => t.Key == "transportr.direction" && (string?)t.Value == "sending"));
-        Assert.Contains(clientMeasurements, m =>
-            m.Name == "transportr.client.bytes.transferred" &&
-            m.LongValue > 0 &&
-            m.Tags.Any(t => t.Key == "transportr.direction" && (string?)t.Value == "receiving"));
-        Assert.Contains(clientMeasurements, m =>
-            m.Name == "transportr.client.transfers.completed" &&
-            m.Tags.Any(t => t.Key == "transportr.outcome" && (string?)t.Value == "completed"));
 
         // Activities for this specific transfer
         Assert.Contains(activities, a =>
@@ -231,11 +201,10 @@ public class DiagnosticsTests
     }
 
     [Fact]
-    public async Task HostTermination_RecordsHubEndReasonAndClientFailureCategory()
+    public async Task HostTermination_RecordsHubEndReason()
     {
         var hubMeterFactory = new TrackingMeterFactory();
         var hubEndReasons = new ConcurrentQueue<string?>();
-        var clientCompletedTags = new ConcurrentQueue<KeyValuePair<string, object?>[]>();
 
         using var hubListener = new MeterListener
         {
@@ -258,19 +227,6 @@ public class DiagnosticsTests
             }
         });
         hubListener.Start();
-
-        using var clientListener = new MeterListener
-        {
-            InstrumentPublished = (instrument, listener) =>
-            {
-                if (instrument.Meter.Name == TransportRClientDiagnostics.MeterName && instrument.Name == "transportr.client.transfers.completed")
-                {
-                    listener.EnableMeasurementEvents(instrument);
-                }
-            }
-        };
-        clientListener.SetMeasurementEventCallback<long>((_, _, tags, _) => clientCompletedTags.Enqueue(tags.ToArray()));
-        clientListener.Start();
 
         using var host = TestHubServerFactory.CreateHost(services =>
         {
@@ -306,24 +262,13 @@ public class DiagnosticsTests
 
         await host.Services.GetRequiredService<ITransferTerminator>().TerminateAsync(send.TransferId);
 
-        await Assert.ThrowsAsync<TransferFailedException>(async () =>
+        var ex = await Assert.ThrowsAsync<TransferFailedException>(async () =>
         {
             await foreach (var _ in receive.ReceiveAsync()) { }
         });
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (!clientCompletedTags.Any(tags =>
-                   tags.Any(t => t.Key == "transportr.outcome" && (string?)t.Value == "failed")
-                   && tags.Any(t => t.Key == "transportr.failure_category" && (string?)t.Value == nameof(TransferFailureCategory.EndedByHub)))
-               && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(20);
-        }
-
+        Assert.Equal(TransferFailureCategory.EndedByHub, ex.Category);
         Assert.Contains("host", hubEndReasons);
-        Assert.Contains(clientCompletedTags, tags =>
-            tags.Any(t => t.Key == "transportr.outcome" && (string?)t.Value == "failed")
-            && tags.Any(t => t.Key == "transportr.failure_category" && (string?)t.Value == nameof(TransferFailureCategory.EndedByHub)));
     }
 
     private sealed class TrackingMeterFactory : IMeterFactory

@@ -411,7 +411,7 @@ public class RedisStateStoreTests : IAsyncLifetime
     }
 
     [RedisAvailableFact]
-    public void UseRedisStore_SupportsExistingDiMultiplexer_Instance_AndConfigurationOptions()
+    public async Task UseRedisStore_SupportsExistingDiMultiplexer_Instance_AndConfigurationOptions()
     {
         // Existing multiplexer in DI
         var servicesFromDi = new ServiceCollection();
@@ -424,22 +424,29 @@ public class RedisStateStoreTests : IAsyncLifetime
             Assert.Equal("di:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
         }
 
-        // Provided multiplexer instance
+        // Provided multiplexer instance must not overwrite a pre-existing DI multiplexer
+        var hostMultiplexer = System.Reflection.DispatchProxy.Create<IConnectionMultiplexer, NoopMultiplexerProxy>();
         var servicesInstance = new ServiceCollection();
+        servicesInstance.AddSingleton(hostMultiplexer);
         servicesInstance.AddDataHub().UseRedisStore(_multiplexer, o => o.KeyPrefix = "inst:");
         using (var sp = servicesInstance.BuildServiceProvider())
         {
-            Assert.Same(_multiplexer, sp.GetRequiredService<IConnectionMultiplexer>());
-            Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            Assert.Same(hostMultiplexer, sp.GetRequiredService<IConnectionMultiplexer>());
+            var store = Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
+            var probeId = Guid.NewGuid();
+            await store.SaveClientAsync(CreateClient(probeId, "conn-inst"));
+            Assert.NotNull(await store.GetClientAsync(probeId));
             Assert.Equal("inst:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
         }
 
-        // ConfigurationOptions overload
+        // ConfigurationOptions overload must not overwrite a pre-existing DI multiplexer
         var configOptions = ConfigurationOptions.Parse(_redis.ConnectionString);
         var servicesConfig = new ServiceCollection();
+        servicesConfig.AddSingleton(hostMultiplexer);
         servicesConfig.AddDataHub().UseRedisStore(configOptions, o => o.KeyPrefix = "cfg:");
         using (var sp = servicesConfig.BuildServiceProvider())
         {
+            Assert.Same(hostMultiplexer, sp.GetRequiredService<IConnectionMultiplexer>());
             Assert.IsType<RedisStateStore>(sp.GetRequiredService<IStateStore>());
             Assert.Equal("cfg:", sp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value.KeyPrefix);
         }
@@ -449,5 +456,10 @@ public class RedisStateStoreTests : IAsyncLifetime
         servicesInvalid.AddDataHub().UseRedisStore(_multiplexer, o => o.KeyPrefix = null!);
         using var invalidSp = servicesInvalid.BuildServiceProvider();
         Assert.Throws<OptionsValidationException>(() => invalidSp.GetRequiredService<IOptions<RedisStateStoreOptions>>().Value);
+    }
+
+    private class NoopMultiplexerProxy : System.Reflection.DispatchProxy
+    {
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args) => null;
     }
 }

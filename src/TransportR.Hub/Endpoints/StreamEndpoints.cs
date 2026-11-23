@@ -475,7 +475,7 @@ internal sealed class StreamEndpoints
         }
 
         _logger.LogInformation("Transfer {TransferId} ended at the request of one of its participants", transferId);
-        await _terminator.TerminateWithReasonAsync(transferId, TransferEndReasons.Abort, context.RequestAborted);
+        await _terminator.TerminateAsync(transferId, TransferEndReasons.Abort, context.RequestAborted);
         return Results.NoContent();
     }
 

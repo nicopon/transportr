@@ -73,8 +73,8 @@ internal sealed record AffinityRedirect(string CookieName, string Token);
 
 /// <summary>
 /// The answer to a request the hub could not carry out, with a 409; the message is written for the
-/// client, and <see cref="Code"/> carries its <see cref="HubRequestFailureCategory"/>. A 429 or a 400
-/// carries none: the status says the first, and nothing reads the body of the second.
+/// client, and <see cref="Code"/> carries its <see cref="HubRequestFailureCategory"/>. A 429, a 503,
+/// or a 400 carries none: the status says the first two, and nothing reads the body of the last.
 /// </summary>
 internal sealed record HubError(string Message, HubErrorCode Code = HubErrorCode.Absent);
 

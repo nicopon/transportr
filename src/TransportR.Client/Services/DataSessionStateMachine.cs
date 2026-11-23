@@ -11,7 +11,6 @@ internal class DataSessionStateMachine
     private volatile SessionState _currentState = SessionState.Idle;
     private readonly ILogger _logger;
     private readonly string _transferId;
-    private readonly Action<SessionState, SessionState>? _onTransition;
     private readonly object _lock = new();
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _completing = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -37,11 +36,10 @@ internal class DataSessionStateMachine
     /// </summary>
     public bool IsCompleting => _currentState == SessionState.ReceiverCompleteReceived;
 
-    public DataSessionStateMachine(string transferId, ILogger logger, Action<SessionState, SessionState>? onTransition = null)
+    public DataSessionStateMachine(string transferId, ILogger logger)
     {
         _transferId = transferId;
         _logger = logger;
-        _onTransition = onTransition;
     }
 
     /// <summary>
@@ -52,7 +50,6 @@ internal class DataSessionStateMachine
     /// <returns>True if transition valid and executed, False if ignored.</returns>
     public bool TransitionTo(SessionState newState)
     {
-        SessionState oldState;
         lock (_lock)
         {
             if (_currentState == newState) return false;
@@ -69,11 +66,9 @@ internal class DataSessionStateMachine
                 return false;
             }
 
-            oldState = Enter(newState);
+            Enter(newState);
+            return true;
         }
-
-        _onTransition?.Invoke(oldState, newState);
-        return true;
     }
 
     /// <summary>
@@ -85,17 +80,14 @@ internal class DataSessionStateMachine
     /// <returns>True when the session moved to <see cref="SessionState.Reconnecting"/>.</returns>
     public bool OnStreamsLost()
     {
-        SessionState oldState;
         lock (_lock)
         {
             if (IsFinal(_currentState)
                 || _currentState is SessionState.Reconnecting or SessionState.ReceiverCompleteReceived) return false;
 
-            oldState = Enter(SessionState.Reconnecting);
+            Enter(SessionState.Reconnecting);
+            return true;
         }
-
-        _onTransition?.Invoke(oldState, SessionState.Reconnecting);
-        return true;
     }
 
     /// <summary>
@@ -105,16 +97,13 @@ internal class DataSessionStateMachine
     /// <returns>True when the release stopped a session that had not, which abandons its transfer.</returns>
     public bool OnReleased()
     {
-        SessionState oldState;
         lock (_lock)
         {
             if (IsFinal(_currentState)) return false;
 
-            oldState = Enter(SessionState.Disposed);
+            Enter(SessionState.Disposed);
+            return true;
         }
-
-        _onTransition?.Invoke(oldState, SessionState.Disposed);
-        return true;
     }
 
     /// <summary>
@@ -124,16 +113,13 @@ internal class DataSessionStateMachine
     /// <returns>True when the abort stopped a session that had not yet reached an outcome.</returns>
     public bool OnAborted()
     {
-        SessionState oldState;
         lock (_lock)
         {
             if (IsFinal(_currentState)) return false;
 
-            oldState = Enter(SessionState.Failed);
+            Enter(SessionState.Failed);
+            return true;
         }
-
-        _onTransition?.Invoke(oldState, SessionState.Failed);
-        return true;
     }
 
     /// <summary>
@@ -144,23 +130,19 @@ internal class DataSessionStateMachine
     /// <returns>True when the hub's ending stopped a session that had not yet reached an outcome.</returns>
     public bool OnEndedByHub()
     {
-        SessionState oldState;
         lock (_lock)
         {
             if (IsFinal(_currentState)) return false;
 
-            oldState = Enter(SessionState.Failed);
+            Enter(SessionState.Failed);
+            return true;
         }
-
-        _onTransition?.Invoke(oldState, SessionState.Failed);
-        return true;
     }
 
     // Called under the lock: the state, the log line and the signal that the session stopped are one step.
-    private SessionState Enter(SessionState state)
+    private void Enter(SessionState state)
     {
-        var oldState = _currentState;
-        _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", oldState, state, _transferId);
+        _logger.LogInformation("State Transition: {Old} -> {New} (Transfer={TransferId})", _currentState, state, _transferId);
         _currentState = state;
 
         if (state == SessionState.ReceiverCompleteReceived)
@@ -172,8 +154,6 @@ internal class DataSessionStateMachine
         {
             _stopped.TrySetResult();
         }
-
-        return oldState;
     }
 
     // "No transition may leave this state", which is not the same question as "did the transfer

@@ -186,18 +186,21 @@ public class TokenRenewalRouteTests
         var streams = new ClientStreams(clock);
         var transfers = new TransferManager(store, clock);
         var affinity = Options.Create(new AffinityOptions());
+        var drain = new HubDrainState();
         var endpoints = new ClientEndpoints(
             store,
             new JwtIdentityProvider(),
             policy,
             reconciler,
             streams,
-            new TransferInitiator(streams, store, transfers, policy, affinity, Options.Create(new AccessOptions()), NullLogger<TransferInitiator>.Instance, clock),
+            new TransferInitiator(streams, store, transfers, policy, affinity, Options.Create(new AccessOptions()), NullLogger<TransferInitiator>.Instance, clock, drain),
             transfers,
             affinity,
             Options.Create(new DataPlaneConfiguration()),
             clock,
-            NullLogger<ClientEndpoints>.Instance);
+            NullLogger<ClientEndpoints>.Instance,
+            drain,
+            Options.Create(new ClientRegistryConfiguration()));
         var httpContext = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(

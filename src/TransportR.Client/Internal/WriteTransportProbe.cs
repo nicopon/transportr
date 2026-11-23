@@ -155,8 +155,7 @@ internal sealed class WriteTransportProbe : IAsyncDisposable
     {
         using (socket)
         {
-            using var boundCts = new CancellationTokenSource(_options.WebSocketOpenBound, _options.TimeProvider);
-            using var closing = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
+            using var closing = new LinkedTimeout(_options.WebSocketOpenBound, _options.TimeProvider, token);
             try
             {
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, closing.Token);

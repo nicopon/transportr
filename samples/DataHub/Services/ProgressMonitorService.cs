@@ -3,15 +3,13 @@ namespace DataHub.Services;
 public class ProgressMonitorService
 {
     private readonly ILogger<ProgressMonitorService> _logger;
-    private readonly DataProxyMetrics _metrics;
     private TransferProgress? _hub;
     private readonly IConfiguration _configuration;
     private readonly bool _showProgress;
 
-    public ProgressMonitorService(ILogger<ProgressMonitorService> logger, DataProxyMetrics metrics, IConfiguration configuration)
+    public ProgressMonitorService(ILogger<ProgressMonitorService> logger, IConfiguration configuration)
     {
         _logger = logger;
-        _metrics = metrics;
         _configuration = configuration;
         _showProgress = _configuration.GetValue<bool>("ShowProgress", false);
     }
@@ -26,9 +24,6 @@ public class ProgressMonitorService
         });
 
         Interlocked.Add(ref tracker.TotalCompressedBytes, bytes);
-
-        // OpenTelemetry Metrics
-        _metrics.BytesTransferred.Add(bytes);
 
         var now = DateTime.UtcNow;
         if ((now - tracker.LastLogTime).TotalMilliseconds >= 1000)

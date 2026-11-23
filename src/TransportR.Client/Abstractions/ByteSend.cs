@@ -109,8 +109,9 @@ public abstract class ByteSend : Transfer, IAsyncDisposable
     /// (such as <c>GZipStream</c> or <c>JsonSerializer</c>).
     /// </summary>
     /// <remarks>
-    /// Disposing the returned stream does not call <see cref="CompleteAsync"/> or dispose this handle;
-    /// complete and dispose the <see cref="ByteSend"/> after the wrapper stream is disposed.
+    /// Disposing the returned stream does not call <see cref="CompleteAsync"/> or dispose this handle,
+    /// and <c>Flush</c>/<c>FlushAsync</c> are no-ops (flushing follows batch size and timeout); complete
+    /// and dispose the <see cref="ByteSend"/> after the wrapper stream is disposed.
     /// </remarks>
     public Stream AsStream() => new ByteSendStream(this);
 

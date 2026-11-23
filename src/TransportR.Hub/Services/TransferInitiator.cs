@@ -43,7 +43,7 @@ internal class TransferInitiator : ITransferInitiator
     private readonly AffinityOptions _affinityOptions;
     private readonly ILogger<TransferInitiator> _logger;
     private readonly TimeProvider _time;
-    private readonly HubDrainState? _drainState;
+    private readonly HubDrainState _drainState;
 
     public TransferInitiator(
         ClientStreams streams,
@@ -54,7 +54,7 @@ internal class TransferInitiator : ITransferInitiator
         IOptions<AccessOptions> accessOptions,
         ILogger<TransferInitiator> logger,
         TimeProvider timeProvider,
-        HubDrainState? drainState = null)
+        HubDrainState drainState)
     {
         _maxHandshakes = accessOptions.Value.MaxHandshakesPerClient;
         _maxOpenTransfers = accessOptions.Value.MaxOpenTransfersPerClient;
@@ -87,7 +87,7 @@ internal class TransferInitiator : ITransferInitiator
                 $"The handshake timeout must be from zero to {TransferManager.SessionTtl}.");
         }
 
-        if (_drainState?.IsDraining == true)
+        if (_drainState.IsDraining)
         {
             _logger.LogWarning("InitTransfer by host refused: the hub is shutting down");
             throw new HubRequestFailedException(HubRequestFailureCategory.Refused, "The hub is shutting down.");

@@ -101,6 +101,11 @@ public class HubHealthAndDrainTests
 
         host.Services.GetRequiredService<HubDrainState>().BeginDraining();
 
+        // Client-side InitTransferAsync translates 503 HubError to HubRequestFailureCategory.Refused.
+        var clientEx = await Assert.ThrowsAsync<HubRequestFailedException>(() =>
+            sender.InitTransferAsync(receiver.ClientId));
+        Assert.Equal(HubRequestFailureCategory.Refused, clientEx.Category);
+
         // Raw HTTP InitTransfer returns 503 Service Unavailable.
         using var rawClient = host.GetTestClient();
         using var resp = await rawClient.PostAsJsonAsync(
@@ -121,15 +126,11 @@ public class HubHealthAndDrainTests
     {
         var drain = new HubDrainState();
         var bridges = new BridgeManager(NullLoggerFactory.Instance);
-        var store = new InMemoryStateStore();
-        var manager = new TransferManager(store);
-        using var metrics = new Hub.Diagnostics.HubMetrics(new ClientStreams(TimeProvider.System), manager);
         var lifetime = new StubLifetime();
 
         var service = new HubDrainService(
             drain,
             bridges,
-            metrics,
             Options.Create(new DataPlaneConfiguration { DrainTimeoutSeconds = 5 }),
             lifetime,
             TimeProvider.System,
@@ -154,14 +155,10 @@ public class HubHealthAndDrainTests
     {
         var drain = new HubDrainState();
         var bridges = new BridgeManager(NullLoggerFactory.Instance);
-        var store = new InMemoryStateStore();
-        var manager = new TransferManager(store);
-        using var metrics = new Hub.Diagnostics.HubMetrics(new ClientStreams(TimeProvider.System), manager);
 
         var service = new HubDrainService(
             drain,
             bridges,
-            metrics,
             Options.Create(new DataPlaneConfiguration { DrainTimeoutSeconds = 1 }),
             new StubLifetime(),
             TimeProvider.System,

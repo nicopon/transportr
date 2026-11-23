@@ -75,7 +75,7 @@ internal class TransferCleanupService : BackgroundService
                 _logger.LogWarning("Transfer {TransferId} INACTIVE (LastActivity: {LastActivity}). Terminating...",
                     transfer.TransferId, transfer.LastActivityUtc);
 
-                await _terminator.TerminateWithReasonAsync(transfer.TransferId, TransferEndReasons.Inactivity, ct);
+                await _terminator.TerminateAsync(transfer.TransferId, TransferEndReasons.Inactivity, ct);
                 continue;
             }
 
@@ -90,7 +90,7 @@ internal class TransferCleanupService : BackgroundService
                     transfer.TransferId, transfer.LastProgressUtc,
                     transfer.ItemsSent, transfer.AcksReceived, transfer.ItemsReceived, transfer.AcksSent);
 
-                await _terminator.TerminateWithReasonAsync(transfer.TransferId, TransferEndReasons.Stalled, ct);
+                await _terminator.TerminateAsync(transfer.TransferId, TransferEndReasons.Stalled, ct);
             }
         }
     }

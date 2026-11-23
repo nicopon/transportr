@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
 using TransportR.Client.Batching;
-using TransportR.Client.Diagnostics;
 using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 using TransportR.Protocol;
@@ -387,7 +386,6 @@ internal class HttpStreamManager : IAsyncDisposable
     private void GiveUpOnWebSocket(string reason)
     {
         _webSocketUnavailable = reason;
-        ClientMetrics.RecordWriteTransportFallback();
         _config.Logger.LogWarning("No WebSocket for the write stream of Transfer={TransferId}: {Reason}", _transferId, reason);
     }
 

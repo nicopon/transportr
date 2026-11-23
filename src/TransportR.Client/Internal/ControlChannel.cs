@@ -293,12 +293,15 @@ internal sealed class ControlChannel : IAsyncDisposable
             throw new HubRequestFailedException(category, error.Message);
         }
 
-        // A proxy in front of the hub that limits the rate answers 429 too, without the hub's error.
-        if (response.StatusCode == HttpStatusCode.TooManyRequests
+        // A proxy in front of the hub that limits the rate or answers 503 answers without the hub's JSON error.
+        if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable
             && response.Content.Headers.ContentType?.MediaType == MediaTypeNames.Application.Json
             && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { Message: { } message })
         {
-            throw new HubRequestFailedException(HubRequestFailureCategory.RateLimited, message);
+            var category = response.StatusCode == HttpStatusCode.TooManyRequests
+                ? HubRequestFailureCategory.RateLimited
+                : HubRequestFailureCategory.Refused;
+            throw new HubRequestFailedException(category, message);
         }
 
         response.EnsureSuccessStatusCode();

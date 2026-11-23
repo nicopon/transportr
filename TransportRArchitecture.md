@@ -29,7 +29,7 @@ TransportR.Storage.Redis/                # Redis State Store implementation
 | **Dumb Pipe Architecture** | Hub forwards variable-length opaque bytes without deserialization |
 | **Reliable Delivery** | Packet-level ACK with automatic retry |
 | **Group-based Access** | Groups taken from token scopes decide which client may send to which |
-| **Observability** | Built-in BCL `Meter` metrics and `ActivitySource` tracing on hub and client, plus `IHubProgressMonitor` and `GetTransfers()` |
+| **Observability** | Hub BCL `Meter` metrics, hub and client `ActivitySource` tracing, plus `IHubProgressMonitor` and `GetTransfers()` |
 
 ---
 
@@ -264,26 +264,18 @@ write per heartbeat, for a case the deployment already excludes.
 | Interface | Purpose | Location |
 |-----------|---------|----------|
 | `IDataSender<T>` | Initiate transfers, discover receivers | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
-| `IDataReceiver<T>` | Receive transfers via event | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
+| `IDataReceiver<T>` | Receive transfers via callback | [ITransportRClient.cs](src/TransportR.Client/Abstractions/ITransportRClient.cs) |
 | `IBatchSerializer<T>` | Pluggable serialization | [IBatchSerializer.cs](src/TransportR.Client/Abstractions/IBatchSerializer.cs) |
 | `IHubProgressMonitor` | Hub-side monitoring (bytes and write transports) | [IHubProgressMonitor.cs](src/TransportR.Hub/Abstractions/IHubProgressMonitor.cs) |
 
 ## Observability
 
-Both `TransportR.Hub` and `TransportR.Client` emit built-in BCL `System.Diagnostics.Metrics.Meter` metrics and
-`System.Diagnostics.ActivitySource` spans with zero external dependencies, alongside the programmatic hooks
-`IHubProgressMonitor` (hub) and `GetTransfers()` (`TransferInfo`, client):
-
-- **Hub (`TransportRHubDiagnostics.MeterName` / `ActivitySourceName` = `"TransportR.Hub"`)**: gauges
-  `transportr.hub.clients.connected` and `transportr.hub.transfers.active`; counters
-  `transportr.hub.bytes.relayed`, `transportr.hub.write_streams.opened` (`transportr.transport`,
-  `transportr.connection_type`), and `transportr.hub.transfers.ended` (`transportr.end_reason`); activity
-  `"transportr.hub.init_transfer"`.
-- **Client (`TransportRClientDiagnostics.MeterName` / `ActivitySourceName` = `"TransportR.Client"`)**: up/down counter
-  `transportr.client.transfers.active`; counters `transportr.client.transfers.completed` (`transportr.direction`,
-  `transportr.outcome`, `transportr.failure_category`), `transportr.client.bytes.transferred`,
-  `transportr.client.reconnections`, and `transportr.client.write_transport.fallbacks`; activity
-  `"transportr.client.init_transfer"`, with W3C `traceparent`/`tracestate` propagated on WebSocket upgrades.
+`TransportR.Hub` emits built-in BCL `System.Diagnostics.Metrics.Meter` metrics and `System.Diagnostics.ActivitySource`
+spans with zero external dependencies; `TransportR.Client` emits `ActivitySource` tracing (propagating W3C
+`traceparent`/`tracestate` headers on WebSocket upgrades as well as HTTP requests), alongside `IHubProgressMonitor` (hub)
+and `GetTransfers()` (`TransferInfo`, client). See [the hub README](src/TransportR.Hub/README.md) and
+[the client README](src/TransportR.Client/README.md) for the `TransportRHubDiagnostics` and
+`TransportRClientDiagnostics` identifiers and instrument names.
 
 The hub announces the transport of each write stream it takes on, to its log and to
 `IHubProgressMonitor.OnWriteStreamOpened`, and of each write-transport probe to `OnWriteTransportProbed`.

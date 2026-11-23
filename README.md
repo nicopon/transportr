@@ -99,19 +99,16 @@ The hub picks no serializer: it forwards opaque bytes and never decodes a payloa
 ### 2. A sender
 
 ```csharp
-using Microsoft.Extensions.Logging;
 using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
 var hubUrl = "http://localhost:5252";
-using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
 
 // Connect to hub
 await using var sender = new TransportRClientBuilder<Order>()
     .WithUrl(hubUrl)
     .WithMessagePackSerialization()
     .WithMaxInFlightBatches(8)              // size backpressure to your payload; see Configuration
-    .WithLoggerFactory(loggerFactory)
     .Build();
 
 // In dev mode a client names its groups; with authentication they come from its token.
@@ -134,20 +131,17 @@ otherwise, whose `Category` says why ("Failures" in the [client README](./src/Tr
 ### 3. A receiver
 
 ```csharp
-using Microsoft.Extensions.Logging;
 using TransportR.Client;
 using TransportR.Serialization.MessagePack;
 
 var hubUrl = "http://localhost:5252";
 using var stop = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
-using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
 
 await using var receiver = new TransportRClientBuilder<Order>()
     .WithUrl(hubUrl)
     .WithMessagePackSerialization()
     .WithReceiveCapacity(maxItems: 10_000)  // size backpressure to your payload; see Configuration
-    .WithLoggerFactory(loggerFactory)
     .Build();
 
 receiver.OnTransferStarted(async transfer =>
@@ -226,7 +220,6 @@ The variables used by `scripts/` belong to the samples, not to the packages.
 | `WithMaxBatchBytes(bytes)` | `256 MiB` | The largest batch on the wire, at both ends: a receiver fails the transfer on a larger one |
 | `WithWriteTransport(policy)` | `PreferWebSocket` | What carries a write stream: a WebSocket, else segments; `RequireWebSocket` fails without one, `SegmentsOnly` never asks |
 | `ConfigureHttpHandler(configure)` | none | The `SocketsHttpHandler` of every request, for a proxy, a client certificate or a certificate authority: `Build()` refuses cookies and automatic decompression |
-| `WithHttpMessageHandler(handler, disposeHandler)` | none | Supplies a custom `HttpMessageHandler` (such as `TestServer.CreateHandler()` or a `DelegatingHandler`); mutually exclusive with `ConfigureHttpHandler` |
 | `WithEndToEndEncryption(...)` | off | Seals every batch from one end to the other, with an optional pre-shared key; both ends set it alike |
 
 **Set both backpressure bounds.** Out of the box there is none, and either bound alone moves the backlog to the

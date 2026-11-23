@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using TransportR.Hub.Diagnostics;
 
 namespace TransportR.Hub.Services;
 
@@ -11,7 +10,6 @@ internal sealed class HubDrainService : IHostedService
 
     private readonly HubDrainState _drain;
     private readonly BridgeManager _bridgeManager;
-    private readonly HubMetrics _metrics;
     private readonly TimeSpan _drainTimeout;
     private readonly IHostApplicationLifetime _lifetime;
     private readonly TimeProvider _time;
@@ -21,7 +19,6 @@ internal sealed class HubDrainService : IHostedService
     public HubDrainService(
         HubDrainState drain,
         BridgeManager bridgeManager,
-        HubMetrics metrics,
         IOptions<DataPlaneConfiguration> dataPlane,
         IHostApplicationLifetime lifetime,
         TimeProvider time,
@@ -29,7 +26,6 @@ internal sealed class HubDrainService : IHostedService
     {
         _drain = drain;
         _bridgeManager = bridgeManager;
-        _metrics = metrics;
         _drainTimeout = TimeSpan.FromSeconds(dataPlane.Value.DrainTimeoutSeconds);
         _lifetime = lifetime;
         _time = time;

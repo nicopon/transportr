@@ -331,26 +331,14 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Supplies the <see cref="HttpMessageHandler"/> used for the client's HTTP requests, such as
-    /// <c>TestServer.CreateHandler()</c> in integration tests or a custom <see cref="DelegatingHandler"/>.
+    /// Supplies a custom <see cref="HttpMessageHandler"/> for the client's requests (for example
+    /// <c>TestServer.CreateHandler()</c> or a <see cref="DelegatingHandler"/> pipeline).
     /// </summary>
-    /// <param name="handler">The handler to use.</param>
-    /// <param name="disposeHandler">
-    /// Whether disposing the client disposes <paramref name="handler"/>. Defaults to <c>false</c>.
-    /// </param>
     /// <remarks>
-    /// <para>
-    /// Mutually exclusive with <see cref="ConfigureHttpHandler"/>: <see cref="Build"/> throws
-    /// <see cref="InvalidOperationException"/> if both are configured. Because <c>TestServer</c> does
-    /// not relay WebSocket upgrades through <c>CreateHandler()</c>, pair it with
-    /// <see cref="WithWriteTransport"/> set to <see cref="WriteTransportPolicy.SegmentsOnly"/> (or use
-    /// Kestrel on loopback when testing WebSockets).
-    /// </para>
-    /// <para>
-    /// Any <see cref="SocketsHttpHandler"/> or <see cref="HttpClientHandler"/> in the handler chain
-    /// with <c>UseCookies</c> enabled or <c>AutomaticDecompression</c> other than <c>None</c> is
-    /// refused at <see cref="Build"/>, as with <see cref="ConfigureHttpHandler"/>.
-    /// </para>
+    /// Mutually exclusive with <see cref="ConfigureHttpHandler"/>, enforces the same cookie and
+    /// decompression restrictions on any wrapped handler, and pairs with
+    /// <see cref="WriteTransportPolicy.SegmentsOnly"/> under <c>TestServer</c> (which does not relay
+    /// WebSocket upgrades).
     /// </remarks>
     public TransportRClientBuilder<T> WithHttpMessageHandler(HttpMessageHandler handler, bool disposeHandler = false)
     {

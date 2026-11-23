@@ -40,7 +40,7 @@ internal sealed class ClientEndpoints
     private readonly bool _exposeSubjectInDiscovery;
     private readonly TimeProvider _time;
     private readonly ILogger<ClientEndpoints> _logger;
-    private readonly HubDrainState? _drainState;
+    private readonly HubDrainState _drainState;
 
     public ClientEndpoints(
         IStateStore stateStore,
@@ -54,8 +54,8 @@ internal sealed class ClientEndpoints
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider timeProvider,
         ILogger<ClientEndpoints> logger,
-        HubDrainState? drainState = null,
-        IOptions<ClientRegistryConfiguration>? clientRegistry = null)
+        HubDrainState drainState,
+        IOptions<ClientRegistryConfiguration> clientRegistry)
     {
         _stateStore = stateStore;
         _identityProvider = identityProvider;
@@ -66,7 +66,7 @@ internal sealed class ClientEndpoints
         _transferManager = transferManager;
         _affinityOptions = affinityOptions.Value;
         _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
-        _exposeSubjectInDiscovery = clientRegistry?.Value.ExposeSubjectInDiscovery == true;
+        _exposeSubjectInDiscovery = clientRegistry.Value.ExposeSubjectInDiscovery;
         _time = timeProvider;
         _logger = logger;
         _drainState = drainState;
@@ -216,7 +216,7 @@ internal sealed class ClientEndpoints
         if (verdict != AccessVerdict.Allowed)
         {
             _logger.LogWarning("Receivers refused for client {ClientId}: {Verdict}", clientId, verdict);
-            return Results.Json(new List<ClientInfo>(), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
+            return Json(new List<ClientInfo>());
         }
 
         var all = await _stateStore.GetAllClientsAsync();
@@ -230,7 +230,7 @@ internal sealed class ClientEndpoints
         _logger.LogDebug("Receivers: [{SourceGroups}] -> {Count} authorized receivers",
             string.Join(", ", source.Groups), receivers.Count);
 
-        return Results.Json(receivers, ControlPlane.Json, statusCode: StatusCodes.Status200OK);
+        return Json(receivers);
     }
 
     /// <summary>
@@ -242,13 +242,10 @@ internal sealed class ClientEndpoints
     /// </summary>
     public async Task<IResult> InitTransferAsync(HttpContext context, Guid clientId)
     {
-        if (_drainState?.IsDraining == true)
+        if (_drainState.IsDraining)
         {
             _logger.LogWarning("InitTransfer refused for {ClientId}: the hub is shutting down", clientId);
-            return Results.Json(
-                new HubError("The hub is shutting down."),
-                ControlPlane.Json,
-                statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Json(new HubError("The hub is shutting down."), StatusCodes.Status503ServiceUnavailable);
         }
 
         var (ok, request) = await TryReadJsonAsync<InitTransferRequest>(context);
@@ -268,10 +265,7 @@ internal sealed class ClientEndpoints
             var longestTimeoutMs = TransferManager.SessionTtl.TotalMilliseconds;
             _logger.LogWarning("InitTransfer refused for {ClientId}: handshake timeout {TimeoutMs} ms is outside 0..{LongestTimeoutMs} ms",
                 clientId, request.TimeoutMs, longestTimeoutMs);
-            return Results.Json(
-                new HubError("The transfer request is not acceptable."),
-                ControlPlane.Json,
-                statusCode: StatusCodes.Status400BadRequest);
+            return Json(new HubError("The transfer request is not acceptable."), StatusCodes.Status400BadRequest);
         }
 
         if (!_initiator.TryEnterHandshake(clientId)) return TooManyTransfers();
@@ -287,29 +281,23 @@ internal sealed class ClientEndpoints
             if (target == null)
             {
                 _logger.LogWarning("InitTransfer failed: Target {TargetClientId} not found.", request.TargetClientId);
-                return Results.Json(
-                    new HubError(TransferInitiator.TargetUnavailable, HubErrorCode.Refused),
-                    ControlPlane.Json,
-                    statusCode: StatusCodes.Status409Conflict);
+                return Json(new HubError(TransferInitiator.TargetUnavailable, HubErrorCode.Refused), StatusCodes.Status409Conflict);
             }
 
             _initiator.ValidateTransferRequest(source, target);
 
             if (Redirect(context.Request, target) is { } redirect)
             {
-                return Results.Json(redirect, ControlPlane.Json, statusCode: StatusCodes.Status421MisdirectedRequest);
+                return Json(redirect, StatusCodes.Status421MisdirectedRequest);
             }
 
             var transferId = await _initiator.HandshakeAsync(source, target, handshakeTimeout,
                 requestSender: false, context.RequestAborted);
-            return Results.Json(new InitTransferResponse(transferId), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
+            return Json(new InitTransferResponse(transferId));
         }
         catch (HubRequestFailedException ex)
         {
-            return Results.Json(
-                new HubError(ex.Message, HubErrorCodes.Of(ex.Category)),
-                ControlPlane.Json,
-                statusCode: StatusCodes.Status409Conflict);
+            return Json(new HubError(ex.Message, HubErrorCodes.Of(ex.Category)), StatusCodes.Status409Conflict);
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
@@ -322,10 +310,7 @@ internal sealed class ClientEndpoints
     }
 
     private static IResult TooManyTransfers() =>
-        Results.Json(
-            new HubError(TransferInitiator.TooManyTransfers),
-            ControlPlane.Json,
-            statusCode: StatusCodes.Status429TooManyRequests);
+        Json(new HubError(TransferInitiator.TooManyTransfers), StatusCodes.Status429TooManyRequests);
 
     /// <summary>The client's answer to an event that asked for one.</summary>
     public async Task<IResult> ReplyAsync(HttpContext context, Guid clientId, Guid requestId)
@@ -427,8 +412,11 @@ internal sealed class ClientEndpoints
         // What the new token no longer grants applies now, to what this client has running.
         await _reconciler.ReconcileAsync(clientId, context.RequestAborted);
 
-        return Results.Json(new TokenRenewalResponse(renewed.TokenExpiry), ControlPlane.Json, statusCode: StatusCodes.Status200OK);
+        return Json(new TokenRenewalResponse(renewed.TokenExpiry));
     }
+
+    private static IResult Json(object value, int statusCode = StatusCodes.Status200OK) =>
+        Results.Json(value, ControlPlane.Json, statusCode: statusCode);
 
     private static async Task<(bool Ok, T? Value)> TryReadJsonAsync<T>(HttpContext context)
     {
@@ -527,8 +515,8 @@ internal sealed class ClientEndpoints
     }
 
     /// <summary>
-    /// What discovery is allowed to reveal of a registration: identity, groups, and whether its stream
-    /// is currently up. Nothing about the hub itself.
+    /// What discovery is allowed to reveal of a registration: identity, groups, disconnection marker,
+    /// and optionally the attested subject when configured. Nothing about the hub itself.
     /// </summary>
     private ClientInfo ToClientInfo(ClientRegistration client) => new()
     {

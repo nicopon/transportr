@@ -1,3 +1,4 @@
+using TransportR.Client.Internal;
 using TransportR.Client.Protocol;
 
 namespace TransportR.Client.Sessions;
@@ -28,8 +29,7 @@ internal class ReconnectionHandler : IDisposable
     /// </summary>
     public async Task<bool> ProbeConnectivityAsync(CancellationToken token)
     {
-        using var boundCts = new CancellationTokenSource(ProbeTimeout, _context.Options.TimeProvider);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
+        using var timeout = new LinkedTimeout(ProbeTimeout, _context.Options.TimeProvider, token);
         try
         {
             return await _context.ProbeAsync(_transferId, _affinity, timeout.Token);
@@ -73,8 +73,7 @@ internal class ReconnectionHandler : IDisposable
         if (_streamPongReceived == null) return -1;
 
         // Wait for Handshake Pong
-        using var boundCts = new CancellationTokenSource(_context.Options.PongTimeout, _context.Options.TimeProvider);
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
+        using var cts = new LinkedTimeout(_context.Options.PongTimeout, _context.Options.TimeProvider, token);
 
         try
         {

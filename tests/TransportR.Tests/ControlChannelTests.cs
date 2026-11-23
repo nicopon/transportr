@@ -139,6 +139,26 @@ public class ControlChannelTests
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
     }
 
+    [Fact]
+    public async Task AServiceUnavailableThatCarriesTheHubsError_IsRefused_AndOneWithout_IsNot()
+    {
+        using var fromHub = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = System.Net.Http.Json.JsonContent.Create(new HubError("The hub is shutting down."), options: ControlPlane.Json)
+        };
+        using var fromAProxy = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("<html>Unavailable</html>", Encoding.UTF8, "text/html")
+        };
+
+        var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(fromHub));
+        Assert.Equal("The hub is shutting down.", refusal.Message);
+        Assert.Equal(HubRequestFailureCategory.Refused, refusal.Category);
+
+        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxy));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, failure.StatusCode);
+    }
+
     [Theory]
     [InlineData("""{"message":"Refused."}""")]
     [InlineData("""{"message":"Refused.","code":99}""")]

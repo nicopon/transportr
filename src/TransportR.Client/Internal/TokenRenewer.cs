@@ -219,15 +219,14 @@ internal sealed class TokenRenewer : IAsyncDisposable
             return kicked;
         }
 
-        using var timer = new CancellationTokenSource(wait, _time);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timer.Token);
+        using var timeout = new LinkedTimeout(wait, _time, ct);
         try
         {
-            await _kick.WaitAsync(linked.Token);
+            await _kick.WaitAsync(timeout.Token);
             DrainKicks();
             return true;
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested && timer.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeout.TimedOut)
         {
             return false;
         }
@@ -291,8 +290,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
         var request = new HttpRequestMessage(HttpMethod.Put, _url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        using var boundCts = new CancellationTokenSource(RequestTimeout, _time);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, boundCts.Token);
+        using var timeout = new LinkedTimeout(RequestTimeout, _time, ct);
 
         TokenRenewalResponse? body;
         try

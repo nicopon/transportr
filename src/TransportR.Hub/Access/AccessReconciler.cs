@@ -84,7 +84,7 @@ internal sealed class AccessReconciler : IAccessReconciler
                 if (ended.Add(transferId))
                 {
                     _logger.LogWarning("Ending transfer {TransferId}: client {ClientId} is {Verdict}", transferId, client.ClientId, verdict);
-                    await _terminator.TerminateWithReasonAsync(transferId, TransferEndReasons.AccessRevoked, cancellationToken);
+                    await _terminator.TerminateAsync(transferId, TransferEndReasons.AccessRevoked, cancellationToken);
                 }
             }
 
@@ -121,7 +121,7 @@ internal sealed class AccessReconciler : IAccessReconciler
             if (verdict != AccessVerdict.Allowed)
             {
                 _logger.LogWarning("Ending transfer {TransferId}: {Verdict} between its participants", transferId, verdict);
-                await _terminator.TerminateWithReasonAsync(transferId, TransferEndReasons.AccessRevoked, cancellationToken);
+                await _terminator.TerminateAsync(transferId, TransferEndReasons.AccessRevoked, cancellationToken);
             }
         }
     }

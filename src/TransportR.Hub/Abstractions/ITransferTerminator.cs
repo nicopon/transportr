@@ -25,4 +25,7 @@ public interface ITransferTerminator
     /// action to take beyond what it already did.
     /// </summary>
     Task TerminateAsync(string transferId, CancellationToken cancellationToken = default);
+
+    internal Task TerminateAsync(string transferId, string reason, CancellationToken cancellationToken = default) =>
+        TerminateAsync(transferId, cancellationToken);
 }

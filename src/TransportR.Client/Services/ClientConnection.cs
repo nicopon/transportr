@@ -322,25 +322,24 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
 
         // The hub answers within the handshake timeout it was given or not at all, and the HttpClient has
         // no timeout of its own: this one deadline is all that ends a call to a hub that has gone quiet.
-        using var deadline = new CancellationTokenSource(_options.HandshakeTimeout + HandshakeMargin, _options.TimeProvider);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
+        using var deadline = new LinkedTimeout(_options.HandshakeTimeout + HandshakeMargin, _options.TimeProvider, cancellationToken);
 
         InitTransferResponse opened;
         HttpResponseMessage? response = null;
         try
         {
-            response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, linked.Token);
+            response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, deadline.Token);
             if (response.StatusCode == HttpStatusCode.MisdirectedRequest)
             {
                 // The receiver is on another instance. Only this request goes there: the client's own
                 // stream, and its other transfers, stay where they are.
-                var redirect = await response.Content.ReadFromJsonAsync<AffinityRedirect>(ControlPlane.Json, linked.Token)
+                var redirect = await response.Content.ReadFromJsonAsync<AffinityRedirect>(ControlPlane.Json, deadline.Token)
                     ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub redirected the transfer without saying where.");
                 _logger.LogInformation("The receiver is on another hub instance. Sending the transfer request there (cookie {CookieName}).", redirect.CookieName);
 
                 affinity = ControlChannel.WithCookie(affinity, redirect.CookieName, redirect.Token);
                 response.Dispose();
-                response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, linked.Token);
+                response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, deadline.Token);
 
                 if (response.StatusCode == HttpStatusCode.MisdirectedRequest)
                 {
@@ -348,13 +347,13 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                 }
             }
 
-            await ControlChannel.EnsureAcceptedAsync(response, linked.Token);
-            opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, linked.Token)
+            await ControlChannel.EnsureAcceptedAsync(response, deadline.Token);
+            opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, deadline.Token)
                 ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub opened the transfer without naming it.");
 
             activity?.SetTag("transportr.transfer.id", opened.TransferId);
         }
-        catch (OperationCanceledException ex) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (deadline.TimedOut && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "The hub did not answer the transfer request to ReceiverId={TargetId} within {Seconds}s (handshake timeout {HandshakeSeconds}s plus {MarginSeconds}s).",

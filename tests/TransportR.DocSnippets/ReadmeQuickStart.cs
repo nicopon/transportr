@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using MessagePack;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Logging;
 using TransportR.Client;
 using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
@@ -45,14 +44,11 @@ internal static class ReadmeQuickStart
     // test can point it at its own hub.
     public static async Task Sender(string hubUrl)
     {
-        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
-
         // Connect to hub
         await using var sender = new TransportRClientBuilder<Order>()
             .WithUrl(hubUrl)
             .WithMessagePackSerialization()
             .WithMaxInFlightBatches(8)              // size backpressure to your payload; see Configuration
-            .WithLoggerFactory(loggerFactory)
             .Build();
 
         // In dev mode a client names its groups; with authentication they come from its token.
@@ -74,13 +70,10 @@ internal static class ReadmeQuickStart
     // that source's token as parameters so that a test can point it at its own hub and end its wait.
     public static async Task Receiver(string hubUrl, CancellationToken stop)
     {
-        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
-
         await using var receiver = new TransportRClientBuilder<Order>()
             .WithUrl(hubUrl)
             .WithMessagePackSerialization()
             .WithReceiveCapacity(maxItems: 10_000)  // size backpressure to your payload; see Configuration
-            .WithLoggerFactory(loggerFactory)
             .Build();
 
         receiver.OnTransferStarted(async transfer =>

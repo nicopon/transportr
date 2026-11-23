@@ -31,10 +31,15 @@ public sealed class ByteStreamClientBuilder
     /// </exception>
     public ByteStreamClientBuilder(int batchBytes)
     {
+        ValidateBatchBytes(batchBytes);
+        _batchBytes = batchBytes;
+    }
+
+    internal static void ValidateBatchBytes(int batchBytes)
+    {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchBytes, 0, nameof(batchBytes));
         // A batch is its body and the 4 bytes of its length, held in one int.
         ArgumentOutOfRangeException.ThrowIfGreaterThan(batchBytes, int.MaxValue - sizeof(int), nameof(batchBytes));
-        _batchBytes = batchBytes;
     }
 
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithUrl"/>
