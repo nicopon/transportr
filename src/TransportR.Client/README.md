@@ -69,7 +69,7 @@ await sender.ConnectAsync(new[] { "senders" });
 var receivers = await sender.GetReceiversAsync("receivers");
 await using var send = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 await using var source = File.OpenRead("data.bin");
-await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), or send.AsStream() for Stream-based APIs
+await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), which copies them before it returns
 await send.CompleteAsync();               // returns once the receiver has acknowledged everything (buffered, not yet consumed)
 
 // Receiver
@@ -281,10 +281,9 @@ public interface IDataReceiver<T> : IDataClient
 ### ByteSend / ByteReceive
 
 The handles of a byte-stream transfer, which `ByteStreamClient` opens: raw bytes, no item type and no
-serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)`, `AsStream()`, and `CompleteAsync`;
-`ByteReceive` has `ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)`, `AsStream()`, and `WaitForCompletionAsync`. Both are
-abstract, like `Send<T>` and `Receive<T>`, and are disposed once the transfer has ended. Disposing the wrapper returned by
-`AsStream()` does not complete or dispose the underlying handle.
+serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)` and `CompleteAsync`;
+`ByteReceive` has `ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are
+abstract, like `Send<T>` and `Receive<T>`, and are disposed once the transfer has ended.
 
 ### Dependency injection and `TimeProvider`
 

@@ -23,7 +23,9 @@ builder.Services.AddDataHub()
 
 `UseRedisStore` accepts a connection string, `ConfigurationOptions`, an `IConnectionMultiplexer` instance, or an
 existing `IConnectionMultiplexer` in DI, each with an optional `Action<RedisStateStoreOptions>` to customize `KeyPrefix`
-(default `"transportr:"`).
+(default `"transportr:"`). The `connectionString` and `ConfigurationOptions` overloads keep their
+`IConnectionMultiplexer` private to `RedisStateStore` (without registering it in the host's DI container) and dispose
+it on shutdown.
 
 ## Features
 

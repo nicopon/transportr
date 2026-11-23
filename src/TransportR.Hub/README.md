@@ -71,19 +71,22 @@ app.Run();
 - **Two hubs or more** need the Redis state store and effective session affinity at the load balancer ("High
   Availability" in `TransportRArchitecture.md`).
 - **Health checks and graceful drain.** Register `builder.Services.AddHealthChecks().AddDataHub()` and map a readiness
-  endpoint: it probes `IStateStore` and reports `Unhealthy` as soon as the host enters shutdown. Set
-  `DataPlaneConfiguration.DrainTimeoutSeconds` (0 by default) so shutdown refuses new transfers (`503`) and waits up to
-  that bound for active bridges to finish; raise ASP.NET Core's `HostOptions.ShutdownTimeout` (30 s by default) whenever
-  `DrainTimeoutSeconds` exceeds it.
+  endpoint: it probes `IStateStore` and reports the configured failure status (`Unhealthy` by default) as soon as the
+  host enters shutdown. Entering shutdown (`ApplicationStopping`) always marks the hub draining and refuses new
+  transfers (`503` with `TransportR-Refused: 1`); `DataPlaneConfiguration.DrainTimeoutSeconds` (0 by default) sets how
+  long `StopAsync` waits for active transfers and bridges to clear. Raise `HostOptions.ShutdownTimeout` (30 s by
+  default) whenever `DrainTimeoutSeconds` exceeds it, and keep `HostOptions.ServicesStopConcurrently` disabled when
+  Kestrel must stay up during the drain.
 - **Discovery subject.** `ClientInfo.Subject` stays `null` by default; enable `ClientRegistryConfiguration.ExposeSubjectInDiscovery`
   when callers need to identify peers by their attested JWT subject during discovery.
 - **Built-in metrics and tracing.** Subscribe an OpenTelemetry or `dotnet-counters` listener to
   `TransportRHubDiagnostics.MeterName` (`"TransportR.Hub"`) and `TransportRHubDiagnostics.ActivitySourceName`
   (`"TransportR.Hub"`): clients connected, active/ended transfers (by `transportr.end_reason`), bytes relayed, write
   streams opened, and `transportr.hub.init_transfer` spans.
-- **Reference deployment templates.** `samples/DataHub/Dockerfile` provides a multi-stage `.NET 10` container image, and
-  `scripts/nginx/ws.conf.template` configures nginx for WebSocket upgrades, SSE (`proxy_buffering off`), and streaming
-  timeouts.
+- **Reference deployment templates.** `samples/DataHub/Dockerfile` builds a multi-stage `.NET 10` container image from
+  the repository root (`docker build -f samples/DataHub/Dockerfile .`). `scripts/nginx/ws.conf.template` is the
+  test-harness nginx config (`nginx-ws`, HTTP on port 80 targeting `host.docker.internal`) showing the WebSocket upgrade,
+  `proxy_buffering off`, and timeout directives to adapt with an `upstream` block and TLS in production.
 
 ### In front of the hub
 
@@ -202,8 +205,7 @@ using var host = new HostBuilder()
     .Start();
 
 // Pass host.GetTestServer().CreateHandler() via WithHttpMessageHandler with WriteTransportPolicy.SegmentsOnly
-// (TestServer does not relay WebSocket upgrades; use Kestrel on loopback to test WebSockets).
-// clock.Advance(...) runs the hub's timeouts.
+// (see the client README); clock.Advance(...) runs the hub's timeouts.
 await using var sender = new TransportRClientBuilder<Order>()
     .WithUrl("http://localhost")
     .WithHttpMessageHandler(host.GetTestServer().CreateHandler())

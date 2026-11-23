@@ -1,3 +1,4 @@
+# Build from the repository root: docker build -f samples/DataHub/Dockerfile .
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -28,7 +29,8 @@ COPY --from=build /app/publish ./
 RUN mkdir -p /app/output && chown $APP_UID:$APP_UID /app/output
 
 USER $APP_UID
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_URLS=http://+:8080 \
+    HUB_PORT=8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "DataHub.dll"]
