@@ -32,9 +32,10 @@ internal sealed class ClientBuilderState
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
     private ILoggerFactory? _loggerFactory;
+    private TimeProvider? _timeProvider;
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
-    private Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>>? _tokenProviderFactory;
+    private Func<HttpMessageHandler, ILoggerFactory, TimeProvider, Func<Task<string>>>? _tokenProviderFactory;
     private Action<SocketsHttpHandler>? _configureHttpHandler;
     private HttpMessageHandler? _customHttpHandler;
     private bool _disposeHttpHandler;
@@ -103,6 +104,12 @@ internal sealed class ClientBuilderState
 
     public void SetLoggerFactory(ILoggerFactory loggerFactory) => _loggerFactory = loggerFactory;
 
+    public void SetTimeProvider(TimeProvider timeProvider)
+    {
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        _timeProvider = timeProvider;
+    }
+
     public void SetAccessToken(string token) => _accessToken = token;
 
     public void SetTokenProvider(Func<Task<string>> provider)
@@ -111,7 +118,7 @@ internal sealed class ClientBuilderState
         _tokenProviderFactory = null;
     }
 
-    public void SetTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
+    public void SetTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, TimeProvider, Func<Task<string>>> factory)
     {
         _tokenProviderFactory = factory;
         _tokenProvider = null;
@@ -196,6 +203,7 @@ internal sealed class ClientBuilderState
         }
 
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
+        var timeProvider = _timeProvider ?? TimeProvider.System;
 
         var options = new ClientOptions
         {
@@ -203,7 +211,8 @@ internal sealed class ClientBuilderState
             MaxInFlightBatches = _maxInFlightBatches,
             WriteTransportPolicy = _writeTransportPolicy,
             ProbeWriteTransport = _probeWriteTransport,
-            EndToEndEncryption = _endToEndEncryption
+            EndToEndEncryption = _endToEndEncryption,
+            TimeProvider = timeProvider
         };
 
         options.ReceiveBufferCapacity = ReceiveCapacity;
@@ -240,7 +249,7 @@ internal sealed class ClientBuilderState
             options,
             loggerFactory.CreateLogger<ControlChannel>(),
             _accessToken,
-            _tokenProviderFactory?.Invoke(httpHandler, loggerFactory) ?? _tokenProvider);
+            _tokenProviderFactory?.Invoke(httpHandler, loggerFactory, timeProvider) ?? _tokenProvider);
 
         return new ClientWiring(channel, options, dataUrl, httpClient);
     }

@@ -38,7 +38,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     private readonly WriteTransportProbe? _probe;
 
     private bool _registered;
-    private Timer? _presenceTimer;
+    private ITimer? _presenceTimer;
     private TokenRenewer? _renewer;
 
     // Held by whoever registers this client with the hub, so that two registrations do not overlap;
@@ -180,7 +180,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     {
         if (_channel.HasTokenProvider)
         {
-            _renewer ??= new TokenRenewer(_channel, _options.TokenRefreshThreshold, _logger);
+            _renewer ??= new TokenRenewer(_channel, _options.TokenRefreshThreshold, _logger, _options.TimeProvider);
             _renewer.Start();
         }
         else if (_channel.TokenExpiry is { } expiry)
@@ -205,8 +205,11 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     {
         if (_presenceTimer != null) return;
 
-        var interval = (int)_options.PresenceHeartbeatInterval.TotalMilliseconds;
-        _presenceTimer = new Timer(async _ => await SendPresenceHeartbeatAsync(), null, interval, interval);
+        _presenceTimer = _options.TimeProvider.CreateTimer(
+            async _ => await SendPresenceHeartbeatAsync(),
+            null,
+            _options.PresenceHeartbeatInterval,
+            _options.PresenceHeartbeatInterval);
     }
 
     private async Task SendPresenceHeartbeatAsync()
@@ -219,7 +222,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
             if (!_channel.IsOpen) return;
 
             // Bounded by the next beat: a hub that does not answer must not hold the turn a refresh waits for.
-            using var timeout = new CancellationTokenSource(_options.PresenceHeartbeatInterval);
+            using var timeout = new CancellationTokenSource(_options.PresenceHeartbeatInterval, _options.TimeProvider);
             var known = await _channel.IsKnownAsync(timeout.Token);
             if (!known)
             {
@@ -319,7 +322,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
 
         // The hub answers within the handshake timeout it was given or not at all, and the HttpClient has
         // no timeout of its own: this one deadline is all that ends a call to a hub that has gone quiet.
-        using var deadline = new CancellationTokenSource(_options.HandshakeTimeout + HandshakeMargin);
+        using var deadline = new CancellationTokenSource(_options.HandshakeTimeout + HandshakeMargin, _options.TimeProvider);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
 
         InitTransferResponse opened;
@@ -386,7 +389,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                     s.ItemsProcessed,
                     s.BytesTransferred,
                     s.StartedAt,
-                    DateTime.UtcNow - s.StartedAt,
+                    _options.TimeProvider.GetUtcNow().UtcDateTime - s.StartedAt,
                     s.AcksReceived,
                     s.AcksSent,
                     s.WriteTransport,

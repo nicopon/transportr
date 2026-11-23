@@ -10,7 +10,8 @@ namespace TransportR.Client.Batching;
 internal sealed class ByteBatchSource(
     int batchBytes,
     int flushIntervalMs,
-    RecyclableMemoryStreamManager streams) : IBatchSource
+    RecyclableMemoryStreamManager streams,
+    TimeProvider? timeProvider = null) : IBatchSource
 {
     private ByteStreamAccumulator? _accumulator;
 
@@ -23,7 +24,7 @@ internal sealed class ByteBatchSource(
         _accumulator ?? throw new InvalidOperationException("The source is not open.");
 
     public void Open(SemaphoreSlim? inFlightSlots, Action releaseSlot) =>
-        _accumulator = new ByteStreamAccumulator(batchBytes, flushIntervalMs, streams, inFlightSlots, releaseSlot);
+        _accumulator = new ByteStreamAccumulator(batchBytes, flushIntervalMs, streams, inFlightSlots, releaseSlot, timeProvider);
 
     public void StartFlushInterval() => Accumulator.StartFlushInterval();
 

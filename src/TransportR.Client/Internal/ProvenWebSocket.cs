@@ -29,15 +29,17 @@ internal static class ProvenWebSocket
         Func<string?, ClientWebSocket> newSocket,
         TimeSpan bound,
         ILogger logger,
-        CancellationToken token)
+        CancellationToken token,
+        TimeProvider? timeProvider = null)
     {
+        var time = timeProvider ?? TimeProvider.System;
         var refreshed = false;
         while (true)
         {
             var accessToken = await transport.GetAccessTokenAsync(refreshed);
             var socket = newSocket(accessToken);
-            using var opening = CancellationTokenSource.CreateLinkedTokenSource(token);
-            opening.CancelAfter(bound);
+            using var boundCts = new CancellationTokenSource(bound, time);
+            using var opening = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
 
             var proven = false;
             try

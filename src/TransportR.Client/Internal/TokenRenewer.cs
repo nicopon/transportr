@@ -37,6 +37,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
     private readonly string _url;
     private readonly TimeSpan _threshold;
     private readonly ILogger _logger;
+    private readonly TimeProvider _time;
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _kick = new(0);
     private readonly object _lock = new();
@@ -54,12 +55,13 @@ internal sealed class TokenRenewer : IAsyncDisposable
     /// Where tokens come from, and what the renewal goes through: it carries the client's own
     /// affinity, so that the instance holding the client's stream judges what the token changes.
     /// </param>
-    public TokenRenewer(ControlChannel channel, TimeSpan threshold, ILogger logger)
+    public TokenRenewer(ControlChannel channel, TimeSpan threshold, ILogger logger, TimeProvider? timeProvider = null)
     {
         _tokens = channel;
         _url = channel.UrlOf(WireRoutes.TokenSegment);
         _threshold = threshold;
         _logger = logger;
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>Starts renewing, beginning with the token the client holds now.</summary>
@@ -121,7 +123,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken ct)
     {
-        DateTime? due = DateTime.UtcNow;
+        DateTime? due = _time.GetUtcNow().UtcDateTime;
         var pushCurrent = true;
         var failures = 0;
 
@@ -137,7 +139,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
                     _pending = null;
                     requested = TakeRequests();
                 }
-                else if (due is { } at && DateTime.UtcNow < at)
+                else if (due is { } at && _time.GetUtcNow().UtcDateTime < at)
                 {
                     continue;
                 }
@@ -198,19 +200,42 @@ internal sealed class TokenRenewer : IAsyncDisposable
     /// <returns>True when the wait was ended by <see cref="PushNow"/>, false when it ran out.</returns>
     private async Task<bool> WaitUntilAsync(DateTime? due, CancellationToken ct)
     {
-        var wait = due is { } at ? at - DateTime.UtcNow : Timeout.InfiniteTimeSpan;
+        if (_kick.Wait(0))
+        {
+            DrainKicks();
+            return true;
+        }
+
+        var wait = due is { } at ? at - _time.GetUtcNow().UtcDateTime : Timeout.InfiniteTimeSpan;
         if (wait != Timeout.InfiniteTimeSpan)
         {
             wait = TimeSpan.FromTicks(Math.Clamp(wait.Ticks, 0, MaxWait.Ticks));
         }
 
-        var kicked = await _kick.WaitAsync(wait, ct);
-        if (kicked)
+        if (wait == Timeout.InfiniteTimeSpan)
         {
-            while (_kick.CurrentCount > 0) _kick.Wait(0);
+            var kicked = await _kick.WaitAsync(Timeout.InfiniteTimeSpan, ct);
+            if (kicked) DrainKicks();
+            return kicked;
         }
 
-        return kicked;
+        using var timer = new CancellationTokenSource(wait, _time);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timer.Token);
+        try
+        {
+            await _kick.WaitAsync(linked.Token);
+            DrainKicks();
+            return true;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && timer.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    private void DrainKicks()
+    {
+        while (_kick.CurrentCount > 0) _kick.Wait(0);
     }
 
     private readonly record struct Attempt(bool Accepted, DateTime? Expiry, Exception? Error = null);
@@ -266,8 +291,8 @@ internal sealed class TokenRenewer : IAsyncDisposable
         var request = new HttpRequestMessage(HttpMethod.Put, _url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(RequestTimeout);
+        using var boundCts = new CancellationTokenSource(RequestTimeout, _time);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, boundCts.Token);
 
         TokenRenewalResponse? body;
         try
@@ -279,7 +304,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
                 _logger.LogWarning("Token renewal refused by the hub with {Status}. The old token stays in place.", (int)response.StatusCode);
 
                 // A token past its own expiry cannot be accepted by anyone; asking the provider again is the way on.
-                if (JwtHelper.ExtractExpiry(token) is { } own && own <= DateTime.UtcNow) _pending = null;
+                if (JwtHelper.ExtractExpiry(token) is { } own && own <= _time.GetUtcNow().UtcDateTime) _pending = null;
                 return Failed(new HttpRequestException($"The hub refused the token ({(int)response.StatusCode}).", null, response.StatusCode));
             }
 
@@ -316,7 +341,7 @@ internal sealed class TokenRenewer : IAsyncDisposable
             return null;
         }
 
-        var advance = Advance(_threshold, at - DateTime.UtcNow);
+        var advance = Advance(_threshold, at - _time.GetUtcNow().UtcDateTime);
         return at - advance;
     }
 
@@ -325,12 +350,12 @@ internal sealed class TokenRenewer : IAsyncDisposable
         // Past the expiry the hub holds, there is nothing left to keep alive: the connection is the
         // hub's to close, and the restart that follows starts this over.
         var bound = _heldExpiry ?? JwtHelper.ExtractExpiry(_pending);
-        if (bound is { } at && DateTime.UtcNow > at)
+        if (bound is { } at && _time.GetUtcNow().UtcDateTime > at)
         {
             return null;
         }
 
-        return DateTime.UtcNow + Backoff.Jittered(Backoff.Ceiling(FirstRetry, MaxRetry, failures));
+        return _time.GetUtcNow().UtcDateTime + Backoff.Jittered(Backoff.Ceiling(FirstRetry, MaxRetry, failures));
     }
 
     public async ValueTask DisposeAsync()

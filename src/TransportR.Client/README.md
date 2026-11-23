@@ -44,7 +44,7 @@ await client.ConnectAsync();
 // 3. Send Data
 var receivers = await client.GetReceiversAsync("receivers");
 await using var transfer = await client.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
-// ... send each item with transfer.SendAsync(item) ...
+await send.SendAsync(items); // accepts T, IEnumerable<T>, or IAsyncEnumerable<T>
 await transfer.CompleteAsync();
 
 // 4. Dispose
@@ -68,7 +68,7 @@ await sender.ConnectAsync(new[] { "senders" });
 var receivers = await sender.GetReceiversAsync("receivers");
 await using var send = await sender.InitTransferAsync(receivers.First(r => r.DisconnectedAtUtc is null).ClientId);
 await using var source = File.OpenRead("data.bin");
-await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), which copies them before it returns
+await send.CopyFromAsync(source);         // or send.WriteAsync(bytes), or send.AsStream() for Stream-based APIs
 await send.CompleteAsync();               // returns once the receiver has acknowledged everything (buffered, not yet consumed)
 
 // Receiver
@@ -280,9 +280,26 @@ public interface IDataReceiver<T> : IDataClient
 ### ByteSend / ByteReceive
 
 The handles of a byte-stream transfer, which `ByteStreamClient` opens: raw bytes, no item type and no
-serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)` and `CompleteAsync`; `ByteReceive` has
-`ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)` and `WaitForCompletionAsync`. Both are abstract, like `Send<T>` and `Receive<T>`, and
-are disposed once the transfer has ended.
+serializer. `ByteSend` has `WriteAsync(ReadOnlyMemory<byte>)`, `CopyFromAsync(Stream)`, `AsStream()`, and `CompleteAsync`;
+`ByteReceive` has `ReadAsync(Memory<byte>)`, `CopyToAsync(Stream)`, `AsStream()`, and `WaitForCompletionAsync`. Both are
+abstract, like `Send<T>` and `Receive<T>`, and are disposed once the transfer has ended. Disposing the wrapper returned by
+`AsStream()` does not complete or dispose the underlying handle.
+
+### Dependency injection and `TimeProvider`
+
+Register a singleton client in ASP.NET Core or Generic Host applications with `AddTransportRClient<T>` or
+`AddByteStreamClient`. Both extensions pre-wire `ILoggerFactory` and `TimeProvider` from the container (which
+`configure` may override) and register `IDataSender<T>` / `IDataReceiver<T>` for typed clients; the host calls
+`ConnectAsync` (for example from a `BackgroundService`).
+
+```csharp
+builder.Services.AddTransportRClient<Order>((sp, client) => client
+    .WithUrl(hubUrl)
+    .WithMessagePackSerialization());
+```
+
+For deterministic unit tests over timeouts, heartbeats, batch flushes, or token renewal, supply a fake clock via
+`WithTimeProvider(TimeProvider)`.
 
 ### Failures
 

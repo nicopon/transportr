@@ -16,6 +16,12 @@ public class ClientInfo
     public HashSet<string> Groups { get; set; } = [];
 
     /// <summary>
+    /// The attested subject of this client when the hub enables
+    /// <c>ClientRegistryConfiguration.ExposeSubjectInDiscovery</c>; otherwise <c>null</c>.
+    /// </summary>
+    public string? Subject { get; set; }
+
+    /// <summary>
     /// When this client's events stream was last seen ending, or <c>null</c> if it is
     /// currently connected.
     /// </summary>

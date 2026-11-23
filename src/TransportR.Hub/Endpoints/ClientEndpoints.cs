@@ -37,6 +37,7 @@ internal sealed class ClientEndpoints
     private readonly ITransferManager _transferManager;
     private readonly AffinityOptions _affinityOptions;
     private readonly TimeSpan _inactivityTimeout;
+    private readonly bool _exposeSubjectInDiscovery;
     private readonly TimeProvider _time;
     private readonly ILogger<ClientEndpoints> _logger;
     private readonly HubDrainState? _drainState;
@@ -53,7 +54,8 @@ internal sealed class ClientEndpoints
         IOptions<DataPlaneConfiguration> dataPlane,
         TimeProvider timeProvider,
         ILogger<ClientEndpoints> logger,
-        HubDrainState? drainState = null)
+        HubDrainState? drainState = null,
+        IOptions<ClientRegistryConfiguration>? clientRegistry = null)
     {
         _stateStore = stateStore;
         _identityProvider = identityProvider;
@@ -64,6 +66,7 @@ internal sealed class ClientEndpoints
         _transferManager = transferManager;
         _affinityOptions = affinityOptions.Value;
         _inactivityTimeout = TimeSpan.FromSeconds(dataPlane.Value.TransferInactivityTimeoutSeconds);
+        _exposeSubjectInDiscovery = clientRegistry?.Value.ExposeSubjectInDiscovery == true;
         _time = timeProvider;
         _logger = logger;
         _drainState = drainState;
@@ -527,10 +530,11 @@ internal sealed class ClientEndpoints
     /// What discovery is allowed to reveal of a registration: identity, groups, and whether its stream
     /// is currently up. Nothing about the hub itself.
     /// </summary>
-    private static ClientInfo ToClientInfo(ClientRegistration client) => new()
+    private ClientInfo ToClientInfo(ClientRegistration client) => new()
     {
         ClientId = client.ClientId,
         Groups = client.Groups,
-        DisconnectedAtUtc = client.DisconnectedAtUtc
+        DisconnectedAtUtc = client.DisconnectedAtUtc,
+        Subject = _exposeSubjectInDiscovery ? client.Subject : null
     };
 }

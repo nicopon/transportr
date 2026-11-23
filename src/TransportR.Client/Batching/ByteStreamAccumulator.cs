@@ -45,8 +45,9 @@ internal sealed class ByteStreamAccumulator : Accumulator<RecyclableMemoryStream
         int flushIntervalMs,
         RecyclableMemoryStreamManager streams,
         SemaphoreSlim? inFlightSlots,
-        Action releaseSlot)
-        : base(flushIntervalMs, inFlightSlots)
+        Action releaseSlot,
+        TimeProvider? timeProvider = null)
+        : base(flushIntervalMs, inFlightSlots, timeProvider)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchBytes, 0, nameof(batchBytes));
 

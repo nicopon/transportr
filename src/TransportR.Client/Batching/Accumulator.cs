@@ -17,6 +17,7 @@ namespace TransportR.Client.Batching;
 internal abstract class Accumulator<TBatch> : IDisposable
 {
     private readonly int _flushIntervalMs;
+    private readonly TimeProvider _time;
     private readonly CancellationTokenSource _disposeCts = new();
 
     // Read once, here: the source's Token throws once disposed, which Dispose does right after
@@ -35,14 +36,15 @@ internal abstract class Accumulator<TBatch> : IDisposable
     // and - for off-heap payloads - not yet released.
     private readonly SemaphoreSlim? _inFlightSlots;
 
-    protected Accumulator(int flushIntervalMs, SemaphoreSlim? inFlightSlots)
+    protected Accumulator(int flushIntervalMs, SemaphoreSlim? inFlightSlots, TimeProvider? timeProvider = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(flushIntervalMs, 0, nameof(flushIntervalMs));
 
         _flushIntervalMs = flushIntervalMs;
+        _time = timeProvider ?? TimeProvider.System;
         _inFlightSlots = inFlightSlots;
         _releaseToken = _disposeCts.Token;
-        _lastFlushTime = DateTime.UtcNow;
+        _lastFlushTime = _time.GetUtcNow().UtcDateTime;
 
         _batchChannel = Channel.CreateUnbounded<(TBatch, int)>(new UnboundedChannelOptions
         {
@@ -139,24 +141,25 @@ internal abstract class Accumulator<TBatch> : IDisposable
     /// </summary>
     protected ValueTask HandOffAsync(TBatch batch, CancellationToken ct)
     {
-        _lastFlushTime = DateTime.UtcNow;
+        _lastFlushTime = _time.GetUtcNow().UtcDateTime;
         return _batchChannel.Writer.WriteAsync((batch, _batchId++), ct);
     }
 
     private async Task FlushIntervalLoop(CancellationToken token)
     {
+        var checkInterval = TimeSpan.FromMilliseconds(Math.Max(1, _flushIntervalMs / 2));
         while (!token.IsCancellationRequested)
         {
             try
             {
                 // At least a millisecond: half of one is no wait at all, nor is a free lock, and the
                 // loop would then never give its thread back, the caller of StartFlushInterval first.
-                await Task.Delay(Math.Max(1, _flushIntervalMs / 2), token);
+                await Task.Delay(checkInterval, _time, token);
 
                 await Lock.WaitAsync(token);
                 try
                 {
-                    if (HasPending && (DateTime.UtcNow - _lastFlushTime).TotalMilliseconds >= _flushIntervalMs)
+                    if (HasPending && (_time.GetUtcNow().UtcDateTime - _lastFlushTime).TotalMilliseconds >= _flushIntervalMs)
                     {
                         await FlushAsync(token);
                     }

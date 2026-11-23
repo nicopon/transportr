@@ -97,6 +97,10 @@ checks the streams use, and answers 404 to anyone else:
 
 A host that lists its routes, filters them or allow-lists them in a proxy keeps this one with `send` and `receive`.
 
+In discovery (`GetReceivers`), `ClientInfo.Subject` is `null` by default so hubs do not reveal peer subjects; setting
+`ClientRegistryConfiguration.ExposeSubjectInDiscovery = true` opts in to exposing each registration's attested
+subject without altering group-based authorization.
+
 ---
 
 ## End-to-End Encryption

@@ -63,6 +63,7 @@ internal class DataSession : IDataSession
     private readonly string? _affinity;
     private readonly TransferParties _parties;
     private readonly ISessionConfig _config;
+    private readonly TimeProvider _time;
 
     private readonly CancellationTokenSource _cts;
     private readonly HttpStreamManager _httpStreamManager;
@@ -88,14 +89,14 @@ internal class DataSession : IDataSession
     /// </summary>
     private volatile bool _abortQueued;
 
-    private readonly Timer _heartbeatTimer;
+    private readonly ITimer _heartbeatTimer;
     private int _heartbeating;
     private int _disposed;
     private int _writeSideEndDelivered;
     private int _metricsActive;
 
     // Session Statistics
-    public DateTime StartedAt { get; } = DateTime.UtcNow;
+    public DateTime StartedAt { get; }
 
     // Public properties for GetTransfers()
     public bool IsSender => _isSender;
@@ -144,6 +145,8 @@ internal class DataSession : IDataSession
         _affinity = affinity;
         _parties = parties;
         _config = context; // ISessionContext implements ISessionConfig
+        _time = context.Options.TimeProvider;
+        StartedAt = _time.GetUtcNow().UtcDateTime;
 
         TransferId = transferId;
         BatchSize = batchSize;
@@ -192,7 +195,11 @@ internal class DataSession : IDataSession
             _batchProcessor.CompleteSenderChannel();
         };
 
-        _heartbeatTimer = new Timer(HeartbeatLoop, null, (int)_config.Options.HeartbeatInterval.TotalMilliseconds, (int)_config.Options.HeartbeatInterval.TotalMilliseconds);
+        _heartbeatTimer = _time.CreateTimer(
+            HeartbeatLoop,
+            null,
+            _config.Options.HeartbeatInterval,
+            _config.Options.HeartbeatInterval);
     }
 
     #region Public API
@@ -293,11 +300,11 @@ internal class DataSession : IDataSession
     private async Task WhileAcknowledgingAsync(Task send, CancellationToken cancellationToken)
     {
         var stallTimeout = _config.Options.CompleteStallTimeout;
-        var parkedAtMs = Environment.TickCount64;
+        var parkedAt = _time.GetTimestamp();
 
         while (!send.IsCompleted)
         {
-            var silence = AcknowledgementSilence(parkedAtMs);
+            var silence = AcknowledgementSilence(parkedAt);
             if (silence >= stallTimeout)
             {
                 var stalled = $"The send window stayed full: nothing was acknowledged for {silence.TotalSeconds:N0}s.";
@@ -313,7 +320,7 @@ internal class DataSession : IDataSession
             // silent for the whole bound: no moment in between can change the verdict. Not on the
             // caller's token, which the send carries and ends on at its next wait: past its own wait a
             // send goes on reading the caller's buffer, which the caller takes back once this returns.
-            await send.WaitAsync(stallTimeout - silence)
+            await send.WaitAsync(stallTimeout - silence, _time)
                 .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
 
@@ -321,12 +328,12 @@ internal class DataSession : IDataSession
     }
 
     /// <summary>
-    /// How long the receiver has acknowledged nothing, counted from <paramref name="sinceMs"/>
-    /// (<see cref="Environment.TickCount64"/>) at the earliest. The one clock for both waits that only
+    /// How long the receiver has acknowledged nothing, counted from <paramref name="sinceTimestamp"/>
+    /// (<see cref="TimeProvider.GetTimestamp()"/>) at the earliest. The one clock for both waits that only
     /// an acknowledgement ends, a producer on a full window and <see cref="CompleteAsync"/>.
     /// </summary>
-    private TimeSpan AcknowledgementSilence(long sinceMs) =>
-        TimeSpan.FromMilliseconds(Environment.TickCount64 - Math.Max(sinceMs, _batchProcessor.LastAckAtMs));
+    private TimeSpan AcknowledgementSilence(long sinceTimestamp) =>
+        _time.GetElapsedTime(Math.Max(sinceTimestamp, _batchProcessor.LastAckTimestamp));
 
     /// <summary>
     /// Fails a transfer whose receiver stopped acknowledging, for <paramref name="message"/>, which a
@@ -420,7 +427,7 @@ internal class DataSession : IDataSession
         // tail of a transfer drains and a retry on its own says nothing is wrong. What bounds the
         // loop is therefore the acknowledgements, not the number of attempts: a peer still
         // acknowledging is still working, one that has gone away stops sending them.
-        var startedAtMs = Environment.TickCount64;
+        var startedAt = _time.GetTimestamp();
 
         while (!IsStopped)
         {
@@ -430,7 +437,7 @@ internal class DataSession : IDataSession
 
             // Wait for CompleteAck
             var ackTask = _batchProcessor.WaitForCompleteAckAsync(cancellationToken);
-            var delayTask = Task.Delay(retryInterval, cancellationToken);
+            var delayTask = Task.Delay(retryInterval, _time, cancellationToken);
 
             var finished = await Task.WhenAny(ackTask, delayTask, _fsm.Stopped);
 
@@ -456,7 +463,7 @@ internal class DataSession : IDataSession
             // follows the loop says why, and a retry of Complete would be sent to nobody.
             if (IsStopped) break;
 
-            var silence = AcknowledgementSilence(startedAtMs);
+            var silence = AcknowledgementSilence(startedAt);
             if (silence >= stallTimeout)
             {
                 var stalled = $"Transfer did not complete: nothing was acknowledged for {silence.TotalSeconds:N0}s.";
@@ -517,7 +524,7 @@ internal class DataSession : IDataSession
             // peer is still working and the caller's token is the only clock that applies.
             try
             {
-                await _fsm.Stopped.WaitAsync(_config.Options.CompleteStallTimeout, cancellationToken);
+                await _fsm.Stopped.WaitAsync(_config.Options.CompleteStallTimeout, _time, cancellationToken);
             }
             catch (TimeoutException)
             {
@@ -623,7 +630,7 @@ internal class DataSession : IDataSession
         {
             try
             {
-                await readTask.WaitAsync(HttpStreamManager.ReadSideEndTimeout);
+                await readTask.WaitAsync(HttpStreamManager.ReadSideEndTimeout, _time);
             }
             catch (TimeoutException)
             {
@@ -660,7 +667,7 @@ internal class DataSession : IDataSession
         {
             if (_httpStreamManager.WriteTask is { } writeTask)
             {
-                abortUnconfirmed = !AbortConfirmed(await writeTask.WaitAsync(AbortWriteTimeout));
+                abortUnconfirmed = !AbortConfirmed(await writeTask.WaitAsync(AbortWriteTimeout, _time));
             }
         }
         catch (Exception ex)
@@ -727,7 +734,7 @@ internal class DataSession : IDataSession
                         else
                         {
                             missedProbes++;
-                            await Task.Delay(Backoff.Jittered(Backoff.Ceiling(FirstProbePause, MaxProbePause, missedProbes)), token);
+                            await Task.Delay(Backoff.Jittered(Backoff.Ceiling(FirstProbePause, MaxProbePause, missedProbes)), _time, token);
                         }
                         break;
 
@@ -754,7 +761,7 @@ internal class DataSession : IDataSession
             catch (Exception ex)
             {
                 _config.Logger.LogError(ex, "Session Loop Error");
-                await Task.Delay(Backoff.Jittered(LoopErrorPause), token);
+                await Task.Delay(Backoff.Jittered(LoopErrorPause), _time, token);
             }
         }
 
@@ -807,7 +814,7 @@ internal class DataSession : IDataSession
                 else
                 {
                     _config.Logger.LogInformation("Retrying stream connection while in completing phase.");
-                    await Task.Delay(CompletingPhaseRetryMs, token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(CompletingPhaseRetryMs), _time, token);
                 }
             }
             else if (result.Outcome == StreamOutcome.Gone && IsInCompletingPhase)
@@ -983,8 +990,8 @@ internal class DataSession : IDataSession
 
         while (true)
         {
-            using var idle = CancellationTokenSource.CreateLinkedTokenSource(token);
-            idle.CancelAfter(_config.Options.PresenceHeartbeatInterval);
+            using var idleTimeout = new CancellationTokenSource(_config.Options.PresenceHeartbeatInterval, _time);
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(token, idleTimeout.Token);
             try
             {
                 return await _batchProcessor.OutgoingMessages.WaitToReadAsync(idle.Token);
@@ -1135,7 +1142,7 @@ internal class DataSession : IDataSession
         // activity left to claim, and claiming it would keep alive a transfer whose peer is gone.
         if (IsStopped || IsInCompletingPhase)
         {
-            _heartbeatTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            _heartbeatTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
             return;
         }
 
@@ -1144,8 +1151,8 @@ internal class DataSession : IDataSession
         if (Interlocked.Exchange(ref _heartbeating, 1) == 1) return;
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            timeout.CancelAfter(HeartbeatTimeout);
+            using var boundTimeout = new CancellationTokenSource(HeartbeatTimeout, _time);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, boundTimeout.Token);
 
             var (items, acks) = IsSender
                 ? (_batchProcessor.ItemsSent, _batchProcessor.AcksReceived)

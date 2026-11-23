@@ -33,7 +33,7 @@ builder.Services.AddDataHub();
 //     .UseRedisStore("localhost:6379")
 //     .UseAffinityHandoff()
 //     .ConfigureDataPlane(o => o.TransferInactivityTimeoutSeconds = 60);
-//     // Also available: ConfigureAccess(...), ConfigureClientRegistry(...)
+//     // Also available: ConfigureAccess(...), ConfigureClientRegistry(o => o.ExposeSubjectInDiscovery = true)
 
 var app = builder.Build();
 
@@ -75,6 +75,8 @@ app.Run();
   `DataPlaneConfiguration.DrainTimeoutSeconds` (0 by default) so shutdown refuses new transfers (`503`) and waits up to
   that bound for active bridges to finish; raise ASP.NET Core's `HostOptions.ShutdownTimeout` (30 s by default) whenever
   `DrainTimeoutSeconds` exceeds it.
+- **Discovery subject.** `ClientInfo.Subject` stays `null` by default; enable `ClientRegistryConfiguration.ExposeSubjectInDiscovery`
+  when callers need to identify peers by their attested JWT subject during discovery.
 - **Built-in metrics and tracing.** Subscribe an OpenTelemetry or `dotnet-counters` listener to
   `TransportRHubDiagnostics.MeterName` (`"TransportR.Hub"`) and `TransportRHubDiagnostics.ActivitySourceName`
   (`"TransportR.Hub"`): clients connected, active/ended transfers (by `transportr.end_reason`), bytes relayed, write

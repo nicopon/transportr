@@ -184,6 +184,16 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Sets the <see cref="TimeProvider"/> used for timeouts, heartbeats, batch flushes, and token
+    /// renewal. Defaults to <see cref="TimeProvider.System"/>.
+    /// </summary>
+    public TransportRClientBuilder<T> WithTimeProvider(TimeProvider timeProvider)
+    {
+        _state.SetTimeProvider(timeProvider);
+        return this;
+    }
+
+    /// <summary>
     /// Sets the batch serializer.
     /// </summary>
     /// <remarks>
@@ -236,10 +246,10 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Sets a token provider made at <see cref="Build"/> from the handler the client's requests go through
-    /// and the builder's logger factory.
+    /// Sets a token provider made at <see cref="Build"/> from the handler the client's requests go through,
+    /// the builder's logger factory, and its time provider.
     /// </summary>
-    internal TransportRClientBuilder<T> WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
+    internal TransportRClientBuilder<T> WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, TimeProvider, Func<Task<string>>> factory)
     {
         _state.SetTokenProviderFactory(factory);
         return this;

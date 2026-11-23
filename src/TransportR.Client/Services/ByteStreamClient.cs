@@ -186,7 +186,7 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// </summary>
     private ByteClientSession NewSession(string transferId, int batchSize, string? affinity, TransferParties parties)
     {
-        var send = new ByteBatchSource(_batchBytes, _options.BatchFlushIntervalMs, new RecyclableMemoryStreamManager());
+        var send = new ByteBatchSource(_batchBytes, _options.BatchFlushIntervalMs, new RecyclableMemoryStreamManager(), _options.TimeProvider);
         var receive = new ByteReceivePort(_options.ReceiveBufferCapacity);
         var session = new DataSession(_connection, transferId, batchSize, _dataUrl, affinity, parties, send, receive.OpenSink);
         return new ByteClientSession(session, send, receive);

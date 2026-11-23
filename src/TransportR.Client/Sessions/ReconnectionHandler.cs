@@ -28,8 +28,8 @@ internal class ReconnectionHandler : IDisposable
     /// </summary>
     public async Task<bool> ProbeConnectivityAsync(CancellationToken token)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(ProbeTimeout);
+        using var boundCts = new CancellationTokenSource(ProbeTimeout, _context.Options.TimeProvider);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
         try
         {
             return await _context.ProbeAsync(_transferId, _affinity, timeout.Token);
@@ -73,8 +73,8 @@ internal class ReconnectionHandler : IDisposable
         if (_streamPongReceived == null) return -1;
 
         // Wait for Handshake Pong
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        cts.CancelAfter(_context.Options.PongTimeout);
+        using var boundCts = new CancellationTokenSource(_context.Options.PongTimeout, _context.Options.TimeProvider);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
 
         try
         {

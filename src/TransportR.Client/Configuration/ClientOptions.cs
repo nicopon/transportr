@@ -148,5 +148,11 @@ internal class ClientOptions
     /// </summary>
     public EndToEndEncryption? EndToEndEncryption { get; set; }
 
+    /// <summary>
+    /// Clock and timer source for the client's timeouts, heartbeats, batch flushes, and token renewal.
+    /// Defaults to <see cref="TimeProvider.System"/>.
+    /// </summary>
+    public TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
     public const int DefaultMaxBatchBytes = 256 * 1024 * 1024;
 }

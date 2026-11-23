@@ -187,7 +187,7 @@ internal class HttpStreamManager : IAsyncDisposable
                 {
                     try
                     {
-                        await read.WaitAsync(ReadSideEndTimeout);
+                        await read.WaitAsync(ReadSideEndTimeout, _config.Options.TimeProvider);
                     }
                     catch (TimeoutException)
                     {
@@ -249,7 +249,7 @@ internal class HttpStreamManager : IAsyncDisposable
             return WriteStreamFailed(ex, type);
         }
 
-        var openedAtMs = Environment.TickCount64;
+        var openedAt = _config.Options.TimeProvider.GetTimestamp();
         await using (stream)
         {
             using var writing = CancellationTokenSource.CreateLinkedTokenSource(token, stream.Lost);
@@ -269,7 +269,7 @@ internal class HttpStreamManager : IAsyncDisposable
                 var result = WriteStreamFailed(stream.Failure ?? ex, type);
                 if (stream is WebSocketWriteStream && result is { Outcome: StreamOutcome.Retryable, Refused: false })
                 {
-                    CountRupture(openedAtMs);
+                    CountRupture(openedAt);
                 }
 
                 return result;
@@ -305,9 +305,9 @@ internal class HttpStreamManager : IAsyncDisposable
         _ => TransferFailureCategory.ProtocolViolation,
     };
 
-    private void CountRupture(long openedAtMs)
+    private void CountRupture(long openedAt)
     {
-        if (Environment.TickCount64 - openedAtMs >= ShortLived.TotalMilliseconds)
+        if (_config.Options.TimeProvider.GetElapsedTime(openedAt) >= ShortLived)
         {
             _shortLivedRuptures = 0;
         }
@@ -373,7 +373,8 @@ internal class HttpStreamManager : IAsyncDisposable
             accessToken => ProvenWebSocket.NewSocket(type, _affinity, accessToken, options.PresenceHeartbeatInterval),
             options.WebSocketOpenBound,
             _config.Logger,
-            token);
+            token,
+            options.TimeProvider);
 
         if (opening.Unavailable is { } reason)
         {
@@ -473,7 +474,7 @@ internal class HttpStreamManager : IAsyncDisposable
     /// <returns>True when the hub accepted the request.</returns>
     public async Task<bool> RequestAbortAsync(TimeSpan timeout)
     {
-        using var cts = new CancellationTokenSource(timeout);
+        using var cts = new CancellationTokenSource(timeout, _config.Options.TimeProvider);
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{_dataUrl}/{_transferId}/{WireRoutes.AbortSegment}");

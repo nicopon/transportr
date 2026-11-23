@@ -54,6 +54,7 @@ internal sealed class ControlChannel : IAsyncDisposable
     private readonly ClientOptions _options;
     private readonly ILogger _logger;
     private readonly Func<Task<string>>? _tokenProvider;
+    private readonly TimeProvider _time;
     private readonly CookieContainer _cookies = new();
 
     // Auth state
@@ -88,6 +89,7 @@ internal sealed class ControlChannel : IAsyncDisposable
         _http = http;
         _options = options;
         _logger = logger;
+        _time = options.TimeProvider;
         _currentAccessToken = initialAccessToken;
         _tokenProvider = tokenProvider;
 
@@ -171,7 +173,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             {
                 _logger.LogWarning("Connection attempt {Attempt}/{MaxRetries} failed, retrying in {Delay}ms: {Message}",
                     attempt, FirstOpenAttempts, delay.TotalMilliseconds, ex.Message);
-                await Task.Delay(delay, cancellationToken);
+                await Task.Delay(delay, _time, cancellationToken);
                 delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxOpenDelay.Ticks));
             }
         }
@@ -320,7 +322,7 @@ internal sealed class ControlChannel : IAsyncDisposable
         if (_tokenProvider == null) return _currentAccessToken;
 
         if (forceRefresh || _currentAccessToken == null ||
-            (_tokenExpiry.HasValue && DateTime.UtcNow > _tokenExpiry.Value - _options.TokenRefreshThreshold))
+            (_tokenExpiry.HasValue && _time.GetUtcNow().UtcDateTime > _tokenExpiry.Value - _options.TokenRefreshThreshold))
         {
             try
             {
@@ -461,7 +463,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             var ceiling = Backoff.Ceiling(FirstReopenDelay, MaxReopenDelay, failures + 1);
             try
             {
-                await Task.Delay(Backoff.Jittered(ceiling), cancellationToken);
+                await Task.Delay(Backoff.Jittered(ceiling), _time, cancellationToken);
 
                 await ReopenOnceAsync(lost, token: null, cancellationToken);
                 return;
@@ -562,7 +564,8 @@ internal sealed class ControlChannel : IAsyncDisposable
         if (!string.IsNullOrEmpty(token)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         // The stream's own source: the caller's token bounds the opening only.
-        var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var cancel = new CancellationTokenSource(Timeout.InfiniteTimeSpan, _time);
+        var lifetimeReg = _lifetime.Token.Register(() => cancel.Cancel());
         var opening = cancellationToken.Register(() => cancel.Cancel());
         HttpResponseMessage? response = null;
         try
@@ -589,11 +592,12 @@ internal sealed class ControlChannel : IAsyncDisposable
             }
 
             opening.Dispose();
-            return new EventStream(response, events, cancel, registered.ConnectionId);
+            return new EventStream(response, events, cancel, lifetimeReg, registered.ConnectionId);
         }
         catch
         {
             opening.Dispose();
+            lifetimeReg.Dispose();
             request.Dispose();
             response?.Dispose();
             cancel.Dispose();
@@ -642,12 +646,19 @@ internal sealed class ControlChannel : IAsyncDisposable
     private sealed class EventStream : IAsyncDisposable
     {
         private readonly HttpResponseMessage _response;
+        private readonly CancellationTokenRegistration _lifetimeRegistration;
 
-        public EventStream(HttpResponseMessage response, IAsyncEnumerator<SseItem<string>> events, CancellationTokenSource cancel, string connectionId)
+        public EventStream(
+            HttpResponseMessage response,
+            IAsyncEnumerator<SseItem<string>> events,
+            CancellationTokenSource cancel,
+            CancellationTokenRegistration lifetimeRegistration,
+            string connectionId)
         {
             _response = response;
             Events = events;
             Cancel = cancel;
+            _lifetimeRegistration = lifetimeRegistration;
             ConnectionId = connectionId;
         }
 
@@ -666,6 +677,7 @@ internal sealed class ControlChannel : IAsyncDisposable
 
         public async ValueTask DisposeAsync()
         {
+            _lifetimeRegistration.Dispose();
             try { Cancel.Cancel(); } catch (ObjectDisposedException) { }
 
             if (Reading != null)

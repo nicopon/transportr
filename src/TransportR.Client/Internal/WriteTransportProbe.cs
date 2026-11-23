@@ -115,7 +115,8 @@ internal sealed class WriteTransportProbe : IAsyncDisposable
                 accessToken => ProvenWebSocket.NewSocket(type: null, _affinity(), accessToken, _options.PresenceHeartbeatInterval),
                 _options.WebSocketOpenBound,
                 _logger,
-                token);
+                token,
+                _options.TimeProvider);
 
             if (opening.Socket is { } socket)
             {
@@ -154,8 +155,8 @@ internal sealed class WriteTransportProbe : IAsyncDisposable
     {
         using (socket)
         {
-            using var closing = CancellationTokenSource.CreateLinkedTokenSource(token);
-            closing.CancelAfter(_options.WebSocketOpenBound);
+            using var boundCts = new CancellationTokenSource(_options.WebSocketOpenBound, _options.TimeProvider);
+            using var closing = CancellationTokenSource.CreateLinkedTokenSource(token, boundCts.Token);
             try
             {
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, closing.Token);

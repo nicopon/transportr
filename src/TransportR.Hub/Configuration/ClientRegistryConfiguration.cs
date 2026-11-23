@@ -44,4 +44,14 @@ public class ClientRegistryConfiguration
     /// a caller that finds nobody fails outright rather than retrying.
     /// </remarks>
     public int ConnectedTtlSeconds { get; set; } = 3600;
+
+    /// <summary>
+    /// Whether client discovery (<c>GetReceiversAsync</c>) includes each registration's attested
+    /// <see cref="ClientInfo.Subject"/>. Default: <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Kept opt-in so hubs do not reveal peer subjects unless the host explicitly wants callers to see
+    /// who runs behind a client id. Authorization remains solely governed by JWT group scopes.
+    /// </remarks>
+    public bool ExposeSubjectInDiscovery { get; set; }
 }

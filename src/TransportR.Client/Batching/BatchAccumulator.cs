@@ -14,8 +14,8 @@ internal class BatchAccumulator<T> : Accumulator<List<T>>
     private readonly int _batchSize;
     private List<T> _items;
 
-    public BatchAccumulator(int batchSize, int flushIntervalMs, SemaphoreSlim? inFlightSlots = null)
-        : base(flushIntervalMs, inFlightSlots)
+    public BatchAccumulator(int batchSize, int flushIntervalMs, SemaphoreSlim? inFlightSlots = null, TimeProvider? timeProvider = null)
+        : base(flushIntervalMs, inFlightSlots, timeProvider)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(batchSize, 0, nameof(batchSize));
 

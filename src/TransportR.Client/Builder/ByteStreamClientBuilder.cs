@@ -101,6 +101,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithTimeProvider"/>
+    public ByteStreamClientBuilder WithTimeProvider(TimeProvider timeProvider)
+    {
+        _state.SetTimeProvider(timeProvider);
+        return this;
+    }
+
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithAccessToken"/>
     public ByteStreamClientBuilder WithAccessToken(string token)
     {
@@ -116,7 +123,7 @@ public sealed class ByteStreamClientBuilder
     }
 
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithTokenProviderFactory"/>
-    internal ByteStreamClientBuilder WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
+    internal ByteStreamClientBuilder WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, TimeProvider, Func<Task<string>>> factory)
     {
         _state.SetTokenProviderFactory(factory);
         return this;

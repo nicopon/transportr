@@ -14,6 +14,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
     private readonly ClientCredentialsOptions _options;
     private readonly HttpClient _httpClient;
     private readonly ILogger<ClientCredentialsTokenProvider>? _logger;
+    private readonly TimeProvider _time;
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
 
     private string? _cachedToken;
@@ -26,16 +27,19 @@ internal class ClientCredentialsTokenProvider : IDisposable
     /// <param name="options">Client credentials configuration.</param>
     /// <param name="logger">Optional logger.</param>
     /// <param name="httpClient">What the token requests go through; a client of its own when null.</param>
+    /// <param name="timeProvider">Clock used for cache expiry checks.</param>
     public ClientCredentialsTokenProvider(
         ClientCredentialsOptions options,
         ILogger<ClientCredentialsTokenProvider>? logger = null,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        TimeProvider? timeProvider = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         EnsureConfigured(options);
 
         _logger = logger;
         _httpClient = httpClient ?? new HttpClient();
+        _time = timeProvider ?? TimeProvider.System;
     }
 
     public HttpClient HttpClient => _httpClient;
@@ -54,7 +58,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
     {
         // Fast path: return cached token if still valid
         if (_cachedToken != null && _tokenExpiry.HasValue &&
-            DateTime.UtcNow < _tokenExpiry.Value - _options.RefreshThreshold)
+            _time.GetUtcNow().UtcDateTime < _tokenExpiry.Value - _options.RefreshThreshold)
         {
             return _cachedToken;
         }
@@ -65,7 +69,7 @@ internal class ClientCredentialsTokenProvider : IDisposable
         {
             // Double-check after acquiring lock
             if (_cachedToken != null && _tokenExpiry.HasValue &&
-                DateTime.UtcNow < _tokenExpiry.Value - _options.RefreshThreshold)
+                _time.GetUtcNow().UtcDateTime < _tokenExpiry.Value - _options.RefreshThreshold)
             {
                 return _cachedToken;
             }

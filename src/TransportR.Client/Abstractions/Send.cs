@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace TransportR.Client;
 
 /// <summary>
@@ -49,6 +51,21 @@ public abstract class Send<T> : Transfer, IAsyncDisposable
         foreach (var item in items)
         {
             await SendAsync(item, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Sends an asynchronous sequence of items through the transfer without buffering the whole sequence.
+    /// </summary>
+    /// <param name="items">The async sequence of items to send.</param>
+    /// <param name="cancellationToken">Token to cancel the send operation.</param>
+    public virtual async Task SendAsync(IAsyncEnumerable<T> items, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        await foreach (var item in items.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            await SendAsync(item, cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -1,3 +1,5 @@
+using TransportR.Client.Internal;
+
 namespace TransportR.Client;
 
 /// <summary>
@@ -70,6 +72,16 @@ public abstract class ByteReceive : Transfer, IAsyncDisposable
     /// <exception cref="InvalidOperationException">Another read or copy of this handle is under way.</exception>
     /// <exception cref="TransferFailedException">The transfer failed, or the handle was released before it reached its outcome.</exception>
     public abstract Task CopyToAsync(Stream destination, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Exposes this handle as a read-only <see cref="Stream"/> for interop with stream-based APIs
+    /// (such as <c>GZipStream</c> or <c>JsonSerializer</c>).
+    /// </summary>
+    /// <remarks>
+    /// Subject to the single-consumer rule of <see cref="ReadAsync"/> and <see cref="CopyToAsync"/>.
+    /// Disposing the returned stream does not dispose this handle.
+    /// </remarks>
+    public Stream AsStream() => new ByteReceiveStream(this);
 
     /// <summary>
     /// Waits for the transfer to be fully completed (including shutdown handshake).

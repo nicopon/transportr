@@ -14,7 +14,7 @@ internal static class SessionPorts
         RecyclableMemoryStreamManager streams,
         int batchSize) =>
         (
-            new ItemBatchSource<T>(serializer, streams, batchSize, options.BatchFlushIntervalMs),
+            new ItemBatchSource<T>(serializer, streams, batchSize, options.BatchFlushIntervalMs, options.TimeProvider),
             new ReceivePort<T>(() => new ItemChunkSink<T>(new ReceiveBuffer<T>(options.ReceiveBufferCapacity), serializer))
         );
 }

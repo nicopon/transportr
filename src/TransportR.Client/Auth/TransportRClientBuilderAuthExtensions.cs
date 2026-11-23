@@ -27,8 +27,8 @@ public static class TransportRClientBuilderAuthExtensions
         HttpClient? httpClient = null)
     {
         var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
-        return builder.WithTokenProviderFactory((handler, loggerFactory) =>
-            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler)));
+        return builder.WithTokenProviderFactory((handler, loggerFactory, timeProvider) =>
+            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler), timeProvider));
     }
 
     /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, HttpClient?)"/>
@@ -41,8 +41,8 @@ public static class TransportRClientBuilderAuthExtensions
         HttpClient? httpClient = null)
     {
         var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
-        return builder.WithTokenProviderFactory((handler, loggerFactory) =>
-            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler)));
+        return builder.WithTokenProviderFactory((handler, loggerFactory, timeProvider) =>
+            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler), timeProvider));
     }
 
     private static ClientCredentialsOptions OptionsOf(string tokenEndpoint, string clientId, string clientSecret, string? scope)
@@ -65,12 +65,13 @@ public static class TransportRClientBuilderAuthExtensions
     private static HttpClient OnTheHubsHandler(HttpMessageHandler handler) => new(handler, disposeHandler: false);
 
     private static Func<Task<string>> CreateProvider(
-        ClientCredentialsOptions options, ILoggerFactory? loggerFactory, HttpClient httpClient)
+        ClientCredentialsOptions options, ILoggerFactory? loggerFactory, HttpClient httpClient, TimeProvider timeProvider)
     {
         var provider = new ClientCredentialsTokenProvider(
             options,
             loggerFactory?.CreateLogger<ClientCredentialsTokenProvider>() ?? NullLogger<ClientCredentialsTokenProvider>.Instance,
-            httpClient);
+            httpClient,
+            timeProvider);
 
         return provider.AsTokenProvider();
     }

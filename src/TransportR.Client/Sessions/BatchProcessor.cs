@@ -58,10 +58,11 @@ internal class BatchProcessor : IAsyncDisposable
     private ControlChunkMessage? _completeAck;
 
     // Stats
+    private readonly TimeProvider _time;
     private long _itemsSent;
     private long _itemsReceived;
     private long _acksReceived;
-    private long _lastAckAtMs = Environment.TickCount64;
+    private long _lastAckTimestamp;
     private long _acksSent;
     private long _payloadBytes;
 
@@ -71,10 +72,10 @@ internal class BatchProcessor : IAsyncDisposable
     public long AcksReceived => Interlocked.Read(ref _acksReceived);
 
     /// <summary>
-    /// When the last acknowledgement arrived, on the <see cref="Environment.TickCount64"/> clock, or
+    /// When the last acknowledgement arrived, on <see cref="TimeProvider.GetTimestamp()"/>, or
     /// when this processor was created if none has.
     /// </summary>
-    public long LastAckAtMs => Volatile.Read(ref _lastAckAtMs);
+    public long LastAckTimestamp => Volatile.Read(ref _lastAckTimestamp);
     public long AcksSent => Interlocked.Read(ref _acksSent);
 
     /// <summary>
@@ -95,6 +96,8 @@ internal class BatchProcessor : IAsyncDisposable
     public BatchProcessor(ISessionContext context, string transferId, IBatchSource batches, Func<IChunkSink> openSink)
     {
         _context = context;
+        _time = context.Options.TimeProvider;
+        _lastAckTimestamp = _time.GetTimestamp();
         _transferId = transferId;
         _batches = batches;
         _openSink = openSink;
@@ -441,7 +444,7 @@ internal class BatchProcessor : IAsyncDisposable
     private void CountAck()
     {
         Interlocked.Increment(ref _acksReceived);
-        Volatile.Write(ref _lastAckAtMs, Environment.TickCount64);
+        Volatile.Write(ref _lastAckTimestamp, _time.GetTimestamp());
     }
 
     /// <summary>

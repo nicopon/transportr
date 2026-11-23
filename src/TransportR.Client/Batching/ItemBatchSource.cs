@@ -15,7 +15,8 @@ internal sealed class ItemBatchSource<T>(
     IBatchSerializer<T> serializer,
     RecyclableMemoryStreamManager streams,
     int batchSize,
-    int flushIntervalMs) : IBatchSource, ISendPort<T>
+    int flushIntervalMs,
+    TimeProvider? timeProvider = null) : IBatchSource, ISendPort<T>
 {
     private BatchAccumulator<T>? _accumulator;
     private Action _releaseSlot = static () => { };
@@ -33,7 +34,7 @@ internal sealed class ItemBatchSource<T>(
     public void Open(SemaphoreSlim? inFlightSlots, Action releaseSlot)
     {
         _releaseSlot = releaseSlot;
-        _accumulator = new BatchAccumulator<T>(batchSize, flushIntervalMs, inFlightSlots);
+        _accumulator = new BatchAccumulator<T>(batchSize, flushIntervalMs, inFlightSlots, timeProvider);
     }
 
     public void StartFlushInterval() => Accumulator.StartFlushInterval();
