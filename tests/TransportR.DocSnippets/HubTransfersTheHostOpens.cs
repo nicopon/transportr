@@ -22,11 +22,11 @@ internal static class HubTransfersTheHostOpens
 
     public static void Sender(TransportRClient<Order> sender)
     {
-        sender.OnSendRequested += send =>
+        sender.OnSendRequested(send =>
         {
             _ = SendOrdersAsync(send);   // or send here: the hub is answered once the handler returns, not once its task ends
             return Task.CompletedTask;
-        };
+        });
 
         async Task SendOrdersAsync(Send<Order> send)
         {

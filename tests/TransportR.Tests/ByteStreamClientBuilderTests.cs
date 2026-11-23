@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Logging.Abstractions;
 using TransportR.Client;
 using TransportR.Client.Sessions;
+using TransportR.Tests.Infrastructure;
 
 namespace TransportR.Tests;
 
@@ -142,5 +144,80 @@ public class ByteStreamClientBuilderTests
         Assert.Same(builder, returned);
         await using var client = returned.Build();
         Assert.True(client.Channel.HasTokenProvider);
+    }
+
+    [Fact]
+    public void WithClientId_EmptyGuid_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => Builder().WithClientId(Guid.Empty));
+    }
+
+    [Fact]
+    public async Task WithClientId_SetsClientId_AndSupportsPerPairPreSharedKeyOverTestServer()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        var senderId = Guid.NewGuid();
+        var receiverId = Guid.NewGuid();
+        var pairKey = Enumerable.Range(0, 32).Select(i => (byte)(i * 5 + 2)).ToArray();
+
+        var senderKeys = new Dictionary<Guid, byte[]> { [receiverId] = pairKey };
+        var receiverKeys = new Dictionary<Guid, byte[]> { [senderId] = pairKey };
+
+        await using var sender = new ByteStreamClientBuilder(1024)
+            .WithUrl("http://localhost")
+            .WithClientId(senderId)
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMaxInFlightBatches(4)
+            .WithEndToEndEncryption(peerId => senderKeys.GetValueOrDefault(peerId))
+            .Build();
+
+        await using var receiver = new ByteStreamClientBuilder(1024)
+            .WithUrl("http://localhost")
+            .WithClientId(receiverId)
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithReceiveCapacity(1 << 16)
+            .WithEndToEndEncryption(peerId => receiverKeys.GetValueOrDefault(peerId))
+            .Build();
+
+        Assert.Equal(senderId, sender.ClientId);
+        Assert.Equal(receiverId, receiver.ClientId);
+
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiverId);
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var received = new MemoryStream();
+        var copy = receive.CopyToAsync(received);
+
+        var payload = Enumerable.Range(0, 1500).Select(i => (byte)(i % 251)).ToArray();
+        await send.WriteAsync(payload).WaitAsync(TimeSpan.FromSeconds(10));
+        await send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        await copy.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(payload, received.ToArray());
+        Assert.Equal(TransferProtection.EncryptedWithPreSharedKey, Assert.Single(sender.GetTransfers()).Protection);
+    }
+
+    [Fact]
+    public async Task OnTransferStarted_And_OnSendRequested_RefuseNullOrSecondRegistration()
+    {
+        await using var client = Builder().Build();
+
+        Assert.Throws<ArgumentNullException>(() => client.OnTransferStarted(null!));
+        Assert.Throws<ArgumentNullException>(() => client.OnSendRequested(null!));
+
+        client.OnTransferStarted(_ => Task.CompletedTask);
+        client.OnSendRequested(_ => Task.CompletedTask);
+
+        Assert.Throws<InvalidOperationException>(() => client.OnTransferStarted(_ => Task.CompletedTask));
+        Assert.Throws<InvalidOperationException>(() => client.OnSendRequested(_ => Task.CompletedTask));
     }
 }

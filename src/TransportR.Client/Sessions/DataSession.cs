@@ -53,6 +53,8 @@ internal class DataSession : IDataSession
     private sealed record Failure(TransferFailureCategory Category, string Message);
 
     public string TransferId { get; }
+    public Guid SenderId => _parties.SenderId;
+    public Guid ReceiverId => _parties.ReceiverId;
     public int BatchSize { get; }
     public string DataUrl { get; }
 

@@ -14,6 +14,16 @@ internal interface IDataSession : IAsyncDisposable
     string TransferId { get; }
 
     /// <summary>
+    /// The sending client's identifier.
+    /// </summary>
+    Guid SenderId { get; }
+
+    /// <summary>
+    /// The receiving client's identifier.
+    /// </summary>
+    Guid ReceiverId { get; }
+
+    /// <summary>
     /// The batch size for this session.
     /// </summary>
     int BatchSize { get; }

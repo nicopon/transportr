@@ -45,30 +45,8 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     private readonly string _dataUrl;
     private readonly TransferSignaling<ByteClientSession, ByteSend, ByteReceive> _signaling;
 
-    /// <summary>
-    /// Event fired when a new transfer is initiated targeting this receiver.
-    /// </summary>
-    /// <remarks>
-    /// The handler reads the transfer from the handle it is given and owns it: nothing else disposes it,
-    /// and a handle left alive keeps its session registered with the client and reporting to the hub for
-    /// as long as the client lives. The client answers the hub once the handler has returned its task,
-    /// so the handler may read in its body; what a failure of the handler does, before it returns or
-    /// after, is as for <see cref="IDataReceiver{T}.OnTransferStarted"/>.
-    /// </remarks>
-    public event Func<ByteReceive, Task>? OnTransferStarted;
-
-    /// <summary>
-    /// Event fired when the application hosting the hub opens a transfer from this client, rather
-    /// than this client calling <see cref="InitTransferAsync"/>.
-    /// </summary>
-    /// <remarks>
-    /// The handler owns the handle it is given, as with <see cref="OnTransferStarted"/>: it sends through
-    /// it, completes it and disposes it. The client answers the hub once the handler has returned its
-    /// task, so the handler may send in its body; what a failure of the handler does, before it returns
-    /// or after, is as for <see cref="IDataSender{T}.OnSendRequested"/>. With no handler attached the
-    /// client refuses such transfers, and the host's request fails.
-    /// </remarks>
-    public event Func<ByteSend, Task>? OnSendRequested;
+    private Func<ByteReceive, Task>? _onTransferStarted;
+    private Func<ByteSend, Task>? _onSendRequested;
 
     // Internal so that only the builder instantiates it.
     internal ByteStreamClient(
@@ -95,9 +73,54 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
             session => new HttpByteReceive(session.Session, session.Receive.ReadAllAsync),
             logger,
             RequestedBatchSize,
-            transfer => OnTransferStarted?.Invoke(transfer) ?? Task.CompletedTask,
-            () => OnSendRequested);
+            transfer => Volatile.Read(ref _onTransferStarted)?.Invoke(transfer) ?? Task.CompletedTask,
+            () => Volatile.Read(ref _onSendRequested));
         _signaling.Initialize();
+    }
+
+    /// <summary>
+    /// Registers the handler called when a new transfer is initiated targeting this receiver.
+    /// </summary>
+    /// <param name="handler">The handler reading from each transfer handle.</param>
+    /// <remarks>
+    /// Only one handler may be registered per client. Calling this method more than once throws
+    /// <see cref="InvalidOperationException"/>. The handler owns the handle and must dispose it;
+    /// what a failure of the handler does, before it returns or after, is as for
+    /// <see cref="IDataReceiver{T}.OnTransferStarted"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
+    public void OnTransferStarted(Func<ByteReceive, Task> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (Interlocked.CompareExchange(ref _onTransferStarted, handler, null) is not null)
+        {
+            throw new InvalidOperationException("A handler is already registered for OnTransferStarted.");
+        }
+    }
+
+    /// <summary>
+    /// Registers the handler called when the application hosting the hub opens a transfer from this
+    /// client, rather than this client calling <see cref="InitTransferAsync"/>.
+    /// </summary>
+    /// <param name="handler">The handler sending through each transfer handle.</param>
+    /// <remarks>
+    /// Only one handler may be registered per client. Calling this method more than once throws
+    /// <see cref="InvalidOperationException"/>. The handler owns the handle, as with
+    /// <see cref="OnTransferStarted"/>: it sends through it, completes it and disposes it; what a
+    /// failure of the handler does, before it returns or after, is as for
+    /// <see cref="IDataSender{T}.OnSendRequested"/>. With no handler attached the client refuses such
+    /// transfers, and the host's request fails.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
+    public void OnSendRequested(Func<ByteSend, Task> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (Interlocked.CompareExchange(ref _onSendRequested, handler, null) is not null)
+        {
+            throw new InvalidOperationException("A handler is already registered for OnSendRequested.");
+        }
     }
 
     /// <inheritdoc />
@@ -132,16 +155,17 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// Initiates a new transfer to the specified target client.
     /// </summary>
     /// <param name="targetClientId">The ID of the receiver client.</param>
+    /// <param name="cancellationToken">Token to cancel the transfer initiation.</param>
     /// <returns>A handle to write the bytes through.</returns>
     /// <exception cref="HubRequestFailedException">
     /// The hub refused the transfer, or the handshake failed: the receiver is unknown, unreachable or
     /// refused it, or it timed out.
     /// </exception>
-    public async Task<ByteSend> InitTransferAsync(Guid targetClientId)
+    public async Task<ByteSend> InitTransferAsync(Guid targetClientId, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (BatchBytes={BatchBytes})...", targetClientId, _batchBytes);
 
-        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId);
+        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId, cancellationToken);
         return await _signaling.StartRequestedSendAsync(transferId, RequestedBatchSize, targetClientId, affinity);
     }
 

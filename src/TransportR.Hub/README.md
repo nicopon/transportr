@@ -31,7 +31,9 @@ builder.Services.AddDataHub();
 // For HA deployment (Redis + Affinity):
 // builder.Services.AddDataHub()
 //     .UseRedisStore("localhost:6379")
-//     .UseAffinityHandoff();
+//     .UseAffinityHandoff()
+//     .ConfigureDataPlane(o => o.TransferInactivityTimeoutSeconds = 60);
+//     // Also available: ConfigureAccess(...), ConfigureClientRegistry(...)
 
 var app = builder.Build();
 
@@ -96,7 +98,7 @@ behind a given front end.
 |---|---|---|
 | Azure App Service, Linux, `http20Enabled=true`, `http20ProxyFlag=1` | WebSocket | clients on Linux, macOS and Windows, one behind a proxy taken from the system's proxy settings. Kestrel must keep accepting HTTP/1.1: a container restricted to HTTP/2 failed App Service's health check under this flag |
 | App Service, Linux, `sitecontainers`, `http20Enabled=false`, `http20ProxyFlag=0` | segments | transfers of 200 items, of 2 million, and of 460 s to a throttled receiver, each complete to the item, no 408 or 499 on `/send` |
-| `tests/TransportR.TestProxy` (YARP) | WebSocket | relays the upgrade and the affinity cookie |
+| `tests/TransportR.TestProxy` (YARP) | WebSocket | relays the upgrade and the affinity cookie. Note: YARP does not flush outgoing request bodies per write by default, so carrying segments through YARP requires a flushing `IForwarderHttpClientFactory` (see `tests/TransportR.TestProxy/Program.cs`) |
 | Toxiproxy | WebSocket | the cut scenarios |
 | stock nginx, a `proxy_pass` that sets neither upgrade header (`nginx-default`) | segments | |
 | stock nginx relaying the upgrade | not run | |
@@ -126,11 +128,11 @@ still chooses the receiver, which binding the client ids does not prevent ("End-
 `SecurityArchitecture.md`).
 
 ```csharp
-sender.OnSendRequested += send =>
+sender.OnSendRequested(send =>
 {
     _ = SendOrdersAsync(send);   // or send here: the hub is answered once the handler returns, not once its task ends
     return Task.CompletedTask;
-};
+});
 
 async Task SendOrdersAsync(Send<Order> send)
 {
@@ -143,10 +145,11 @@ async Task SendOrdersAsync(Send<Order> send)
 }
 ```
 
+**HA constraint.** With `UseAffinityHandoff()` enabled, `ITransferInitiator.InitTransferAsync` refuses the transfer unless both clients' event streams are held by the same hub instance, and `ITransferTerminator.TerminateAsync` only cancels bridges held on the instance where it is called ("Affinity Handoff" in `ResilienceArchitecture.md`).
+
 `TerminateAsync` removes the transfer's state and bridges and tells both clients to cancel, and their sessions fail with
 `TransferFailedException` (`EndedByHub`). `AccessOptions.ClientsMayOpenTransfers = false` reserves opening transfers to the host: a client
-is then refused `GetReceivers` and `InitTransfer`. With affinity handoff on, a transfer the host opens is refused unless
-both clients' streams are on the instance that opens it ("Affinity Handoff" in `ResilienceArchitecture.md`).
+is then refused `GetReceivers` and `InitTransfer`.
 
 A client that opens transfers itself is held to two ceilings of `AccessOptions`, on by default: `MaxHandshakesPerClient`
 (32 handshakes at once on an instance) and `MaxOpenTransfersPerClient` (256 open transfers, counted through the state
@@ -178,7 +181,15 @@ using var host = new HostBuilder()
         }))
     .Start();
 
-// Clients connect through host.GetTestServer().CreateHandler(); clock.Advance(...) runs the hub's timeouts.
+// Pass host.GetTestServer().CreateHandler() via WithHttpMessageHandler with WriteTransportPolicy.SegmentsOnly
+// (TestServer does not relay WebSocket upgrades; use Kestrel on loopback to test WebSockets).
+// clock.Advance(...) runs the hub's timeouts.
+await using var sender = new TransportRClientBuilder<Order>()
+    .WithUrl("http://localhost")
+    .WithHttpMessageHandler(host.GetTestServer().CreateHandler())
+    .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+    .WithMessagePackSerialization()
+    .Build();
 ```
 
 ## Dependencies

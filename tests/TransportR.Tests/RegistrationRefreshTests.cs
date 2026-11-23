@@ -76,7 +76,7 @@ public class RegistrationRefreshTests
         await using var node = await Node.StartAsync(["g"]);
         await using var receiver = node.NewClient("receiver", "g");
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await receiver.ConnectAsync();
 
         await using var send = await node.Client.InitTransferAsync(receiver.ClientId, batchSize: 10);

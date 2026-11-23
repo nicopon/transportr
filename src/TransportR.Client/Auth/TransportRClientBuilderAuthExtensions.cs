@@ -23,30 +23,26 @@ public static class TransportRClientBuilderAuthExtensions
         string tokenEndpoint,
         string clientId,
         string clientSecret,
-        string? scope,
-        ILoggerFactory? loggerFactory = null,
+        string? scope = null,
         HttpClient? httpClient = null)
     {
         var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
-        return httpClient != null
-            ? builder.WithTokenProvider(CreateProvider(options, loggerFactory, httpClient))
-            : builder.WithTokenProviderFactory(handler => CreateProvider(options, loggerFactory, OnTheHubsHandler(handler)));
+        return builder.WithTokenProviderFactory((handler, loggerFactory) =>
+            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler)));
     }
 
-    /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, ILoggerFactory?, HttpClient?)"/>
+    /// <inheritdoc cref="WithClientCredentials{T}(TransportRClientBuilder{T}, string, string, string, string?, HttpClient?)"/>
     public static ByteStreamClientBuilder WithClientCredentials(
         this ByteStreamClientBuilder builder,
         string tokenEndpoint,
         string clientId,
         string clientSecret,
-        string? scope,
-        ILoggerFactory? loggerFactory = null,
+        string? scope = null,
         HttpClient? httpClient = null)
     {
         var options = OptionsOf(tokenEndpoint, clientId, clientSecret, scope);
-        return httpClient != null
-            ? builder.WithTokenProvider(CreateProvider(options, loggerFactory, httpClient))
-            : builder.WithTokenProviderFactory(handler => CreateProvider(options, loggerFactory, OnTheHubsHandler(handler)));
+        return builder.WithTokenProviderFactory((handler, loggerFactory) =>
+            CreateProvider(options, loggerFactory, httpClient ?? OnTheHubsHandler(handler)));
     }
 
     private static ClientCredentialsOptions OptionsOf(string tokenEndpoint, string clientId, string clientSecret, string? scope)

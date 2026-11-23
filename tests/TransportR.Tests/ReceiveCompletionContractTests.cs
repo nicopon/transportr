@@ -61,7 +61,7 @@ public class ReceiveCompletionContractTests
         await using var receiver = TestClients.Create(handler, "http://localhost");
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -99,7 +99,7 @@ public class ReceiveCompletionContractTests
         await using var receiver = TestClients.Create(handler, "http://localhost", logger: clientLogs.Factory.CreateLogger("receiver"));
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -150,7 +150,7 @@ public class ReceiveCompletionContractTests
         await using var receiver = TestClients.Create(handler, "http://localhost");
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -196,7 +196,7 @@ public class ReceiveCompletionContractTests
         await using var receiver = TestClients.Create(handler, "http://localhost");
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 

@@ -305,7 +305,7 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
     /// that holds the receiver, and returns the transfer the hub opened with the affinity that reached
     /// that instance.
     /// </summary>
-    public async Task<(string TransferId, string? Affinity)> OpenTransferAsync(Guid targetClientId)
+    public async Task<(string TransferId, string? Affinity)> OpenTransferAsync(Guid targetClientId, CancellationToken cancellationToken = default)
     {
         // The affinity this request carries is the transfer's from then on: the handshake runs on the
         // instance it reaches, and the bridge is there.
@@ -315,23 +315,24 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
         // The hub answers within the handshake timeout it was given or not at all, and the HttpClient has
         // no timeout of its own: this one deadline is all that ends a call to a hub that has gone quiet.
         using var deadline = new CancellationTokenSource(_options.HandshakeTimeout + HandshakeMargin);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, cancellationToken);
 
         InitTransferResponse opened;
         HttpResponseMessage? response = null;
         try
         {
-            response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, deadline.Token);
+            response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, linked.Token);
             if (response.StatusCode == HttpStatusCode.MisdirectedRequest)
             {
                 // The receiver is on another instance. Only this request goes there: the client's own
                 // stream, and its other transfers, stay where they are.
-                var redirect = await response.Content.ReadFromJsonAsync<AffinityRedirect>(ControlPlane.Json, deadline.Token)
+                var redirect = await response.Content.ReadFromJsonAsync<AffinityRedirect>(ControlPlane.Json, linked.Token)
                     ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub redirected the transfer without saying where.");
                 _logger.LogInformation("The receiver is on another hub instance. Sending the transfer request there (cookie {CookieName}).", redirect.CookieName);
 
                 affinity = ControlChannel.WithCookie(affinity, redirect.CookieName, redirect.Token);
                 response.Dispose();
-                response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, deadline.Token);
+                response = await _channel.SendAsync(HttpMethod.Post, WireRoutes.TransfersSegment, request, affinity, linked.Token);
 
                 if (response.StatusCode == HttpStatusCode.MisdirectedRequest)
                 {
@@ -339,11 +340,11 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                 }
             }
 
-            await ControlChannel.EnsureAcceptedAsync(response, deadline.Token);
-            opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, deadline.Token)
+            await ControlChannel.EnsureAcceptedAsync(response, linked.Token);
+            opened = await response.Content.ReadFromJsonAsync<InitTransferResponse>(ControlPlane.Json, linked.Token)
                 ?? throw new HubRequestFailedException(HubRequestFailureCategory.Other, "The hub opened the transfer without naming it.");
         }
-        catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "The hub did not answer the transfer request to ReceiverId={TargetId} within {Seconds}s (handshake timeout {HandshakeSeconds}s plus {MarginSeconds}s).",
@@ -378,7 +379,8 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
                     s.WriteTransportFallback,
                     !s.IsEncrypted ? TransferProtection.None
                         : s.UsesPreSharedKey ? TransferProtection.EncryptedWithPreSharedKey
-                        : TransferProtection.Encrypted
+                        : TransferProtection.Encrypted,
+                    s.IsSender ? s.ReceiverId : s.SenderId
                 ))
         ];
     }

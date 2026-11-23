@@ -18,11 +18,11 @@ internal sealed class ByteWorkload(int seed, int batchBytes) : Workload
         _receiver = new ByteStreamClientBuilder(batchBytes)
             .WithUrl(hubUrl)
             .Build();
-        _receiver.OnTransferStarted += transfer =>
+        _receiver.OnTransferStarted(transfer =>
         {
             _ = Task.Run(() => ReceiveAsync(transfer, _received, _expectedBytes, cancellationToken), CancellationToken.None);
             return Task.CompletedTask;
-        };
+        });
         await _receiver.ConnectAsync([ReceiverGroup], cancellationToken).ConfigureAwait(false);
 
         _sender = new ByteStreamClientBuilder(batchBytes)

@@ -531,6 +531,8 @@ public class ByteSendReceiveTests
         }
 
         public string TransferId => "fake";
+        public Guid SenderId => Guid.Empty;
+        public Guid ReceiverId => Guid.Empty;
         public int BatchSize => 1;
         public string DataUrl => "http://localhost";
         public bool IsSender => true;

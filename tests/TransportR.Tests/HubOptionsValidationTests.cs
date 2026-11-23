@@ -64,4 +64,59 @@ public class HubOptionsValidationTests
                 o.ConnectedTtlSeconds = connectedTtl;
             });
         });
+
+    [Fact]
+    public void FluentConfigureHelpers_ApplyOptions_AndRefuseNullDelegates()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddDataHub();
+
+        Assert.Throws<ArgumentNullException>(() => builder.ConfigureDataPlane(null!));
+        Assert.Throws<ArgumentNullException>(() => builder.ConfigureAccess(null!));
+        Assert.Throws<ArgumentNullException>(() => builder.ConfigureClientRegistry(null!));
+
+        using var host = TestHubServerFactory.CreateHost(sc => sc
+            .AddDataHub()
+            .UseDevMode()
+            .ConfigureDataPlane(o =>
+            {
+                o.BridgeTimeoutSeconds = 120;
+                o.TransferInactivityTimeoutSeconds = 45;
+                o.StalledProgressTimeoutSeconds = 200;
+            })
+            .ConfigureAccess(o =>
+            {
+                o.AccessSweepIntervalSeconds = 15;
+                o.MaxOpenTransfersPerClient = 64;
+            })
+            .ConfigureClientRegistry(o =>
+            {
+                o.DisconnectedGraceSeconds = 120;
+                o.ConnectedTtlSeconds = 1800;
+            }));
+
+        var plane = host.Services.GetRequiredService<IOptions<DataPlaneConfiguration>>().Value;
+        var access = host.Services.GetRequiredService<IOptions<AccessOptions>>().Value;
+        var registry = host.Services.GetRequiredService<IOptions<ClientRegistryConfiguration>>().Value;
+
+        Assert.Equal(120, plane.BridgeTimeoutSeconds);
+        Assert.Equal(45, plane.TransferInactivityTimeoutSeconds);
+        Assert.Equal(200, plane.StalledProgressTimeoutSeconds);
+        Assert.Equal(15, access.AccessSweepIntervalSeconds);
+        Assert.Equal(64, access.MaxOpenTransfersPerClient);
+        Assert.Equal(120, registry.DisconnectedGraceSeconds);
+        Assert.Equal(1800, registry.ConnectedTtlSeconds);
+    }
+
+    [Fact]
+    public void FluentConfigureHelpers_TriggerStartupValidationOnInvalidValues()
+    {
+        var failure = Record.Exception(() => TestHubServerFactory.CreateHost(services => services
+            .AddDataHub()
+            .UseDevMode()
+            .ConfigureDataPlane(o => o.BridgeTimeoutSeconds = 0)));
+
+        var refused = Assert.IsType<OptionsValidationException>(failure);
+        Assert.Contains("BridgeTimeoutSeconds", refused.Message);
+    }
 }

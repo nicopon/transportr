@@ -43,9 +43,14 @@ public interface IDataClient
 public interface IDataReceiver<T> : IDataClient
 {
     /// <summary>
-    /// Event fired when a new transfer is initiated targeting this receiver.
+    /// Registers the handler called when a new transfer is initiated targeting this receiver.
     /// </summary>
+    /// <param name="handler">The handler receiving each transfer handle.</param>
     /// <remarks>
+    /// <para>
+    /// Only one handler may be registered per client. Calling this method more than once throws
+    /// <see cref="InvalidOperationException"/>.
+    /// </para>
     /// <para>
     /// The handler consumes items from the transfer's <see cref="Receive{T}.ReceiveAsync"/> method
     /// and owns the handle it is given: nothing else disposes it, and a handle left alive keeps its
@@ -61,7 +66,9 @@ public interface IDataReceiver<T> : IDataClient
     /// <see cref="TransferFailedException"/>. A transfer that has ended keeps its outcome.
     /// </para>
     /// </remarks>
-    event Func<Receive<T>, Task> OnTransferStarted;
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
+    void OnTransferStarted(Func<Receive<T>, Task> handler);
 }
 
 /// <summary>
@@ -75,20 +82,24 @@ public interface IDataSender<T> : IDataClient
     /// </summary>
     /// <param name="targetClientId">The ID of the receiver client.</param>
     /// <param name="batchSize">Optional batch size override. Uses default if not specified.</param>
+    /// <param name="cancellationToken">Token to cancel the transfer initiation.</param>
     /// <returns>A Send handle to transmit items through.</returns>
     /// <exception cref="HubRequestFailedException">
     /// The hub refused the transfer, or the handshake failed: the receiver is unknown, unreachable or
     /// refused it, or it timed out.
     /// </exception>
-    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
+    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Event fired when the application hosting the hub opens a transfer from this client, rather
-    /// than this client calling <see cref="InitTransferAsync"/>.
+    /// Registers the handler called when the application hosting the hub opens a transfer from this
+    /// client, rather than this client calling <see cref="InitTransferAsync"/>.
     /// </summary>
+    /// <param name="handler">The handler sending through each transfer handle.</param>
     /// <remarks>
-    /// The handler owns the handle it is given, as with <c>OnTransferStarted</c>: it sends through
-    /// it, completes it and disposes it. The client answers the hub once the handler has returned
+    /// Only one handler may be registered per client. Calling this method more than once throws
+    /// <see cref="InvalidOperationException"/>.
+    /// The handler owns the handle it is given, as with <see cref="IDataReceiver{T}.OnTransferStarted"/>:
+    /// it sends through it, completes it and disposes it. The client answers the hub once the handler has returned
     /// its task, not once that task has ended, so the handshake's timeout bounds only what the
     /// handler does before it returns: it may send in its body, or hand the handle off and return.
     /// An exception thrown before it returns, or a task already faulted or cancelled when it does,
@@ -99,7 +110,9 @@ public interface IDataSender<T> : IDataClient
     /// outcome. With no handler attached the client refuses such transfers, and the host's request
     /// fails.
     /// </remarks>
-    event Func<Send<T>, Task> OnSendRequested;
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
+    void OnSendRequested(Func<Send<T>, Task> handler);
 
     /// <summary>
     /// Gets a list of receivers that this client is authorized to send data to.

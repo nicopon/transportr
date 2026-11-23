@@ -7,7 +7,7 @@ namespace TransportR.Client.Internal;
 /// <summary>
 /// Handle for sending data to a receiver. Wraps an IDataSession.
 /// </summary>
-internal class HttpSend<T>(IDataSession session, ISendPort<T> port) : Send<T>(session.TransferId)
+internal class HttpSend<T>(IDataSession session, ISendPort<T> port) : Send<T>(session.TransferId, session.ReceiverId)
 {
     public override Task SendAsync(T item, CancellationToken cancellationToken = default)
     {
@@ -37,7 +37,7 @@ internal class HttpSend<T>(IDataSession session, ISendPort<T> port) : Send<T>(se
 /// <summary>
 /// Handle for receiving data from a sender. Wraps an IDataSession.
 /// </summary>
-internal class HttpReceive<T>(IDataSession session, IReceivePort<T> port) : Receive<T>(session.TransferId, session.BatchSize)
+internal class HttpReceive<T>(IDataSession session, IReceivePort<T> port) : Receive<T>(session.TransferId, session.BatchSize, session.SenderId)
 {
     /// <summary>
     /// Ends only once the transfer has reached its outcome, not at the last item: the acknowledgement
@@ -70,7 +70,7 @@ internal class HttpReceive<T>(IDataSession session, IReceivePort<T> port) : Rece
 /// </summary>
 /// <param name="append">Appends bytes to the stream; copies them before it returns.</param>
 internal sealed class HttpByteSend(IDataSession session, Func<ReadOnlyMemory<byte>, CancellationToken, Task> append)
-    : ByteSend(session.TransferId)
+    : ByteSend(session.TransferId, session.ReceiverId)
 {
     public override Task WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken = default)
     {
@@ -107,7 +107,7 @@ internal sealed class HttpByteSend(IDataSession session, Func<ReadOnlyMemory<byt
 /// </remarks>
 /// <param name="readChunks">The chunks of the transfer, each the reader's to dispose.</param>
 internal sealed class HttpByteReceive(IDataSession session, Func<CancellationToken, IAsyncEnumerable<ByteChunk>> readChunks)
-    : ByteReceive(session.TransferId)
+    : ByteReceive(session.TransferId, session.SenderId)
 {
     private readonly CancellationTokenSource _lifetime = new();
     private IAsyncEnumerator<ByteChunk>? _chunks;

@@ -156,8 +156,7 @@ if (receiverOptions.Auth?.IsConfigured == true)
         receiverOptions.Auth.TokenEndpoint,
         receiverOptions.Auth.ClientId,
         receiverOptions.Auth.ClientSecret,
-        receiverOptions.Auth.Scope,
-        loggerFactory);
+        receiverOptions.Auth.Scope);
 }
 else if (!string.IsNullOrEmpty(receiverOptions.AccessToken))
 {
@@ -183,7 +182,7 @@ try
     await broker.ConnectAsync(new[] { group }, cts.Token);
     logger.LogInformation("Client registered (ID={ClientId}, Group={Group}). Waiting for {Count} streams...", broker.ClientId, group, expectedTransfers);
 
-    broker.OnTransferStarted += async (Receive<Order> transfer) =>
+    broker.OnTransferStarted(async (Receive<Order> transfer) =>
     {
         // Run specific transfer logic in background
         _ = Task.Run(async () =>
@@ -215,7 +214,7 @@ try
 
         });
         await Task.CompletedTask;
-    };
+    });
 
     // Wait for all operations to complete
     await Task.Run(() => completionSignal.Wait(cts.Token));
@@ -307,8 +306,7 @@ static async Task RunByteStreamAsync(
             options.Auth.TokenEndpoint,
             options.Auth.ClientId,
             options.Auth.ClientSecret,
-            options.Auth.Scope,
-            loggerFactory);
+            options.Auth.Scope);
     }
     else if (!string.IsNullOrEmpty(options.AccessToken))
     {
@@ -332,7 +330,7 @@ static async Task RunByteStreamAsync(
         await broker.ConnectAsync(new[] { options.Group }, cts.Token);
         logger.LogInformation("Client registered (ID={ClientId}, Group={Group}). Waiting for {Count} streams...", broker.ClientId, options.Group, expectedTransfers);
 
-        broker.OnTransferStarted += async (ByteReceive transfer) =>
+        broker.OnTransferStarted(async (ByteReceive transfer) =>
         {
             _ = Task.Run(async () =>
             {
@@ -363,7 +361,7 @@ static async Task RunByteStreamAsync(
                 logger.LogInformation("[Transfer {TransferId}] Signalled.", transfer.TransferId);
             });
             await Task.CompletedTask;
-        };
+        });
 
         await Task.Run(() => completionSignal.Wait(cts.Token));
         logger.LogInformation("All expected transfers completed.");

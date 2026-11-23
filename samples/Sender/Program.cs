@@ -157,8 +157,7 @@ if (senderOptions.Auth?.IsConfigured == true)
         senderOptions.Auth.TokenEndpoint,
         senderOptions.Auth.ClientId,
         senderOptions.Auth.ClientSecret,
-        senderOptions.Auth.Scope,
-        loggerFactory);
+        senderOptions.Auth.Scope);
 }
 else if (!string.IsNullOrEmpty(senderOptions.AccessToken))
 {
@@ -336,8 +335,7 @@ static async Task RunByteStreamAsync(
             options.Auth.TokenEndpoint,
             options.Auth.ClientId,
             options.Auth.ClientSecret,
-            options.Auth.Scope,
-            loggerFactory);
+            options.Auth.Scope);
     }
     else if (!string.IsNullOrEmpty(options.AccessToken))
     {

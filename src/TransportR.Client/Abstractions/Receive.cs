@@ -5,7 +5,7 @@ namespace TransportR.Client;
 /// </summary>
 /// <typeparam name="T">The type of items to receive.</typeparam>
 /// <remarks>
-/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it; the client
+/// The handler given to <see cref="IDataReceiver{T}.OnTransferStarted"/> owns the handle and must dispose it; the client
 /// disposes it in the handler's place only when the handler's task faults or is cancelled after the
 /// handler has returned.
 /// Until it is disposed, the session stays registered with its client, which is what keeps its
@@ -24,13 +24,20 @@ public abstract class Receive<T> : Transfer, IAsyncDisposable
     public int BatchSize { get; }
 
     /// <summary>
+    /// Gets the sending client's identifier for this transfer.
+    /// </summary>
+    public Guid SenderId { get; }
+
+    /// <summary>
     /// Creates a new receive handle.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier.</param>
     /// <param name="batchSize">The batch size for this transfer.</param>
-    protected Receive(string transferId, int batchSize) : base(transferId)
+    /// <param name="senderId">The sending client's identifier.</param>
+    protected Receive(string transferId, int batchSize, Guid senderId = default) : base(transferId)
     {
         BatchSize = batchSize;
+        SenderId = senderId;
     }
 
     /// <summary>

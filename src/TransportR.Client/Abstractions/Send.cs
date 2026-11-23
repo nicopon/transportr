@@ -7,10 +7,19 @@ namespace TransportR.Client;
 public abstract class Send<T> : Transfer, IAsyncDisposable
 {
     /// <summary>
+    /// Gets the receiving client's identifier for this transfer.
+    /// </summary>
+    public Guid ReceiverId { get; }
+
+    /// <summary>
     /// Creates a new send handle.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier.</param>
-    protected Send(string transferId) : base(transferId) { }
+    /// <param name="receiverId">The receiving client's identifier.</param>
+    protected Send(string transferId, Guid receiverId = default) : base(transferId)
+    {
+        ReceiverId = receiverId;
+    }
 
     /// <summary>
     /// Sends a single item through the transfer.

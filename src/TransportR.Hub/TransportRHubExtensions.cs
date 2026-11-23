@@ -116,6 +116,36 @@ public class DataHubBuilder
         });
         return this;
     }
+
+    /// <summary>
+    /// Configures <see cref="DataPlaneConfiguration"/> timeouts for bridges, inactivity, and stalled progress.
+    /// </summary>
+    public DataHubBuilder ConfigureDataPlane(Action<DataPlaneConfiguration> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        Services.Configure(configure);
+        return this;
+    }
+
+    /// <summary>
+    /// Configures <see cref="AccessOptions"/> for token expiry margin, access sweeps, and transfer limits.
+    /// </summary>
+    public DataHubBuilder ConfigureAccess(Action<AccessOptions> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        Services.Configure(configure);
+        return this;
+    }
+
+    /// <summary>
+    /// Configures <see cref="ClientRegistryConfiguration"/> lifetimes for connected and disconnected clients.
+    /// </summary>
+    public DataHubBuilder ConfigureClientRegistry(Action<ClientRegistryConfiguration> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        Services.Configure(configure);
+        return this;
+    }
 }
 
 public static class TransportRHubExtensions

@@ -71,8 +71,8 @@ public class HostHandshakeTimeoutTests
         var handler = host.GetTestServer().CreateHandler();
         var sender = TestClients.Create(handler, "http://localhost");
         var receiver = TestClients.Create(handler, "http://localhost");
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
-        sender.OnSendRequested += _ => Task.CompletedTask;
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
+        sender.OnSendRequested(_ => Task.CompletedTask);
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
         return new ConnectedPair(sender, receiver);

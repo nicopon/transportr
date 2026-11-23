@@ -17,8 +17,9 @@ internal static class ClientEndToEndEncryption
         return client;
     }
 
-    public static TransportRClientBuilder<Order> KeyPerPair(TransportRClientBuilder<Order> builder, Dictionary<Guid, byte[]> keys) =>
+    public static TransportRClientBuilder<Order> KeyPerPair(TransportRClientBuilder<Order> builder, Guid nodeId, Dictionary<Guid, byte[]> keys) =>
         builder
+            .WithClientId(nodeId)
             // keys: a Dictionary<Guid, byte[]> read from this node's own configuration, one key per peer
             .WithEndToEndEncryption(peerId => keys.GetValueOrDefault(peerId));
 }

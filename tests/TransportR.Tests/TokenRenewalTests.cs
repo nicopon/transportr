@@ -53,7 +53,7 @@ public class TokenRenewalTests
         await using var receiver = TestClients.Create(handler, "http://localhost", receiverTokens.GetAsync);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -216,7 +216,7 @@ public class TokenRenewalTests
             .Build();
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();

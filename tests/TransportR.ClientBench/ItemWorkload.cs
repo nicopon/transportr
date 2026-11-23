@@ -54,11 +54,11 @@ internal sealed class ItemWorkload : Workload
             .WithBatchTimeout(TimeSpan.FromMilliseconds(FlushIntervalMs))
             .WithMessagePackSerialization(useAnnotations: false)
             .Build();
-        _receiver.OnTransferStarted += transfer =>
+        _receiver.OnTransferStarted(transfer =>
         {
             _ = Task.Run(() => ReceiveAsync(transfer, _received, _expectedItems, cancellationToken), CancellationToken.None);
             return Task.CompletedTask;
-        };
+        });
         await _receiver.ConnectAsync([ReceiverGroup], cancellationToken).ConfigureAwait(false);
 
         _sender = new TransportRClientBuilder<Item>()

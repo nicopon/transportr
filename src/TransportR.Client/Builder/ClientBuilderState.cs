@@ -28,13 +28,16 @@ internal sealed class ClientBuilderState
     private static readonly TimeSpan LongestAcknowledgementTimeout = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
 
     private string? _url;
+    private Guid? _clientId;
     private int _batchFlushIntervalMs = 1000;
     private int? _maxInFlightBatches;
     private ILoggerFactory? _loggerFactory;
     private string? _accessToken;
     private Func<Task<string>>? _tokenProvider;
-    private Func<HttpMessageHandler, Func<Task<string>>>? _tokenProviderFactory;
+    private Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>>? _tokenProviderFactory;
     private Action<SocketsHttpHandler>? _configureHttpHandler;
+    private HttpMessageHandler? _customHttpHandler;
+    private bool _disposeHttpHandler;
     private TimeSpan? _tokenRefreshThreshold;
     private TimeSpan? _acknowledgementTimeout;
     private WriteTransportPolicy _writeTransportPolicy = WriteTransportPolicy.PreferWebSocket;
@@ -46,6 +49,16 @@ internal sealed class ClientBuilderState
     public int MaxBatchBytes { get; private set; } = ClientOptions.DefaultMaxBatchBytes;
 
     public void SetUrl(string url) => _url = url;
+
+    public void SetClientId(Guid clientId)
+    {
+        if (clientId == Guid.Empty)
+        {
+            throw new ArgumentException("Client ID cannot be empty.", nameof(clientId));
+        }
+
+        _clientId = clientId;
+    }
 
     public void SetBatchTimeout(TimeSpan timeout)
     {
@@ -98,7 +111,7 @@ internal sealed class ClientBuilderState
         _tokenProviderFactory = null;
     }
 
-    public void SetTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    public void SetTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
     {
         _tokenProviderFactory = factory;
         _tokenProvider = null;
@@ -108,6 +121,13 @@ internal sealed class ClientBuilderState
     {
         ArgumentNullException.ThrowIfNull(configure);
         _configureHttpHandler = configure;
+    }
+
+    public void SetHttpMessageHandler(HttpMessageHandler handler, bool disposeHandler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _customHttpHandler = handler;
+        _disposeHttpHandler = disposeHandler;
     }
 
     public void SetEndToEndEncryption() => _endToEndEncryption = new EndToEndEncryption();
@@ -156,7 +176,25 @@ internal sealed class ClientBuilderState
             throw new PlatformNotSupportedException("End-to-end encryption needs AES-GCM, which this platform does not provide.");
         }
 
-        var httpHandler = CreateHttpHandler();
+        if (_customHttpHandler is not null && _configureHttpHandler is not null)
+        {
+            throw new InvalidOperationException("Cannot configure both ConfigureHttpHandler and WithHttpMessageHandler.");
+        }
+
+        HttpMessageHandler httpHandler;
+        bool disposeHandler;
+        if (_customHttpHandler is not null)
+        {
+            ValidateHandlerChain(_customHttpHandler);
+            httpHandler = _customHttpHandler;
+            disposeHandler = _disposeHttpHandler;
+        }
+        else
+        {
+            httpHandler = CreateHttpHandler();
+            disposeHandler = true;
+        }
+
         var loggerFactory = _loggerFactory ?? NullLoggerFactory.Instance;
 
         var options = new ClientOptions
@@ -188,23 +226,39 @@ internal sealed class ClientBuilderState
         var hubUrl = _url!.TrimEnd('/');
         var dataUrl = hubUrl + WireRoutes.StreamBase;
 
-        // The hub's HttpClient owns the handler, and the client disposes it. A token provider made here
-        // reaches its identity provider through the same handler without owning it.
-        var httpClient = new HttpClient(httpHandler)
+        // The hub's HttpClient owns the handler when built internally or when disposeHandler is true.
+        // A token provider made here reaches its identity provider through the same handler without owning it.
+        var httpClient = new HttpClient(httpHandler, disposeHandler)
         {
             Timeout = Timeout.InfiniteTimeSpan
         };
 
         var channel = new ControlChannel(
             hubUrl,
-            Guid.NewGuid(),
+            _clientId ?? Guid.NewGuid(),
             httpClient,
             options,
             loggerFactory.CreateLogger<ControlChannel>(),
             _accessToken,
-            _tokenProviderFactory?.Invoke(httpHandler) ?? _tokenProvider);
+            _tokenProviderFactory?.Invoke(httpHandler, loggerFactory) ?? _tokenProvider);
 
         return new ClientWiring(channel, options, dataUrl, httpClient);
+    }
+
+    private static void ValidateHandlerChain(HttpMessageHandler handler)
+    {
+        for (var current = handler; current is not null; current = (current as DelegatingHandler)?.InnerHandler)
+        {
+            switch (current)
+            {
+                case SocketsHttpHandler sockets:
+                    CheckHandlerSettings("WithHttpMessageHandler", sockets.UseCookies, sockets.AutomaticDecompression);
+                    break;
+                case HttpClientHandler httpHandler:
+                    CheckHandlerSettings("WithHttpMessageHandler", httpHandler.UseCookies, httpHandler.AutomaticDecompression);
+                    break;
+            }
+        }
     }
 
     private SocketsHttpHandler CreateHttpHandler()
@@ -220,18 +274,7 @@ internal sealed class ClientBuilderState
         try
         {
             _configureHttpHandler?.Invoke(handler);
-
-            if (handler.UseCookies)
-            {
-                throw Refused(nameof(SocketsHttpHandler.UseCookies),
-                    "the client sets the cookies of each request itself, and a cookie container would override them");
-            }
-
-            if (handler.AutomaticDecompression != DecompressionMethods.None)
-            {
-                throw Refused(nameof(SocketsHttpHandler.AutomaticDecompression),
-                    "it invites compression on the way to the client, which may hold a stream back instead of forwarding it as it is written");
-            }
+            CheckHandlerSettings("ConfigureHttpHandler", handler.UseCookies, handler.AutomaticDecompression);
         }
         catch
         {
@@ -242,6 +285,21 @@ internal sealed class ClientBuilderState
         return handler;
     }
 
-    private static InvalidOperationException Refused(string setting, string why) =>
-        new($"ConfigureHttpHandler may not set {setting}: {why}.");
+    private static void CheckHandlerSettings(string origin, bool useCookies, DecompressionMethods automaticDecompression)
+    {
+        if (useCookies)
+        {
+            throw Refused(origin, nameof(SocketsHttpHandler.UseCookies),
+                "the client sets the cookies of each request itself, and a cookie container would override them");
+        }
+
+        if (automaticDecompression != DecompressionMethods.None)
+        {
+            throw Refused(origin, nameof(SocketsHttpHandler.AutomaticDecompression),
+                "it invites compression on the way to the client, which may hold a stream back instead of forwarding it as it is written");
+        }
+    }
+
+    private static InvalidOperationException Refused(string origin, string setting, string why) =>
+        new($"{origin} may not set {setting}: {why}.");
 }

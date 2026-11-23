@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using MessagePack;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Logging;
 using TransportR.Client;
 using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
@@ -44,10 +45,14 @@ internal static class ReadmeQuickStart
     // test can point it at its own hub.
     public static async Task Sender(string hubUrl)
     {
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+
         // Connect to hub
-        var sender = new TransportRClientBuilder<Order>()
+        await using var sender = new TransportRClientBuilder<Order>()
             .WithUrl(hubUrl)
             .WithMessagePackSerialization()
+            .WithMaxInFlightBatches(8)              // size backpressure to your payload; see Configuration
+            .WithLoggerFactory(loggerFactory)
             .Build();
 
         // In dev mode a client names its groups; with authentication they come from its token.
@@ -69,12 +74,16 @@ internal static class ReadmeQuickStart
     // that source's token as parameters so that a test can point it at its own hub and end its wait.
     public static async Task Receiver(string hubUrl, CancellationToken stop)
     {
-        var receiver = new TransportRClientBuilder<Order>()
+        using var loggerFactory = LoggerFactory.Create(b => b.AddConsole());
+
+        await using var receiver = new TransportRClientBuilder<Order>()
             .WithUrl(hubUrl)
             .WithMessagePackSerialization()
+            .WithReceiveCapacity(maxItems: 10_000)  // size backpressure to your payload; see Configuration
+            .WithLoggerFactory(loggerFactory)
             .Build();
 
-        receiver.OnTransferStarted += async transfer =>
+        receiver.OnTransferStarted(async transfer =>
         {
             // The handler owns the handle and must release it. The loop below ends only once the
             // transfer has reached its outcome, not at the last item, so releasing right after it
@@ -86,7 +95,7 @@ internal static class ReadmeQuickStart
                     Console.WriteLine($"Received: {order.Id}");
                 }
             }
-        };
+        });
 
         await receiver.ConnectAsync(["receivers"]);
         await Task.Delay(Timeout.Infinite, stop).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing); // Keep listening until Ctrl+C

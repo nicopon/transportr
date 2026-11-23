@@ -104,7 +104,7 @@ public class FinishedTransferTests
         await using var receiver = TestClients.Create(null, host.BaseUrl, configure: configure);
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 

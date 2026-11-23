@@ -32,9 +32,8 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
 
-    public event Func<Receive<T>, Task>? OnTransferStarted;
-
-    public event Func<Send<T>, Task>? OnSendRequested;
+    private Func<Receive<T>, Task>? _onTransferStarted;
+    private Func<Send<T>, Task>? _onSendRequested;
 
     private readonly TransferSignaling<ClientSession<T>, Send<T>, Receive<T>> _signaling;
 
@@ -66,10 +65,30 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
             session => new HttpReceive<T>(session.Session, session.Receive),
             logger,
             defaultBatchSize,
-            (t) => OnTransferStarted?.Invoke(t) ?? Task.CompletedTask,
-            () => OnSendRequested
+            (t) => Volatile.Read(ref _onTransferStarted)?.Invoke(t) ?? Task.CompletedTask,
+            () => Volatile.Read(ref _onSendRequested)
         );
         _signaling.Initialize();
+    }
+
+    /// <inheritdoc />
+    public void OnTransferStarted(Func<Receive<T>, Task> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (Interlocked.CompareExchange(ref _onTransferStarted, handler, null) is not null)
+        {
+            throw new InvalidOperationException("A handler is already registered for OnTransferStarted.");
+        }
+    }
+
+    /// <inheritdoc />
+    public void OnSendRequested(Func<Send<T>, Task> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (Interlocked.CompareExchange(ref _onSendRequested, handler, null) is not null)
+        {
+            throw new InvalidOperationException("A handler is already registered for OnSendRequested.");
+        }
     }
 
     public Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)
@@ -155,12 +174,12 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     public Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken cancellationToken = default)
         => _connection.GetReceiversAsync(group, cancellationToken);
 
-    public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null)
+    public async Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null, CancellationToken cancellationToken = default)
     {
         int size = batchSize ?? _defaultBatchSize;
         _logger.LogInformation("Initiating Transfer to ReceiverId={TargetId} (Size={Size})...", targetClientId, size);
 
-        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId);
+        var (transferId, affinity) = await _connection.OpenTransferAsync(targetClientId, cancellationToken);
         return await _signaling.StartRequestedSendAsync(transferId, size, targetClientId, affinity);
     }
 

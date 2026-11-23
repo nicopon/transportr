@@ -77,7 +77,7 @@ public class ByteStreamTransferTests
     private static async Task<(ByteSend Send, ByteReceive Receive)> OpenAsync(ByteStreamClient sender, ByteStreamClient receiver)
     {
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -91,7 +91,7 @@ public class ByteStreamTransferTests
     private static async Task<(ByteSend Send, Receive<byte[]> Receive)> OpenAsync(ByteStreamClient sender, TransportRClient<byte[]> receiver)
     {
         var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -106,7 +106,7 @@ public class ByteStreamTransferTests
         TransportRClient<byte[]> sender, ByteStreamClient receiver, int senderBatchSize)
     {
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -121,7 +121,7 @@ public class ByteStreamTransferTests
         TransportRClient<byte[]> sender, TransportRClient<byte[]> receiver, int senderBatchSize)
     {
         var receiveHandle = new TaskCompletionSource<Receive<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -355,8 +355,8 @@ public class ByteStreamTransferTests
 
         var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -392,7 +392,7 @@ public class ByteStreamTransferTests
 
         var source = Payload(7321);
         var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += async send =>
+        sender.OnSendRequested(async send =>
         {
             await using (send)
             {
@@ -400,9 +400,9 @@ public class ByteStreamTransferTests
                 await send.CompleteAsync();
             }
             sent.TrySetResult();
-        };
+        });
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -427,14 +427,14 @@ public class ByteStreamTransferTests
 
         var received = new MemoryStream();
         var copied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += async receive =>
+        receiver.OnTransferStarted(async receive =>
         {
             await using (receive)
             {
                 await receive.CopyToAsync(received);
             }
             copied.TrySetResult();
-        };
+        });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -668,6 +668,80 @@ public class ByteStreamTransferTests
                 && request.RequestUri!.AbsolutePath.EndsWith("/send", StringComparison.Ordinal))
             {
                 await closed.Task.WaitAsync(cancellationToken);
+            }
+
+            return await base.SendAsync(request, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task InitTransferAsync_CancelledByCaller_ThrowsOperationCanceledException()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        await using var sender = CreateByteClient(new SilentTransferInitHandler(server.CreateHandler()), batchBytes: 1024);
+        await sender.ConnectAsync();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => sender.InitTransferAsync(Guid.NewGuid(), cts.Token).WaitAsync(Bound));
+    }
+
+    [Fact]
+    public async Task SenderInitiatedByteTransfer_ExposesPeerIds_OnHandlesAndTransferInfo()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1024);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1024);
+
+        var (send, receive) = await OpenAsync(sender, receiver);
+        await using (send)
+        await using (receive)
+        {
+            Assert.Equal(receiver.ClientId, send.ReceiverId);
+            Assert.Equal(sender.ClientId, receive.SenderId);
+            Assert.Equal(receiver.ClientId, Assert.Single(sender.GetTransfers()).PeerId);
+            Assert.Equal(sender.ClientId, Assert.Single(receiver.GetTransfers()).PeerId);
+        }
+    }
+
+    [Fact]
+    public async Task HostInitiatedByteTransfer_ExposesPeerIds_OnHandlesAndTransferInfo()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateByteClient(handler, batchBytes: 1024);
+        await using var receiver = CreateByteClient(handler, batchBytes: 1024);
+
+        var sendHandle = new TaskCompletionSource<ByteSend>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, TimeSpan.FromSeconds(10));
+
+        await using var send = await sendHandle.Task.WaitAsync(Bound);
+        await using var receive = await receiveHandle.Task.WaitAsync(Bound);
+
+        Assert.Equal(receiver.ClientId, send.ReceiverId);
+        Assert.Equal(sender.ClientId, receive.SenderId);
+        Assert.Equal(receiver.ClientId, Assert.Single(sender.GetTransfers()).PeerId);
+        Assert.Equal(sender.ClientId, Assert.Single(receiver.GetTransfers()).PeerId);
+    }
+
+    private sealed class SilentTransferInitHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post
+                && request.RequestUri!.AbsolutePath.EndsWith("/" + WireRoutes.TransfersSegment, StringComparison.Ordinal))
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
             }
 
             return await base.SendAsync(request, cancellationToken);

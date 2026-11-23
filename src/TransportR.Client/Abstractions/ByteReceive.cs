@@ -5,7 +5,7 @@ namespace TransportR.Client;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The handler given to <c>OnTransferStarted</c> owns the handle and must dispose it; the client
+/// The handler given to <see cref="ByteStreamClient.OnTransferStarted"/> owns the handle and must dispose it; the client
 /// disposes it in the handler's place only when the handler's task faults or is cancelled after the
 /// handler has returned.
 /// Until it is disposed, the session stays registered with its client, which is what keeps its
@@ -23,10 +23,19 @@ namespace TransportR.Client;
 public abstract class ByteReceive : Transfer, IAsyncDisposable
 {
     /// <summary>
+    /// Gets the sending client's identifier for this transfer.
+    /// </summary>
+    public Guid SenderId { get; }
+
+    /// <summary>
     /// Creates a new receive handle.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier.</param>
-    protected ByteReceive(string transferId) : base(transferId) { }
+    /// <param name="senderId">The sending client's identifier.</param>
+    protected ByteReceive(string transferId, Guid senderId = default) : base(transferId)
+    {
+        SenderId = senderId;
+    }
 
     /// <summary>
     /// Reads up to <paramref name="buffer"/>'s length of the bytes the transfer carries, waiting until

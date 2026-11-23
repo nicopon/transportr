@@ -1,9 +1,17 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using TransportR.Client;
 using TransportR.Client.Auth;
 using TransportR.Client.Internal;
+using TransportR.Hub;
 using TransportR.Serialization.MessagePack;
 using TransportR.Tests.Infrastructure;
 
@@ -40,7 +48,7 @@ public class ConfigureHttpHandlerTests
             .Build();
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; };
+        receiver.OnTransferStarted(started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -148,6 +156,290 @@ public class ConfigureHttpHandlerTests
         await Assert.ThrowsAsync<HttpRequestException>(() => built.Channel.AcquireTokenAsync());
         Assert.Equal(TokenEndpoint, theirs);
         Assert.Equal(0, Volatile.Read(ref hubs));
+    }
+
+    [Fact]
+    public async Task WithHttpMessageHandler_CarriesItemTransferOverTestServer()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .WithMaxInFlightBatches(4)
+            .Build();
+
+        await using var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .WithReceiveCapacity(maxItems: 100)
+            .Build();
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted(started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task.WaitAsync(TestBound);
+        var consumed = ConsumeAsync(receive);
+
+        var items = Enumerable.Range(0, 25).Select(i => $"item-{i}").ToList();
+        await send.SendAsync(items).WaitAsync(TestBound);
+        await send.CompleteAsync().WaitAsync(TestBound);
+
+        Assert.Equal(items, await consumed.WaitAsync(TestBound));
+    }
+
+    [Fact]
+    public async Task WithHttpMessageHandler_CarriesByteTransferOverTestServer()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+
+        await using var sender = new ByteStreamClientBuilder(1024)
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMaxInFlightBatches(4)
+            .Build();
+
+        await using var receiver = new ByteStreamClientBuilder(1024)
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(server.CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithReceiveCapacity(1 << 16)
+            .Build();
+
+        var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted(started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId);
+        await using var receive = await receiveHandle.Task.WaitAsync(TestBound);
+
+        var received = new MemoryStream();
+        var copy = receive.CopyToAsync(received);
+
+        var payload = Enumerable.Range(0, 2500).Select(i => (byte)(i % 251)).ToArray();
+        await send.WriteAsync(payload).WaitAsync(TestBound);
+        await send.CompleteAsync().WaitAsync(TestBound);
+        await copy.WaitAsync(TestBound);
+
+        Assert.Equal(payload, received.ToArray());
+    }
+
+    [Fact]
+    public async Task WithHttpMessageHandler_WorksWithFakeTimeProvider_OnTestServer()
+    {
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        using var host = new HostBuilder()
+            .ConfigureWebHost(web => web
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.AddSingleton<TimeProvider>(clock);
+                    services.AddDataHub()
+                        .UseDevMode()
+                        .ConfigureClientRegistry(o => o.DisconnectedGraceSeconds = 10);
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDataHub(requireAuth: false));
+                }))
+            .Start();
+
+        await using var sender = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(host.GetTestServer().CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .WithMaxInFlightBatches(1)
+            .Build();
+
+        var receiver = new TransportRClientBuilder<string>()
+            .WithUrl("http://localhost")
+            .WithHttpMessageHandler(host.GetTestServer().CreateHandler())
+            .WithWriteTransport(WriteTransportPolicy.SegmentsOnly)
+            .WithMessagePackSerialization()
+            .WithReceiveCapacity(maxItems: 1)
+            .Build();
+
+        await sender.ConnectAsync(["senders"]);
+        await receiver.ConnectAsync(["receivers"]);
+        await receiver.DisposeAsync();
+
+        var duringGrace = await sender.GetReceiversAsync("receivers");
+        Assert.Equal(receiver.ClientId, Assert.Single(duringGrace).ClientId);
+
+        clock.Advance(TimeSpan.FromSeconds(11));
+
+        Assert.Empty(await sender.GetReceiversAsync("receivers"));
+    }
+
+    [Theory]
+    [InlineData("items")]
+    [InlineData("bytes")]
+    public void WithHttpMessageHandler_NullHandler_ThrowsArgumentNullException(string client)
+    {
+        Action act = client == "items"
+            ? () => ItemsBuilder().WithHttpMessageHandler(null!)
+            : () => BytesBuilder().WithHttpMessageHandler(null!);
+
+        Assert.Throws<ArgumentNullException>(act);
+    }
+
+    [Theory]
+    [InlineData("items", true)]
+    [InlineData("items", false)]
+    [InlineData("bytes", true)]
+    [InlineData("bytes", false)]
+    public void Build_RefusesCombiningConfigureHttpHandlerAndWithHttpMessageHandler(string client, bool configureFirst)
+    {
+        using var custom = new SocketsHttpHandler { UseCookies = false, AutomaticDecompression = DecompressionMethods.None };
+
+        Action build = (client, configureFirst) switch
+        {
+            ("items", true) => () => ItemsBuilder().ConfigureHttpHandler(_ => { }).WithHttpMessageHandler(custom).Build(),
+            ("items", false) => () => ItemsBuilder().WithHttpMessageHandler(custom).ConfigureHttpHandler(_ => { }).Build(),
+            ("bytes", true) => () => BytesBuilder().ConfigureHttpHandler(_ => { }).WithHttpMessageHandler(custom).Build(),
+            _ => () => BytesBuilder().WithHttpMessageHandler(custom).ConfigureHttpHandler(_ => { }).Build(),
+        };
+
+        Assert.Throws<InvalidOperationException>(build);
+    }
+
+    public static TheoryData<string, string, bool, bool> RefusedCustomHandlerSettings => new()
+    {
+        { "items", nameof(SocketsHttpHandler.UseCookies), false, false },
+        { "items", nameof(SocketsHttpHandler.AutomaticDecompression), false, false },
+        { "items", nameof(SocketsHttpHandler.UseCookies), true, true },
+        { "items", nameof(SocketsHttpHandler.AutomaticDecompression), true, true },
+        { "bytes", nameof(SocketsHttpHandler.UseCookies), false, false },
+        { "bytes", nameof(SocketsHttpHandler.AutomaticDecompression), false, false },
+        { "bytes", nameof(SocketsHttpHandler.UseCookies), true, true },
+        { "bytes", nameof(SocketsHttpHandler.AutomaticDecompression), true, true },
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedCustomHandlerSettings))]
+    public void WithHttpMessageHandler_RefusesWrappedOrDirectHandlersWithForbiddenSettings(
+        string client, string setting, bool useHttpClientHandler, bool wrapInDelegating)
+    {
+        HttpMessageHandler inner = useHttpClientHandler
+            ? new HttpClientHandler
+            {
+                UseCookies = setting == nameof(SocketsHttpHandler.UseCookies),
+                AutomaticDecompression = setting == nameof(SocketsHttpHandler.AutomaticDecompression) ? DecompressionMethods.GZip : DecompressionMethods.None,
+            }
+            : new SocketsHttpHandler
+            {
+                UseCookies = setting == nameof(SocketsHttpHandler.UseCookies),
+                AutomaticDecompression = setting == nameof(SocketsHttpHandler.AutomaticDecompression) ? DecompressionMethods.GZip : DecompressionMethods.None,
+            };
+
+        using var handler = wrapInDelegating ? new PassThroughHandler(inner) : inner;
+
+        Action build = client == "items"
+            ? () => ItemsBuilder().WithHttpMessageHandler(handler).Build()
+            : () => BytesBuilder().WithHttpMessageHandler(handler).Build();
+
+        var refused = Assert.Throws<InvalidOperationException>(build);
+        Assert.Contains(setting, refused.Message);
+    }
+
+    [Theory]
+    [InlineData("items", false)]
+    [InlineData("items", true)]
+    [InlineData("bytes", false)]
+    [InlineData("bytes", true)]
+    public async Task WithHttpMessageHandler_RespectsDisposeHandlerFlag(string client, bool disposeHandler)
+    {
+        using var probe = new DisposalTrackingHandler();
+
+        await using (var built = client == "items"
+            ? (IAsyncDisposable)ItemsBuilder().WithHttpMessageHandler(probe, disposeHandler).Build()
+            : BytesBuilder().WithHttpMessageHandler(probe, disposeHandler).Build())
+        {
+        }
+
+        Assert.Equal(disposeHandler, probe.Disposed);
+    }
+
+    [Theory]
+    [InlineData("items")]
+    [InlineData("bytes")]
+    public async Task WithClientCredentials_WithoutAnHttpClient_UsesCustomHttpMessageHandler(string client)
+    {
+        Uri? asked = null;
+        using var custom = new InterceptingHandler(req =>
+        {
+            asked = req.RequestUri;
+            throw new IOException("No identity provider in this test.");
+        });
+
+        await using var built = client == "items"
+            ? Built.Of(ItemsBuilder().WithClientCredentials(TokenEndpoint.ToString(), "id", "secret").WithHttpMessageHandler(custom).Build())
+            : Built.Of(BytesBuilder().WithClientCredentials(TokenEndpoint.ToString(), "id", "secret").WithHttpMessageHandler(custom).Build());
+
+        await Assert.ThrowsAsync<IOException>(() => built.Channel.AcquireTokenAsync());
+        Assert.Equal(TokenEndpoint, asked);
+    }
+
+    [Theory]
+    [InlineData("items", true)]
+    [InlineData("items", false)]
+    [InlineData("bytes", true)]
+    [InlineData("bytes", false)]
+    public async Task WithClientCredentials_LogsThroughBuilderLoggerFactory_RegardlessOfCallOrder(string client, bool loggerFirst)
+    {
+        using var recorder = new LogRecorder();
+        using var loggerFactory = recorder.Factory;
+        using var failingIdp = new InterceptingHandler(_ =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("bad_client") }));
+        using var idpClient = new HttpClient(failingIdp);
+
+        await using var built = (client, loggerFirst) switch
+        {
+            ("items", true) => Built.Of(ItemsBuilder().WithLoggerFactory(loggerFactory).WithClientCredentials(TokenEndpoint.ToString(), "id", "secret", httpClient: idpClient).Build()),
+            ("items", false) => Built.Of(ItemsBuilder().WithClientCredentials(TokenEndpoint.ToString(), "id", "secret", httpClient: idpClient).WithLoggerFactory(loggerFactory).Build()),
+            ("bytes", true) => Built.Of(BytesBuilder().WithLoggerFactory(loggerFactory).WithClientCredentials(TokenEndpoint.ToString(), "id", "secret", httpClient: idpClient).Build()),
+            _ => Built.Of(BytesBuilder().WithClientCredentials(TokenEndpoint.ToString(), "id", "secret", httpClient: idpClient).WithLoggerFactory(loggerFactory).Build()),
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => built.Channel.AcquireTokenAsync());
+        Assert.True(recorder.Has(LogLevel.Information, "Acquiring token from"));
+    }
+
+    private sealed class PassThroughHandler(HttpMessageHandler inner) : DelegatingHandler(inner);
+
+    private sealed class DisposalTrackingHandler : HttpMessageHandler
+    {
+        public bool Disposed { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class InterceptingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> onSend) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            onSend(request);
     }
 
     private static TransportRClientBuilder<string> ItemsBuilder() =>

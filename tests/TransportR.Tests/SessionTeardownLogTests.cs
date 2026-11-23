@@ -44,7 +44,7 @@ public class SessionTeardownLogTests
         await using var receiver = TestClients.Create(handler, "http://localhost");
 
         var received = new System.Collections.Concurrent.ConcurrentQueue<Receive<string>>();
-        receiver.OnTransferStarted += r => { received.Enqueue(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { received.Enqueue(r); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -76,7 +76,7 @@ public class SessionTeardownLogTests
             configure: o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();

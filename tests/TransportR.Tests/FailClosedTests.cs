@@ -75,7 +75,7 @@ public class FailClosedTests
     {
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -153,7 +153,7 @@ public class FailClosedTests
         await using var sender = TestClients.Create(null, host.BaseUrl, senderTokens.GetAsync);
         await using var receiver = TestClients.Create(null, host.BaseUrl, receiverTokens.GetAsync);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
         await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
@@ -223,7 +223,7 @@ public class FailClosedTests
         await using var sender = TestClients.Create(handler, "http://localhost");
         await using var receiver = TestClients.Create(handler, "http://localhost");
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();

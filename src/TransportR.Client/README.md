@@ -26,6 +26,7 @@ using Microsoft.Extensions.Logging;
 // 1. Configure the Client
 var client = new TransportRClientBuilder<Order>()
     .WithUrl("http://localhost:5000")
+    .WithLoggerFactory(LoggerFactory.Create(b => b.AddConsole()))
     .WithClientCredentials(
         tokenEndpoint: "http://localhost:5100/connect/token",
         clientId: "my-client",
@@ -35,7 +36,6 @@ var client = new TransportRClientBuilder<Order>()
     .WithMessagePackSerialization() // Use built-in MessagePack support
     // .WithSerializer(new MyCustomSerializer()) // Or bring your own
     .WithBatchSize(1000)
-    .WithLoggerFactory(LoggerFactory.Create(b => b.AddConsole()))
     .Build();
 
 // 2. Connect (with a token, groups passed here are ignored: the token's scopes decide)
@@ -76,14 +76,14 @@ var receiver = new ByteStreamClientBuilder(batchBytes: 1 << 20)
     .WithUrl("http://localhost:5000")
     .WithReceiveCapacity(64 << 20)        // optional: bounds what the receiver holds, in wire bytes
     .Build();
-receiver.OnTransferStarted += async transfer =>
+receiver.OnTransferStarted(async transfer =>
 {
     await using (transfer)
     {
         await using var file = File.Create("out.bin");
         await transfer.CopyToAsync(file); // or transfer.ReadAsync(buffer), which returns 0 once the transfer is over
     }
-};
+});
 await receiver.ConnectAsync(new[] { "receivers" });
 ```
 
@@ -190,6 +190,12 @@ asks for its tokens through the same handler, so what is set here for the hub, a
 the identity provider too. Given an `HttpClient` of its own (its last parameter), it uses that one, which the caller
 keeps and disposes.
 
+For integration tests (such as `TestServer.CreateHandler()`) or custom `DelegatingHandler` pipelines, pass the handler
+directly with `WithHttpMessageHandler(handler, disposeHandler: false)`. It is mutually exclusive with
+`ConfigureHttpHandler`, applies the same cookie and decompression check to any wrapped `SocketsHttpHandler` or
+`HttpClientHandler`, and pairs with `WriteTransportPolicy.SegmentsOnly` under `TestServer` (which does not relay
+WebSocket upgrades through `CreateHandler()`).
+
 ### End-to-end encryption
 
 By default a batch crosses the hub in clear, under whatever TLS each hop has. `WithEndToEndEncryption()`, set alike
@@ -211,10 +217,12 @@ The hub still sees who talks to whom, when and how much. What each level protect
 
 #### Deploying it
 
-With a key per pair, the provider looks the peer's client id up:
+With a key per pair, give each node a stable identifier via `WithClientId(Guid)` and look the peer's client id up:
 ```csharp
-// keys: a Dictionary<Guid, byte[]> read from this node's own configuration, one key per peer
-.WithEndToEndEncryption(peerId => keys.GetValueOrDefault(peerId))
+builder
+    .WithClientId(nodeId)
+    // keys: a Dictionary<Guid, byte[]> read from this node's own configuration, one key per peer
+    .WithEndToEndEncryption(peerId => keys.GetValueOrDefault(peerId));
 ```
 - **Generate a key** with `openssl rand -base64 32`, and give it to both nodes of the pair.
 - **Roll it out** in two steps: upgrade both nodes, then enable encryption on both together.
@@ -255,17 +263,19 @@ public interface IBatchSerializer<T>
 ```csharp
 public interface IDataSender<T> : IDataClient
 {
-    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null);
+    Task<Send<T>> InitTransferAsync(Guid targetClientId, int? batchSize = null, CancellationToken cancellationToken = default);
     Task<List<ClientInfo>> GetReceiversAsync(CancellationToken ct = default);
     Task<List<ClientInfo>> GetReceiversAsync(string group, CancellationToken ct = default);   // those of one group; one whose stream is down is kept
-    event Func<Send<T>, Task> OnSendRequested;   // a transfer the hub's host opened
+    void OnSendRequested(Func<Send<T>, Task> handler);   // a transfer the hub's host opened (single handler)
 }
 
 public interface IDataReceiver<T> : IDataClient
 {
-    event Func<Receive<T>, Task> OnTransferStarted;
+    void OnTransferStarted(Func<Receive<T>, Task> handler);   // single handler
 }
 ```
+
+`Send<T>` and `ByteSend` expose `ReceiverId`; `Receive<T>` and `ByteReceive` expose `SenderId`; `TransferInfo` exposes `PeerId`.
 
 ### ByteSend / ByteReceive
 

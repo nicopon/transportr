@@ -79,11 +79,11 @@ public class WebSocketTransferTests
         var receiverClient = TestClients.Create(null, hub.BaseUrl, configure: receiver);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiverClient.OnTransferStarted += started =>
+        receiverClient.OnTransferStarted(started =>
         {
             receiveHandle.TrySetResult(started);
             return Task.CompletedTask;
-        };
+        });
 
         await senderClient.ConnectAsync();
         await receiverClient.ConnectAsync();

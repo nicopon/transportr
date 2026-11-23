@@ -54,7 +54,7 @@ public class ClientDisposalTests
         await using var receiver = TestClients.Create(null, host.BaseUrl, configure: o => o.WriteTransportPolicy = WriteTransportPolicy.SegmentsOnly);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();

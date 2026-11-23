@@ -32,6 +32,22 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
+    /// Sets a stable client identifier instead of generating a new <see cref="Guid"/> on each build.
+    /// </summary>
+    /// <remarks>
+    /// Useful when targeting a known receiver or looking up per-pair pre-shared keys in configuration.
+    /// With JWT authentication, the hub refuses another subject trying to register under an active or
+    /// grace-period client ID; in dev mode, no subject is attested and a second client using the same
+    /// ID overwrites the first.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="clientId"/> is <see cref="Guid.Empty"/>.</exception>
+    public TransportRClientBuilder<T> WithClientId(Guid clientId)
+    {
+        _state.SetClientId(clientId);
+        return this;
+    }
+
+    /// <summary>
     /// Sets the default batch size for transfers.
     /// </summary>
     public TransportRClientBuilder<T> WithBatchSize(int batchSize)
@@ -220,9 +236,10 @@ public class TransportRClientBuilder<T>
     }
 
     /// <summary>
-    /// Sets a token provider made at <see cref="Build"/> from the handler the client's requests go through.
+    /// Sets a token provider made at <see cref="Build"/> from the handler the client's requests go through
+    /// and the builder's logger factory.
     /// </summary>
-    internal TransportRClientBuilder<T> WithTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    internal TransportRClientBuilder<T> WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
     {
         _state.SetTokenProviderFactory(factory);
         return this;
@@ -300,6 +317,34 @@ public class TransportRClientBuilder<T>
     public TransportRClientBuilder<T> ConfigureHttpHandler(Action<SocketsHttpHandler> configure)
     {
         _state.SetHttpHandlerConfiguration(configure);
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies the <see cref="HttpMessageHandler"/> used for the client's HTTP requests, such as
+    /// <c>TestServer.CreateHandler()</c> in integration tests or a custom <see cref="DelegatingHandler"/>.
+    /// </summary>
+    /// <param name="handler">The handler to use.</param>
+    /// <param name="disposeHandler">
+    /// Whether disposing the client disposes <paramref name="handler"/>. Defaults to <c>false</c>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Mutually exclusive with <see cref="ConfigureHttpHandler"/>: <see cref="Build"/> throws
+    /// <see cref="InvalidOperationException"/> if both are configured. Because <c>TestServer</c> does
+    /// not relay WebSocket upgrades through <c>CreateHandler()</c>, pair it with
+    /// <see cref="WithWriteTransport"/> set to <see cref="WriteTransportPolicy.SegmentsOnly"/> (or use
+    /// Kestrel on loopback when testing WebSockets).
+    /// </para>
+    /// <para>
+    /// Any <see cref="SocketsHttpHandler"/> or <see cref="HttpClientHandler"/> in the handler chain
+    /// with <c>UseCookies</c> enabled or <c>AutomaticDecompression</c> other than <c>None</c> is
+    /// refused at <see cref="Build"/>, as with <see cref="ConfigureHttpHandler"/>.
+    /// </para>
+    /// </remarks>
+    public TransportRClientBuilder<T> WithHttpMessageHandler(HttpMessageHandler handler, bool disposeHandler = false)
+    {
+        _state.SetHttpMessageHandler(handler, disposeHandler);
         return this;
     }
 

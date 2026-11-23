@@ -26,7 +26,7 @@ public class AnnouncedParameterBoundsTests
         var handler = host.GetTestServer().CreateHandler();
         await using var sender = TestClients.Create(handler, "http://localhost");
         await using var receiver = TestClients.Create(handler, "http://localhost");
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 

@@ -71,7 +71,7 @@ public class HubEndedTransferLogTests
         await using var receiver = TestClients.Create(null, host.BaseUrl);
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -114,7 +114,7 @@ public class HubEndedTransferLogTests
         await using var receiver = TestClients.Create(null, host.BaseUrl, configure: o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var handle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += r => { handle.TrySetResult(r); return Task.CompletedTask; };
+        receiver.OnTransferStarted(r => { handle.TrySetResult(r); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 

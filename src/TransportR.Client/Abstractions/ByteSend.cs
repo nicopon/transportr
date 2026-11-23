@@ -16,10 +16,19 @@ public abstract class ByteSend : Transfer, IAsyncDisposable
     private const int ReadBufferBytes = 81920;
 
     /// <summary>
+    /// Gets the receiving client's identifier for this transfer.
+    /// </summary>
+    public Guid ReceiverId { get; }
+
+    /// <summary>
     /// Creates a new send handle.
     /// </summary>
     /// <param name="transferId">The unique transfer identifier.</param>
-    protected ByteSend(string transferId) : base(transferId) { }
+    /// <param name="receiverId">The receiving client's identifier.</param>
+    protected ByteSend(string transferId, Guid receiverId = default) : base(transferId)
+    {
+        ReceiverId = receiverId;
+    }
 
     /// <summary>
     /// Appends <paramref name="bytes"/> to the stream of the transfer. They are copied before this

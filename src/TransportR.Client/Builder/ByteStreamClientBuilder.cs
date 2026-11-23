@@ -44,6 +44,13 @@ public sealed class ByteStreamClientBuilder
         return this;
     }
 
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithClientId"/>
+    public ByteStreamClientBuilder WithClientId(Guid clientId)
+    {
+        _state.SetClientId(clientId);
+        return this;
+    }
+
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithBatchTimeout"/>
     public ByteStreamClientBuilder WithBatchTimeout(TimeSpan timeout)
     {
@@ -109,7 +116,7 @@ public sealed class ByteStreamClientBuilder
     }
 
     /// <inheritdoc cref="TransportRClientBuilder{T}.WithTokenProviderFactory"/>
-    internal ByteStreamClientBuilder WithTokenProviderFactory(Func<HttpMessageHandler, Func<Task<string>>> factory)
+    internal ByteStreamClientBuilder WithTokenProviderFactory(Func<HttpMessageHandler, ILoggerFactory, Func<Task<string>>> factory)
     {
         _state.SetTokenProviderFactory(factory);
         return this;
@@ -140,6 +147,13 @@ public sealed class ByteStreamClientBuilder
     public ByteStreamClientBuilder ConfigureHttpHandler(Action<SocketsHttpHandler> configure)
     {
         _state.SetHttpHandlerConfiguration(configure);
+        return this;
+    }
+
+    /// <inheritdoc cref="TransportRClientBuilder{T}.WithHttpMessageHandler"/>
+    public ByteStreamClientBuilder WithHttpMessageHandler(HttpMessageHandler handler, bool disposeHandler = false)
+    {
+        _state.SetHttpMessageHandler(handler, disposeHandler);
         return this;
     }
 

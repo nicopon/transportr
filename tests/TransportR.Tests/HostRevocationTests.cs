@@ -124,7 +124,7 @@ public class HostRevocationTests
                 accessToken: StubJwt.Create(ReceiverSubject, DateTime.UtcNow.AddHours(1), "unused"));
 
             var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-            receiver.OnTransferStarted += r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; };
+            receiver.OnTransferStarted(r => { receiveHandle.TrySetResult(r); return Task.CompletedTask; });
             await sender.ConnectAsync();
             await receiver.ConnectAsync();
             var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);

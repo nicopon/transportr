@@ -29,7 +29,7 @@ dotnet run
 ## Data Flow
 
 1. Connect to hub (`ConnectAsync`, group `receivers` by default)
-2. Register `OnTransferStarted` handler
+2. Register `OnTransferStarted(...)` handler
 3. Wait for sender to initiate transfer
 4. Receive items via async enumerable and process them asynchronously
 5. Write items to CSV file

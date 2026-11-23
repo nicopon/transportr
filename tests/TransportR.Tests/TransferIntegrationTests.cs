@@ -52,11 +52,11 @@ public class TransferIntegrationTests
 
         // 4. Setup Receiver to "Accept" the transfer
         bool getReadyCalled = false;
-        receiver.OnTransferStarted += (transfer) =>
+        receiver.OnTransferStarted((transfer) =>
         {
             getReadyCalled = true;
             return Task.CompletedTask;
-        };
+        });
 
         // 5. Init Transfer (This is where it failed with HubException)
         var sendSession = await sender.InitTransferAsync(receiver.ClientId, batchSize: 100);
@@ -81,7 +81,7 @@ public class TransferIntegrationTests
             options.EndToEndEncryption = new EndToEndEncryption(peer => { lock (askedByReceiver) askedByReceiver.Add(peer); return key; }));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -113,8 +113,8 @@ public class TransferIntegrationTests
 
         var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -148,8 +148,8 @@ public class TransferIntegrationTests
 
         var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -201,8 +201,8 @@ public class TransferIntegrationTests
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         // The client answers the hub once the handler returns: blocking before the return is what
         // holds the answer.
-        sender.OnSendRequested += send => { asked.TrySetResult(send); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        sender.OnSendRequested(send => { asked.TrySetResult(send); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -228,7 +228,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -263,7 +263,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -323,7 +323,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10));
         await receiver.ConnectAsync().WaitAsync(TimeSpan.FromSeconds(10));
@@ -360,7 +360,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         // Without a group the identity resolves to nothing, which is what the Quick Start did until
         // its clients named one.
@@ -423,7 +423,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -522,7 +522,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -565,7 +565,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -610,7 +610,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(null, host.BaseUrl);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -664,7 +664,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(null, host.BaseUrl, o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -715,7 +715,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(null, host.BaseUrl, o => o.ReceiveBufferCapacity = BufferCapacity.Items(1), networkHandler: opens);
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -773,7 +773,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -829,7 +829,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost", o => o.ReceiveBufferCapacity = BufferCapacity.Items(1));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -877,7 +877,7 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -913,7 +913,7 @@ public class TransferIntegrationTests
 
         await using var sender = CreateClient(handler, "http://localhost");
         await using var receiver = CreateClient(handler, "http://localhost");
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -939,8 +939,8 @@ public class TransferIntegrationTests
 
         await using var sender = CreateClient(handler, "http://localhost");
         await using var receiver = CreateClient(handler, "http://localhost");
-        sender.OnSendRequested += _ => throw new InvalidOperationException("no room for another transfer");
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
+        sender.OnSendRequested(_ => throw new InvalidOperationException("no room for another transfer"));
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -963,7 +963,7 @@ public class TransferIntegrationTests
 
         var expected = Enumerable.Range(0, 250).Select(i => $"item-{i}").ToList();
         var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += async send =>
+        sender.OnSendRequested(async send =>
         {
             await using (send)
             {
@@ -971,9 +971,9 @@ public class TransferIntegrationTests
                 await send.CompleteAsync();
             }
             sent.TrySetResult();
-        };
+        });
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1003,12 +1003,12 @@ public class TransferIntegrationTests
         var handler = host.GetTestServer().CreateHandler();
         await using var sender = CreateClient(handler, "http://localhost", o => o.HandshakeTimeout = TimeSpan.FromSeconds(5));
         await using var receiver = CreateClient(handler, "http://localhost");
-        receiver.OnTransferStarted += _ => how switch
+        receiver.OnTransferStarted(_ => how switch
         {
             "throws" => throw new InvalidOperationException("no room for another transfer"),
             "faulted" => Task.FromException(new InvalidOperationException("no room for another transfer")),
             _ => Task.FromCanceled(new CancellationToken(canceled: true)),
-        };
+        });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1028,12 +1028,12 @@ public class TransferIntegrationTests
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var fail = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += async receive =>
+        receiver.OnTransferStarted(async receive =>
         {
             receiveHandle.TrySetResult(receive);
             await fail.Task;
             throw new InvalidOperationException("the handler failed after it returned");
-        };
+        });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1057,14 +1057,14 @@ public class TransferIntegrationTests
         await using var receiver = CreateClient(handler, "http://localhost");
 
         var fail = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += async send =>
+        sender.OnSendRequested(async send =>
         {
             await send.SendAsync("item-0");
             await fail.Task;
             throw new InvalidOperationException("the handler failed after it returned");
-        };
+        });
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1096,8 +1096,8 @@ public class TransferIntegrationTests
 
         var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += send => { sendHandle.TrySetResult(send); return Task.CompletedTask; };
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -1132,8 +1132,8 @@ public class TransferIntegrationTests
         await using var sender = CreateClient(handler, "http://localhost");
         await using var receiver = CreateClient(handler, "http://localhost");
         var hostSend = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        sender.OnSendRequested += send => { hostSend.TrySetResult(send); return Task.CompletedTask; };
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
+        sender.OnSendRequested(send => { hostSend.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -1287,7 +1287,7 @@ public class TransferIntegrationTests
         // The client answers the hub once the handler returns: blocking before the return is what
         // holds the answer past the hub's deadline, well inside the client's own.
         using var answer = new ManualResetEventSlim();
-        receiver.OnTransferStarted += _ => { answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
+        receiver.OnTransferStarted(_ => { answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1314,7 +1314,7 @@ public class TransferIntegrationTests
 
         var started = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var answer = new ManualResetEventSlim();
-        receiver.OnTransferStarted += receive => { started.TrySetResult(receive); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { started.TrySetResult(receive); answer.Wait(TimeSpan.FromSeconds(10)); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -1359,7 +1359,7 @@ public class TransferIntegrationTests
         await using var sender = CreateClient(
             new SilentTransferRequests(server.CreateHandler()), "http://localhost", o => o.HandshakeTimeout = handshakeTimeout);
         await using var receiver = CreateClient(server.CreateHandler(), "http://localhost");
-        receiver.OnTransferStarted += _ => Task.CompletedTask;
+        receiver.OnTransferStarted(_ => Task.CompletedTask);
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -1474,7 +1474,7 @@ public class TransferIntegrationTests
             serializer: new JsonBatchSerializer<string>(compress: false));
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; };
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
 
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
@@ -1503,6 +1503,70 @@ public class TransferIntegrationTests
         var failure = await Assert.ThrowsAsync<TransferFailedException>(() => send.CompleteAsync().WaitAsync(TimeSpan.FromSeconds(10)));
         Assert.Contains("decode", failure.Message);
         Assert.Equal(TransferFailureCategory.AbandonedByPeer, failure.Category);
+    }
+
+    [Fact]
+    public async Task InitTransferAsync_CancelledByCaller_ThrowsOperationCanceledException()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var server = host.GetTestServer();
+        await using var sender = CreateClient(new SilentTransferRequests(server.CreateHandler()), "http://localhost");
+        await sender.ConnectAsync();
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => sender.InitTransferAsync(Guid.NewGuid(), cancellationToken: cts.Token).WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task SenderInitiatedTransfer_ExposesPeerIds_OnHandlesAndTransferInfo()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 10);
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(receiver.ClientId, send.ReceiverId);
+        Assert.Equal(sender.ClientId, receive.SenderId);
+        Assert.Equal(receiver.ClientId, Assert.Single(sender.GetTransfers()).PeerId);
+        Assert.Equal(sender.ClientId, Assert.Single(receiver.GetTransfers()).PeerId);
+    }
+
+    [Fact]
+    public async Task HostInitiatedTransfer_ExposesPeerIds_OnHandlesAndTransferInfo()
+    {
+        using var host = TestHubServerFactory.CreateHost();
+        var handler = host.GetTestServer().CreateHandler();
+        await using var sender = CreateClient(handler, "http://localhost");
+        await using var receiver = CreateClient(handler, "http://localhost");
+
+        var sendHandle = new TaskCompletionSource<Send<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.OnSendRequested(send => { sendHandle.TrySetResult(send); return Task.CompletedTask; });
+        receiver.OnTransferStarted(receive => { receiveHandle.TrySetResult(receive); return Task.CompletedTask; });
+
+        await sender.ConnectAsync();
+        await receiver.ConnectAsync();
+
+        var initiator = host.Services.GetRequiredService<ITransferInitiator>();
+        await initiator.InitTransferAsync(sender.ClientId, receiver.ClientId, TimeSpan.FromSeconds(10));
+
+        await using var send = await sendHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await using var receive = await receiveHandle.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(receiver.ClientId, send.ReceiverId);
+        Assert.Equal(sender.ClientId, receive.SenderId);
+        Assert.Equal(receiver.ClientId, Assert.Single(sender.GetTransfers()).PeerId);
+        Assert.Equal(sender.ClientId, Assert.Single(receiver.GetTransfers()).PeerId);
     }
 
     /// <param name="handler">The <c>TestServer</c> handler, or null to go over the network.</param>

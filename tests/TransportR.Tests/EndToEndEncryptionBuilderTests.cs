@@ -74,7 +74,7 @@ public class EndToEndEncryptionBuilderTests
         await using var receiver = ItemsBuilder(hub.BaseUrl, receiverSetting).Build();
 
         var receiveHandle = new TaskCompletionSource<Receive<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; };
+        receiver.OnTransferStarted(started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
@@ -128,7 +128,7 @@ public class EndToEndEncryptionBuilderTests
         await using var receiver = BytesBuilder(hub.BaseUrl, receiverSetting).Build();
 
         var receiveHandle = new TaskCompletionSource<ByteReceive>(TaskCreationOptions.RunContinuationsAsynchronously);
-        receiver.OnTransferStarted += started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; };
+        receiver.OnTransferStarted(started => { receiveHandle.TrySetResult(started); return Task.CompletedTask; });
         await sender.ConnectAsync();
         await receiver.ConnectAsync();
 
