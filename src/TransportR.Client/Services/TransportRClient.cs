@@ -32,9 +32,6 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
     private readonly int _defaultBatchSize;
     private readonly string _dataUrl;
 
-    private Func<Receive<T>, Task>? _onTransferStarted;
-    private Func<Send<T>, Task>? _onSendRequested;
-
     private readonly TransferSignaling<ClientSession<T>, Send<T>, Receive<T>> _signaling;
 
     // Internal so that only the builder instantiates it.
@@ -64,32 +61,18 @@ public partial class TransportRClient<T> : IDataSender<T>, IDataReceiver<T>, IAs
             session => new HttpSend<T>(session.Session, session.Send),
             session => new HttpReceive<T>(session.Session, session.Receive),
             logger,
-            defaultBatchSize,
-            (t) => Volatile.Read(ref _onTransferStarted)?.Invoke(t) ?? Task.CompletedTask,
-            () => Volatile.Read(ref _onSendRequested)
+            defaultBatchSize
         );
         _signaling.Initialize();
     }
 
     /// <inheritdoc />
-    public void OnTransferStarted(Func<Receive<T>, Task> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        if (Interlocked.CompareExchange(ref _onTransferStarted, handler, null) is not null)
-        {
-            throw new InvalidOperationException("A handler is already registered for OnTransferStarted.");
-        }
-    }
+    public void OnTransferStarted(Func<Receive<T>, Task> handler) =>
+        _signaling.SetTransferStartedHandler(handler);
 
     /// <inheritdoc />
-    public void OnSendRequested(Func<Send<T>, Task> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        if (Interlocked.CompareExchange(ref _onSendRequested, handler, null) is not null)
-        {
-            throw new InvalidOperationException("A handler is already registered for OnSendRequested.");
-        }
-    }
+    public void OnSendRequested(Func<Send<T>, Task> handler) =>
+        _signaling.SetSendRequestedHandler(handler);
 
     public Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)
         => _connection.ConnectAsync(groups, cancellationToken);

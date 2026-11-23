@@ -293,15 +293,27 @@ internal sealed class ControlChannel : IAsyncDisposable
             throw new HubRequestFailedException(category, error.Message);
         }
 
-        // A proxy in front of the hub that limits the rate or answers 503 answers without the hub's JSON error.
-        if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable
-            && response.Content.Headers.ContentType?.MediaType == MediaTypeNames.Application.Json
-            && await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken) is { Message: { } message })
+        // A proxy in front of the hub that limits the rate or answers 503 answers without the hub's refusal header.
+        if ((response.StatusCode == HttpStatusCode.TooManyRequests
+                || (response.StatusCode == HttpStatusCode.ServiceUnavailable && response.Headers.Contains(WireRoutes.RefusedHeader)))
+            && response.Content.Headers.ContentType?.MediaType == MediaTypeNames.Application.Json)
         {
-            var category = response.StatusCode == HttpStatusCode.TooManyRequests
-                ? HubRequestFailureCategory.RateLimited
-                : HubRequestFailureCategory.Refused;
-            throw new HubRequestFailedException(category, message);
+            HubError? hubError = null;
+            try
+            {
+                hubError = await response.Content.ReadFromJsonAsync<HubError>(ControlPlane.Json, cancellationToken);
+            }
+            catch (JsonException) when (response.StatusCode == HttpStatusCode.ServiceUnavailable)
+            {
+            }
+
+            if (hubError is { Message: { } message })
+            {
+                var category = response.StatusCode == HttpStatusCode.TooManyRequests
+                    ? HubRequestFailureCategory.RateLimited
+                    : HubRequestFailureCategory.Refused;
+                throw new HubRequestFailedException(category, message);
+            }
         }
 
         response.EnsureSuccessStatusCode();
@@ -568,8 +580,8 @@ internal sealed class ControlChannel : IAsyncDisposable
 
         // The stream's own source: the caller's token bounds the opening only.
         var cancel = new CancellationTokenSource(Timeout.InfiniteTimeSpan, _time);
-        var lifetimeReg = _lifetime.Token.Register(() => cancel.Cancel());
-        var opening = cancellationToken.Register(() => cancel.Cancel());
+        var lifetimeReg = _lifetime.Token.Register(static state => CancelQuietly((CancellationTokenSource)state!), cancel);
+        var opening = cancellationToken.Register(static state => CancelQuietly((CancellationTokenSource)state!), cancel);
         HttpResponseMessage? response = null;
         try
         {
@@ -645,6 +657,11 @@ internal sealed class ControlChannel : IAsyncDisposable
     }
 
     private static bool IsTransient(Exception ex) => ex is HttpRequestException or IOException or OperationCanceledException;
+
+    private static void CancelQuietly(CancellationTokenSource cts)
+    {
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+    }
 
     private sealed class EventStream : IAsyncDisposable
     {

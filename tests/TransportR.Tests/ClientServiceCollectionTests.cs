@@ -137,4 +137,23 @@ public class ClientServiceCollectionTests
 
         Assert.Equal(payload, received.ToArray());
     }
+
+    [Fact]
+    public async Task AddTransportRClient_UsesTryAddSingleton_AndDisposesWithServiceProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddTransportRClient<string>(builder => builder
+            .WithUrl("http://localhost")
+            .WithMessagePackSerialization());
+        services.AddTransportRClient<string>(builder => builder
+            .WithUrl("http://other-url-ignored")
+            .WithMessagePackSerialization());
+
+        var sp = services.BuildServiceProvider();
+        var client = sp.GetRequiredService<TransportRClient<string>>();
+        Assert.StartsWith("http://localhost/", client.Channel.UrlOf("x"), StringComparison.Ordinal);
+
+        await sp.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ConnectAsync());
+    }
 }

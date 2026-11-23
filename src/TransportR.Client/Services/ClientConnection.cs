@@ -353,13 +353,13 @@ internal sealed class ClientConnection : ISessionContext, IAsyncDisposable
 
             activity?.SetTag("transportr.transfer.id", opened.TransferId);
         }
-        catch (OperationCanceledException ex) when (deadline.TimedOut && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (deadline.TimedOut && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
                 "The hub did not answer the transfer request to ReceiverId={TargetId} within {Seconds}s (handshake timeout {HandshakeSeconds}s plus {MarginSeconds}s).",
                 targetClientId, (_options.HandshakeTimeout + HandshakeMargin).TotalSeconds, _options.HandshakeTimeout.TotalSeconds, HandshakeMargin.TotalSeconds);
             var timeoutEx = new HubRequestFailedException(HubRequestFailureCategory.HandshakeTimedOut, "The hub did not answer the transfer request in time.");
-            activity?.SetStatus(ActivityStatusCode.Error, timeoutEx.Message ?? ex.Message);
+            activity?.SetStatus(ActivityStatusCode.Error, timeoutEx.Message);
             throw timeoutEx;
         }
         catch (Exception ex)

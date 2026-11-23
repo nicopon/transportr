@@ -74,9 +74,20 @@ public class ClientTimeProviderTests
     public async Task WithTimeProvider_DrivesTokenRenewerSchedule()
     {
         using var host = AuthenticatedHubServerFactory.CreateHost();
-        var handler = host.GetTestServer().CreateHandler();
+        var renewalPushDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var handler = new TokenPutTrackingHandler(
+            host.GetTestServer().CreateHandler(),
+            putCount =>
+            {
+                if (putCount >= 2) renewalPushDone.TrySetResult();
+            });
         var start = DateTimeOffset.UtcNow;
-        var clock = new FakeTimeProvider(start);
+        var fakeClock = new FakeTimeProvider(start);
+        var renewalTimerArmed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new ObservingTimeProvider(fakeClock, due =>
+        {
+            if (due >= TimeSpan.FromMinutes(5)) renewalTimerArmed.TrySetResult();
+        });
 
         var subject = $"client-{Guid.NewGuid()}";
         var issuedCount = 0;
@@ -101,20 +112,15 @@ public class ClientTimeProviderTests
 
         await client.ConnectAsync();
 
-        // Wait for the initial push to settle (provider called once for Connect + TokenRenewer's initial push).
-        await Task.Delay(150);
-        var baseline = Volatile.Read(ref issuedCount);
+        // Wait deterministically until TokenRenewer finishes its initial push and arms the 8-minute timer.
+        await renewalTimerArmed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, Volatile.Read(ref issuedCount));
 
         // Advance past the 8-minute mark (10 min expiry - 2 min threshold): renewal must fire.
-        clock.Advance(TimeSpan.FromMinutes(8) + TimeSpan.FromSeconds(2));
+        fakeClock.Advance(TimeSpan.FromMinutes(8) + TimeSpan.FromSeconds(2));
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (Volatile.Read(ref issuedCount) == baseline && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(20);
-        }
-
-        Assert.True(Volatile.Read(ref issuedCount) > baseline);
+        await renewalPushDone.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(Volatile.Read(ref issuedCount) >= 2);
     }
 
     [Fact]
@@ -158,16 +164,50 @@ public class ClientTimeProviderTests
         await using var send = await sender.InitTransferAsync(receiver.ClientId, batchSize: 100);
         await send.SendAsync("partial-item");
 
-        await Task.Delay(100);
+        await Task.Yield();
         Assert.False(firstItemArrived.Task.IsCompleted);
 
-        // Accumulator checks every flushInterval/2 (15 s): two advances past 30 s flush the partial batch.
-        clock.Advance(TimeSpan.FromSeconds(16));
-        await Task.Delay(50);
-        clock.Advance(TimeSpan.FromSeconds(16));
+        // Accumulator checks every flushInterval/2 (15 s): advance in bounded steps until the loop flushes.
+        var advances = 0;
+        while (!firstItemArrived.Task.IsCompleted && advances < 3)
+        {
+            clock.Advance(TimeSpan.FromSeconds(16));
+            advances++;
+            await Task.WhenAny(firstItemArrived.Task, Task.Delay(25));
+        }
 
         Assert.Equal("partial-item", await firstItemArrived.Task.WaitAsync(TimeSpan.FromSeconds(5)));
 
         await send.CompleteAsync();
+    }
+
+    private sealed class ObservingTimeProvider(FakeTimeProvider inner, Action<TimeSpan> onTimerCreated) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => inner.GetUtcNow();
+        public override long GetTimestamp() => inner.GetTimestamp();
+        public override TimeZoneInfo LocalTimeZone => inner.LocalTimeZone;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = inner.CreateTimer(callback, state, dueTime, period);
+            onTimerCreated(dueTime);
+            return timer;
+        }
+    }
+
+    private sealed class TokenPutTrackingHandler(HttpMessageHandler inner, Action<int> onTokenPut) : DelegatingHandler(inner)
+    {
+        private int _putCount;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (request.Method == HttpMethod.Put
+                && request.RequestUri?.AbsolutePath.EndsWith("/" + WireRoutes.TokenSegment, StringComparison.Ordinal) == true)
+            {
+                onTokenPut(Interlocked.Increment(ref _putCount));
+            }
+            return response;
+        }
     }
 }

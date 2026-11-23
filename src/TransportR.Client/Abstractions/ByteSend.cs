@@ -1,5 +1,4 @@
 using System.Buffers;
-using TransportR.Client.Internal;
 
 namespace TransportR.Client;
 
@@ -103,17 +102,6 @@ public abstract class ByteSend : Transfer, IAsyncDisposable
             if (!writing) ArrayPool<byte>.Shared.Return(buffer);
         }
     }
-
-    /// <summary>
-    /// Exposes this handle as a write-only <see cref="Stream"/> for interop with stream-based APIs
-    /// (such as <c>GZipStream</c> or <c>JsonSerializer</c>).
-    /// </summary>
-    /// <remarks>
-    /// Disposing the returned stream does not call <see cref="CompleteAsync"/> or dispose this handle,
-    /// and <c>Flush</c>/<c>FlushAsync</c> are no-ops (flushing follows batch size and timeout); complete
-    /// and dispose the <see cref="ByteSend"/> after the wrapper stream is disposed.
-    /// </remarks>
-    public Stream AsStream() => new ByteSendStream(this);
 
     /// <summary>
     /// Signals that all bytes have been sent and waits for the receiver's acknowledgment, which says the

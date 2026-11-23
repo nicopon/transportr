@@ -45,9 +45,6 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     private readonly string _dataUrl;
     private readonly TransferSignaling<ByteClientSession, ByteSend, ByteReceive> _signaling;
 
-    private Func<ByteReceive, Task>? _onTransferStarted;
-    private Func<ByteSend, Task>? _onSendRequested;
-
     // Internal so that only the builder instantiates it.
     internal ByteStreamClient(
         ControlChannel channel,
@@ -72,9 +69,7 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
             session => new HttpByteSend(session.Session, session.Send.SendBytesAsync),
             session => new HttpByteReceive(session.Session, session.Receive.ReadAllAsync),
             logger,
-            RequestedBatchSize,
-            transfer => Volatile.Read(ref _onTransferStarted)?.Invoke(transfer) ?? Task.CompletedTask,
-            () => Volatile.Read(ref _onSendRequested));
+            RequestedBatchSize);
         _signaling.Initialize();
     }
 
@@ -90,14 +85,8 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
     /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
-    public void OnTransferStarted(Func<ByteReceive, Task> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        if (Interlocked.CompareExchange(ref _onTransferStarted, handler, null) is not null)
-        {
-            throw new InvalidOperationException("A handler is already registered for OnTransferStarted.");
-        }
-    }
+    public void OnTransferStarted(Func<ByteReceive, Task> handler) =>
+        _signaling.SetTransferStartedHandler(handler);
 
     /// <summary>
     /// Registers the handler called when the application hosting the hub opens a transfer from this
@@ -114,14 +103,8 @@ public sealed class ByteStreamClient : IDataClient, IAsyncDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
     /// <exception cref="InvalidOperationException">A handler is already registered.</exception>
-    public void OnSendRequested(Func<ByteSend, Task> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        if (Interlocked.CompareExchange(ref _onSendRequested, handler, null) is not null)
-        {
-            throw new InvalidOperationException("A handler is already registered for OnSendRequested.");
-        }
-    }
+    public void OnSendRequested(Func<ByteSend, Task> handler) =>
+        _signaling.SetSendRequestedHandler(handler);
 
     /// <inheritdoc />
     public Task ConnectAsync(IEnumerable<string>? groups = null, CancellationToken cancellationToken = default)

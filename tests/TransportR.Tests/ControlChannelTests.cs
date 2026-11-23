@@ -146,17 +146,34 @@ public class ControlChannelTests
         {
             Content = System.Net.Http.Json.JsonContent.Create(new HubError("The hub is shutting down."), options: ControlPlane.Json)
         };
+        fromHub.Headers.Add(WireRoutes.RefusedHeader, "1");
+
         using var fromAProxy = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
         {
             Content = new StringContent("<html>Unavailable</html>", Encoding.UTF8, "text/html")
         };
+        using var fromAProxyWithJson = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("""{"message":"gateway unavailable"}""", Encoding.UTF8, "application/json")
+        };
+        using var fromHubWithBadJson = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = new StringContent("{not-json", Encoding.UTF8, "application/json")
+        };
+        fromHubWithBadJson.Headers.Add(WireRoutes.RefusedHeader, "1");
 
         var refusal = await Assert.ThrowsAsync<HubRequestFailedException>(() => ControlChannel.EnsureAcceptedAsync(fromHub));
         Assert.Equal("The hub is shutting down.", refusal.Message);
         Assert.Equal(HubRequestFailureCategory.Refused, refusal.Category);
 
-        var failure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxy));
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, failure.StatusCode);
+        var proxyHtmlFailure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxy));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, proxyHtmlFailure.StatusCode);
+
+        var proxyJsonFailure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromAProxyWithJson));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, proxyJsonFailure.StatusCode);
+
+        var malformedFailure = await Assert.ThrowsAsync<HttpRequestException>(() => ControlChannel.EnsureAcceptedAsync(fromHubWithBadJson));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, malformedFailure.StatusCode);
     }
 
     [Theory]

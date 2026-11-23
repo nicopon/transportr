@@ -30,8 +30,8 @@ internal class TransferSignaling<TSession, TSend, TReceive>
     private readonly Func<TSession, TReceive> _makeReceive;
     private readonly ILogger _logger;
     private readonly int _defaultBatchSize;
-    private readonly Func<TReceive, Task>? _onTransferStarted;
-    private readonly Func<Func<TSend, Task>?> _sendRequestedHandler;
+    private Func<TReceive, Task>? _onTransferStarted;
+    private Func<TSend, Task>? _onSendRequested;
 
     /// <param name="newSession">
     /// Makes the session of a transfer, given its id, its batch size, the affinity that reached the
@@ -40,11 +40,6 @@ internal class TransferSignaling<TSession, TSend, TReceive>
     /// </param>
     /// <param name="makeSend">The handle of a session a sender starts.</param>
     /// <param name="makeReceive">The handle of a session a receiver starts.</param>
-    /// <param name="sendRequestedHandler">
-    /// Returns the handler currently attached for transfers the host opens, or null when there is
-    /// none. Asked on every request, because the answer decides whether the transfer is refused
-    /// before a session exists.
-    /// </param>
     public TransferSignaling(
         ControlChannel channel,
         SessionRegistry<TSession> sessionRegistry,
@@ -52,11 +47,8 @@ internal class TransferSignaling<TSession, TSend, TReceive>
         Func<TSession, TSend> makeSend,
         Func<TSession, TReceive> makeReceive,
         ILogger logger,
-        int defaultBatchSize,
-        Func<TReceive, Task>? onTransferStarted,
-        Func<Func<TSend, Task>?> sendRequestedHandler)
+        int defaultBatchSize)
     {
-        _sendRequestedHandler = sendRequestedHandler;
         _channel = channel;
         _sessionRegistry = sessionRegistry;
         _newSession = newSession;
@@ -64,7 +56,22 @@ internal class TransferSignaling<TSession, TSend, TReceive>
         _makeReceive = makeReceive;
         _logger = logger;
         _defaultBatchSize = defaultBatchSize;
-        _onTransferStarted = onTransferStarted;
+    }
+
+    public void SetTransferStartedHandler(Func<TReceive, Task> handler) =>
+        SetSingleHandler(ref _onTransferStarted, handler, nameof(IDataReceiver<object>.OnTransferStarted));
+
+    public void SetSendRequestedHandler(Func<TSend, Task> handler) =>
+        SetSingleHandler(ref _onSendRequested, handler, nameof(IDataSender<object>.OnSendRequested));
+
+    private static void SetSingleHandler<THandler>(ref THandler? slot, THandler handler, string methodName)
+        where THandler : class
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (Interlocked.CompareExchange(ref slot, handler, null) is not null)
+        {
+            throw new InvalidOperationException($"A handler is already registered for {methodName}.");
+        }
     }
 
     public void Initialize()
@@ -132,9 +139,9 @@ internal class TransferSignaling<TSession, TSend, TReceive>
             await session.Session.StartReceiverAsync();
 
             var transfer = _makeReceive(session);
-            if (_onTransferStarted != null)
+            if (Volatile.Read(ref _onTransferStarted) is { } handler)
             {
-                Watch(_onTransferStarted(transfer), transfer, ready.TransferId);
+                Watch(handler(transfer), transfer, ready.TransferId);
             }
 
             outcome = CallbackOutcome.Accepted;
@@ -170,7 +177,7 @@ internal class TransferSignaling<TSession, TSend, TReceive>
 
     private async Task HandleRequestSend(RequestSendEvent request)
     {
-        var handler = _sendRequestedHandler();
+        var handler = Volatile.Read(ref _onSendRequested);
         if (handler == null)
         {
             _logger.LogWarning("Refusing Transfer {TransferId}: it was opened by the host, and no OnSendRequested handler is attached.", request.TransferId);
